@@ -1,0 +1,6 @@
+aiohttp==3.12.15
+aiohttp_cors==0.8.1
+google-cloud-spanner==3.58.0
+a2a-sdk==0.2.16
+httpx==0.28.1
+google-cloud-tasks==2.19.3

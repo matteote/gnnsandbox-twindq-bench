@@ -1,0 +1,70 @@
+# ---
+# apiVersion: google.dev/v1
+# kind: TrafficTest
+# metadata:
+#   name: constant-baseline-single
+#   namespace: default
+#   labels:
+#     scenario: baseline
+#     pattern: constant
+# spec:
+#   source_devices:
+#     - dev1  # Single source device (array with one element)
+#   destination_device: devhub
+#   protocol: TCP
+#   port: 5201
+#   duration: 300  # 5 minutes
+#   bandwidth: 10Mbps
+#   pattern_type: constant
+#   concurrent_users: 1
+
+---
+apiVersion: google.dev/v1
+kind: TrafficTest
+metadata:
+  name: multi-source-load-test
+  namespace: default
+  labels:
+    scenario: load-test
+    pattern: constant
+spec:
+  source_devices:
+    - dev1  # First source device
+    - dev2  # Second source device
+  destination_device: devhub
+  protocol: TCP
+  port: 5201 # base port, each source gets its own port
+  duration: 14400  # 240 minutes
+  bandwidth: 5Mbps  # Each source sends 5Mbps
+  pattern_type: constant
+  concurrent_users: 10
+
+# ---
+# # Hub capacity test - Multiple spokes to hub
+# apiVersion: google.dev/v1
+# kind: TrafficTest
+# metadata:
+#   name: hub-capacity-test
+#   namespace: default
+#   labels:
+#     scenario: hub-capacity
+#     pattern: burst
+# spec:
+#   source_devices:
+#     - spoke1
+#     - spoke2
+#     - spoke3
+#     - spoke4
+#     - spoke5
+#   destination_device: hub-router
+#   protocol: TCP
+#   port: 5201
+#   duration: 1800  # 30 minutes
+#   bandwidth: 100Mbps
+#   pattern_type: burst
+#   pattern_config:
+#     burst_duration: 60     # 1-minute bursts
+#     burst_interval: 300    # Every 5 minutes
+#     burst_rate: 100Mbps
+#     idle_rate: 10Mbps
+#   concurrent_users: 20

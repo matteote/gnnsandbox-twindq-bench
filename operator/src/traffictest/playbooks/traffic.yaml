@@ -1,0 +1,439 @@
+---
+- name: Traffic Test Management
+  hosts: all
+  become: true
+  gather_facts: yes
+  vars:
+    # Paths
+    traffic_scripts_dir: "/tmp/traffic_test_{{ test_name | default('unknown') }}"
+    config_file: "{{ traffic_scripts_dir }}/config.json"
+    results_file: "{{ traffic_scripts_dir }}/results.json"
+    pid_file: "{{ traffic_scripts_dir }}/traffic_test.pid"
+    log_file: "{{ traffic_scripts_dir }}/traffic_test.log"
+
+  tasks:
+    - name: Debug operation
+      debug:
+        msg: "Operation: {{ operation }}, Source: {{ source_device }}, Dest: {{ destination_device }}"
+
+    #########################################################################
+    # CREATE OPERATION
+    #########################################################################
+    
+    - name: Create traffic test
+      block:
+        - name: Create traffic test directory in the target container
+          file:
+            path: "{{ traffic_scripts_dir }}"
+            state: directory
+            mode: '0755'
+
+        - name: Copy traffic generator script to target
+          template:
+            src: "traffic_generator.py"
+            dest: "{{ traffic_scripts_dir }}/traffic_generator.py"
+            mode: '0755'
+
+        - name: Template metrics collector script to target
+          template:
+            src: "metrics_collector.py"
+            dest: "{{ traffic_scripts_dir }}/metrics_collector.py"
+            mode: '0755'
+
+        - name: Create traffic test configuration
+          copy:
+            content: |
+              {
+                "test_name": "{{ test_name | default('unknown') }}",
+                "source_device": "{{ source_device }}",
+                "source_ip": "{{ source_ip }}",
+                "destination_device": "{{ destination_device }}",
+                "destination_ip": "{{ destination_ip }}",
+                "protocol": "{{ protocol }}",
+                "port": {{ port | int }},
+                "duration": {{ duration | int }},
+                "bandwidth": "{{ bandwidth }}",
+                "pattern_type": "{{ pattern_type }}",
+                "pattern_config": {{ pattern_config | default({}) | to_json }},
+                "concurrent_users": {{ concurrent_users | int }},
+                "session_duration": {% if session_duration is defined and session_duration != '' and session_duration != 'null' %}{{ session_duration | int }}{% else %}null{% endif %},
+                "think_time": {{ think_time | int }},
+                "metrics_enabled": {{ metrics_enabled | default(true) | lower }},
+                "metrics_interval": {{ metrics_interval | int }}
+              }
+            dest: "{{ config_file }}"
+            mode: '0644'
+
+        - name: Debug - Display generated configuration
+          debug:
+            msg: "Generated config file: {{ config_file }}"
+
+        - name: Check if iperf3 server is already running on destination
+          shell: "docker exec {{ destination_device }} pgrep -f 'iperf3.*-s.*-p {{ port }}' || echo 'not_running'"
+          register: server_check
+          failed_when: false
+
+        - name: Start iperf3 server on destination device (only if not running)
+          shell: "docker exec {{ destination_device }} iperf3 -s -p {{ port }} -D --logfile /tmp/iperf3_server_{{ port }}.log"
+          when: server_check.stdout == "not_running"
+          register: iperf3_server_start
+          failed_when: false
+
+        - name: Wait for iperf3 server to start
+          pause:
+            seconds: 3
+          when: server_check.stdout == "not_running"
+
+        - name: Verify iperf3 server is running
+          shell: |
+            docker exec {{ destination_device }} sh -c "
+              # Check if iperf3 process is running
+              if pgrep -f 'iperf3.*-s.*-p {{ port }}' > /dev/null 2>&1; then
+                echo 'iperf3 server is running'
+                exit 0
+              fi
+              
+              # Alternative check using netstat if available
+              if command -v netstat > /dev/null 2>&1; then
+                if netstat -ln | grep ':{{ port }} ' > /dev/null 2>&1; then
+                  echo 'iperf3 server port is listening'
+                  exit 0
+                fi
+              fi
+              
+              # Alternative check using ss if available
+              if command -v ss > /dev/null 2>&1; then
+                if ss -ln | grep ':{{ port }} ' > /dev/null 2>&1; then
+                  echo 'iperf3 server port is listening'
+                  exit 0
+                fi
+              fi
+              
+              echo 'iperf3 server verification failed'
+              exit 1
+            "
+          register: iperf3_server_check
+          retries: 5
+          delay: 3
+          failed_when: false
+
+        - name: Debug iperf3 server status
+          debug:
+            msg: "iperf3 server check result: {{ iperf3_server_check.stdout }}, return code: {{ iperf3_server_check.rc }}"
+
+        - name: Ensure /tmp exists in source container
+          shell: "docker exec {{ source_device }} mkdir -p /tmp"
+          failed_when: false
+
+        - name: Ensure /tmp exists in destination container
+          shell: "docker exec {{ destination_device }} mkdir -p /tmp"
+          failed_when: false
+
+        - name: Verify traffic generator script exists
+          stat:
+            path: "{{ traffic_scripts_dir }}/traffic_generator.py"
+          register: traffic_gen_stat
+
+        - name: Copy traffic generator script to source container
+          shell: "docker cp {{ traffic_scripts_dir }}/traffic_generator.py {{ source_device }}:/tmp/traffic_generator.py"
+          when: traffic_gen_stat.stat.exists
+
+        - name: Verify metrics collector script exists
+          stat:
+            path: "{{ traffic_scripts_dir }}/metrics_collector.py"
+          register: metrics_collector_stat
+
+        - name: Copy metrics collector script to source container
+          shell: "docker cp {{ traffic_scripts_dir }}/metrics_collector.py {{ source_device }}:/tmp/metrics_collector.py"
+          when: metrics_collector_stat.stat.exists
+
+        - name: Verify configuration file exists
+          stat:
+            path: "{{ traffic_scripts_dir }}/config.json"
+          register: config_file_stat
+
+        - name: Copy configuration file to source container
+          shell: "docker cp {{ traffic_scripts_dir }}/config.json {{ source_device }}:/tmp/config.json"
+          when: config_file_stat.stat.exists
+
+        - name: Create traffic generator wrapper script
+          copy:
+            content: |
+              #!/bin/bash
+              # Trap to clean up child processes on exit
+              cleanup() {
+                # Kill all child processes
+                pkill -P $$ 2>/dev/null || true
+                # Wait for zombies to be reaped
+                wait
+                exit 0
+              }
+              trap cleanup EXIT SIGTERM SIGINT
+              
+              cd /tmp
+              # Run python in background
+              python3 /tmp/traffic_generator.py --config /tmp/config.json > /tmp/traffic_output.log 2>&1 &
+              PYTHON_PID=$!
+              echo $PYTHON_PID > /tmp/traffic_generator.pid
+              
+              # Wait for the python process and reap it when done
+              wait $PYTHON_PID
+              echo $? > /tmp/traffic_exit_code
+            dest: "{{ traffic_scripts_dir }}/run_traffic_test.sh"
+            mode: '0755'
+
+        - name: Verify wrapper script exists
+          stat:
+            path: "{{ traffic_scripts_dir }}/run_traffic_test.sh"
+          register: wrapper_script_stat
+
+        - name: Copy wrapper script to source container
+          shell: "docker cp {{ traffic_scripts_dir }}/run_traffic_test.sh {{ source_device }}:/tmp/run_traffic_test.sh"
+          when: wrapper_script_stat.stat.exists
+
+        - name: Start traffic generator in background
+          shell: "docker exec -d {{ source_device }} /bin/sh /tmp/run_traffic_test.sh"
+          failed_when: false
+
+        - name: Wait for process to start
+          pause:
+            seconds: 2
+
+        - name: Get traffic generator process ID for tracking
+          shell: "docker exec {{ source_device }} cat /tmp/traffic_generator.pid 2>/dev/null || echo ''"
+          register: traffic_process
+          failed_when: false
+
+        - name: Save traffic generator process info
+          copy:
+            content: "{{ traffic_process.stdout }}"
+            dest: "{{ pid_file }}"
+          when: traffic_process.stdout != ""
+
+        # - name: Create results monitoring script
+        #   copy:
+        #     content: |
+        #       #!/bin/bash
+        #       CONTAINER="{{ source_device }}"
+        #       RESULTS_FILE="{{ results_file }}"
+              
+        #       while true; do
+        #         # Check if traffic test is still running
+        #         if ! docker exec $CONTAINER pgrep -f "traffic_generator.py" > /dev/null 2>&1; then
+        #           # Traffic test completed, collect results
+        #           EXIT_CODE=$(docker exec $CONTAINER cat /tmp/traffic_exit_code 2>/dev/null || echo "1")
+        #           OUTPUT=$(docker exec $CONTAINER cat /tmp/traffic_output.log 2>/dev/null || echo "No output available")
+                  
+        #           # Create results JSON
+        #           cat > "$RESULTS_FILE" << EOF
+        #       {
+        #         "returncode": $EXIT_CODE,
+        #         "stdout": "$OUTPUT",
+        #         "stderr": "",
+        #         "completed": true,
+        #         "timestamp": "$(date -Iseconds)"
+        #       }
+        #       EOF
+        #           break
+        #         fi
+        #         sleep 10
+        #       done
+        #     dest: "{{ traffic_scripts_dir }}/monitor_results.sh"
+        #     mode: '0755'
+
+        # - name: Start results monitoring in background
+        #   shell: "nohup {{ traffic_scripts_dir }}/monitor_results.sh > {{ log_file }} 2>&1 &"
+        #   async: "{{ duration + 60 }}"
+        #   poll: 0
+
+        - name: Set traffic test facts
+          set_fact:
+            traffic_test_id: "{{ test_name | default('unknown') }}"
+            start_time: "{{ start_time }}"
+            status: "Running"
+            message: "Traffic test started successfully"
+
+      when: operation == "create"
+
+    #########################################################################
+    # DELETE OPERATION
+    #########################################################################
+    
+    - name: Delete traffic test
+      block:
+        - name: Kill wrapper script process tree in container
+          shell: |
+            docker exec {{ source_device }} sh -c '
+              # Find and kill the wrapper script and all its children
+              WRAPPER_PID=$(pgrep -f "run_traffic_test.sh" | head -1)
+              if [ -n "$WRAPPER_PID" ]; then
+                # Kill the entire process tree
+                pkill -P $WRAPPER_PID 2>/dev/null || true
+                kill $WRAPPER_PID 2>/dev/null || true
+                sleep 1
+                kill -9 $WRAPPER_PID 2>/dev/null || true
+              fi
+            '
+          failed_when: false
+
+        - name: Stop traffic generator process in container
+          shell: |
+            docker exec {{ source_device }} sh -c '
+              # Kill python process
+              pkill -9 -f "traffic_generator.py" 2>/dev/null || true
+              # Kill any orphaned iperf3 clients
+              pkill -9 -f "iperf3.*-c" 2>/dev/null || true
+            '
+          failed_when: false
+
+        - name: Wait for processes to terminate
+          pause:
+            seconds: 2
+
+        - name: Reap zombie processes in container
+          shell: |
+            docker exec {{ source_device }} sh -c '
+              # Kill any remaining zombie iperf3 processes
+              # First, find zombie processes
+              ZOMBIES=$(ps aux | grep iperf3 | grep defunct | awk "{print \$2}")
+              
+              # If zombies exist, force their parent to reap them
+              if [ -n "$ZOMBIES" ]; then
+                for pid in $ZOMBIES; do
+                  # Get parent PID
+                  PPID=$(ps -o ppid= -p $pid 2>/dev/null | tr -d " ")
+                  if [ -n "$PPID" ] && [ "$PPID" != "1" ]; then
+                    # Signal parent to reap child
+                    kill -CHLD $PPID 2>/dev/null || true
+                  fi
+                done
+                sleep 1
+              fi
+              
+              # Final cleanup: kill any remaining process references
+              pkill -9 -f "iperf3" 2>/dev/null || true
+            '
+          failed_when: false
+          register: zombie_cleanup
+
+        - name: Debug zombie cleanup
+          debug:
+            msg: "Zombie cleanup output: {{ zombie_cleanup.stdout }}"
+          when: zombie_cleanup.stdout != ""
+
+        # - name: Stop local monitoring process
+        #   shell: |
+        #     if [ -f "{{ pid_file }}" ]; then
+        #       PID=$(cat {{ pid_file }})
+        #       if kill -0 $PID 2>/dev/null; then
+        #         kill $PID
+        #         sleep 5
+        #         kill -9 $PID 2>/dev/null || true
+        #       fi
+        #       rm -f {{ pid_file }}
+        #     fi
+        #   failed_when: false
+
+        # - name: Stop results monitoring process
+        #   shell: "pkill -f 'monitor_results.sh' || true"
+        #   failed_when: false
+
+        - name: Stop iperf3 server on destination device
+          shell: "docker exec {{ destination_device }} pkill -9 -f 'iperf3.*-s.*-p {{ port }}' || true"
+          failed_when: false
+
+        - name: Stop any remaining iperf3 clients on source device
+          shell: "docker exec {{ source_device }} pkill -9 -f 'iperf3.*-c' || true"
+          failed_when: false
+
+        - name: Collect final results if available
+          shell: |
+            if [ -f "{{ results_file }}" ]; then
+              cat {{ results_file }}
+            else
+              echo '{"message": "No results file found", "completed": false}'
+            fi
+          register: final_results
+          failed_when: false
+
+        - name: Clean up files from source container
+          shell: |
+            docker exec {{ source_device }} rm -f /tmp/traffic_generator.py /tmp/metrics_collector.py /tmp/config.json /tmp/run_traffic_test.sh /tmp/traffic_generator.pid /tmp/traffic_output.log /tmp/traffic_exit_code /tmp/iperf3_client_0.log || true
+          failed_when: false
+
+        - name: Clean up traffic test directory
+          file:
+            path: "{{ traffic_scripts_dir }}"
+            state: absent
+          failed_when: false
+
+        - name: Set deletion facts
+          set_fact:
+            end_time: "{{ end_time }}"
+            status: "Deleted"
+            message: "Traffic test stopped and cleaned up"
+            final_results: "{{ final_results.stdout | default('{}') }}"
+
+      when: operation == "delete"
+
+    #########################################################################
+    # STATUS OPERATION
+    #########################################################################
+    
+    - name: Get traffic test status
+      block:
+        - name: Check if traffic generator is still running in container
+          shell: "docker exec {{ source_device }} pgrep -f 'traffic_generator.py' || echo 'not_running'"
+          register: process_status
+          failed_when: false
+
+        - name: Check if wrapper script is still running in container
+          shell: "docker exec {{ source_device }} pgrep -f 'run_traffic_test.sh' || echo 'not_running'"
+          register: wrapper_status
+          failed_when: false
+
+        - name: Check iperf3 server status
+          shell: "docker exec {{ destination_device }} pgrep -f 'iperf3.*-s.*-p {{ port }}' || echo 'not_running'"
+          register: server_status
+          failed_when: false
+
+        - name: Get current results if available
+          shell: |
+            if [ -f "{{ results_file }}" ]; then
+              cat {{ results_file }}
+            else
+              echo '{"completed": false, "message": "Test in progress"}'
+            fi
+          register: current_results
+          failed_when: false
+
+        - name: Parse current metrics from results
+          set_fact:
+            current_metrics: "{{ current_results.stdout | from_json | default({}) }}"
+
+        - name: Determine overall status
+          set_fact:
+            overall_status: >-
+              {%- if process_status.stdout != "not_running" or wrapper_status.stdout != "not_running" -%}
+                Running
+              {%- elif current_metrics.completed | default(false) -%}
+                Completed
+              {%- else -%}
+                Unknown
+              {%- endif -%}
+
+        - name: Set status facts
+          set_fact:
+            status: "{{ overall_status }}"
+            message: "Traffic Generator: {{ 'running' if process_status.stdout != 'not_running' else 'stopped' }}, Wrapper: {{ 'running' if wrapper_status.stdout != 'not_running' else 'stopped' }}, Server: {{ 'running' if server_status.stdout != 'not_running' else 'stopped' }}"
+            current_metrics: "{{ current_metrics }}"
+
+      when: operation == "status"
+
+    #########################################################################
+    # FINAL RESULT
+    #########################################################################
+    
+    - name: Return operation result
+      debug:
+        msg: "Operation {{ operation }} completed successfully"

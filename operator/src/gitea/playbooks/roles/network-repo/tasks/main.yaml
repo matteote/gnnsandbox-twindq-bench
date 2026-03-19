@@ -1,0 +1,229 @@
+# Copyright 2024-2025 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+- name: Create network directory
+  file:
+    path: /opt/network-repo
+    state: directory
+    owner: git
+    group: git
+    mode: 0775
+
+- name: init git repo
+  command: sudo -u git git init
+  args:
+    chdir: /opt/network-repo
+
+- name: configure git user name
+  command: "sudo -u git git config --global user.name 'Network Agent'"
+  args:
+    chdir: /opt/network-repo
+
+- name: configure git email
+  command: "sudo -u git git config --global user.email 'networkagent@example.com'"
+  args:
+    chdir: /opt/network-repo
+
+###############################################
+# Master Branch
+###############################################
+- name: checkout master branch
+  command: sudo -u git git checkout -B master
+  args:
+    chdir: /opt/network-repo
+
+- name: push network files to master
+  ansible.builtin.copy:
+    src: "{{item}}"
+    dest: "/opt/network-repo/{{item}}"
+    owner: git
+    group: git
+    mode: '0644'
+  loop:
+   - Readme.md
+
+- name: add to master branch in network repo
+  command: sudo -u git git add .
+  args:
+    chdir: /opt/network-repo
+
+- name: initial commit 
+  command: sudo -u git git commit -m "initial commit"
+  args:
+    chdir: /opt/network-repo
+
+- name: add remote repo
+  command: sudo -u git git remote add origin https://{{ lookup('env', 'WEBAPPS_LOGIN') }}:{{ lookup('env', 'WEBAPPS_PWD') }}@{{external_ip_address}}:3000/{{ lookup('env', 'WEBAPPS_LOGIN') }}/network.git
+  args:
+    chdir: /opt/network-repo
+
+- name: push to repo
+  command: sudo -u git git -c http.sslVerify=false push -u origin master
+  args:
+    chdir: /opt/network-repo
+
+###############################################
+# Core Branch
+###############################################
+- name: checkout core branch
+  command: sudo -u git git checkout -B core
+  args:
+    chdir: /opt/network-repo
+
+- name: push network files
+  ansible.builtin.copy:
+    src: "{{item}}"
+    dest: "/opt/network-repo/{{item}}"
+    owner: git
+    group: git
+    mode: '0644'
+  loop:
+   - Readme.md
+   - userplanefunction-upf.yaml
+   - datanetwork-dnn.yaml
+   - controlplane-controlplane.yaml
+
+- name: push templated network files
+  ansible.builtin.template:
+    src: "{{item}}"
+    dest: "/opt/network-repo/{{item}}"
+    owner: git
+    group: git
+    mode: '0644'
+  loop: 
+   - core-network-location.yaml
+   - internet-network-location.yaml
+
+- name: add to core branch in network repo
+  command: sudo -u git git add .
+  args:
+    chdir: /opt/network-repo
+
+- name: network files commit 
+  command: sudo -u git git commit -m "add core files"
+  args:
+    chdir: /opt/network-repo
+
+- name: push to repo
+  command: sudo -u git git -c http.sslVerify=false push -u origin core
+  args:
+    chdir: /opt/network-repo
+
+
+###############################################
+# single site branch
+###############################################
+- name: checkout singlesite branch
+  command: sudo -u git git checkout -B singlesite
+  args:
+    chdir: /opt/network-repo
+
+- name: push network files
+  ansible.builtin.copy:
+    src: "{{item}}"
+    dest: "/opt/network-repo/{{item}}"
+    owner: git
+    group: git
+    mode: '0644'
+  loop:
+   - Readme.md
+   - userplanefunction-upf.yaml
+   - datanetwork-dnn.yaml
+   - controlplane-controlplane.yaml
+   - pointtopointservice-ptp1.yaml
+   - ueransim-cellsite1-ueransim.yaml
+
+- name: push templated network files
+  ansible.builtin.template:
+    src: "{{item}}"
+    dest: "/opt/network-repo/{{item}}"
+    owner: git
+    group: git
+    mode: '0644'
+  loop: 
+   - core-network-location.yaml
+   - internet-network-location.yaml
+   - cellsite1-network-location.yaml
+
+- name: add to singlesite branch in network repo
+  command: sudo -u git git add .
+  args:
+    chdir: /opt/network-repo
+
+- name: network files commit 
+  command: sudo -u git git commit -m "add all singlesite files"
+  args:
+    chdir: /opt/network-repo
+
+- name: push to singlesite repo
+  command: sudo -u git git -c http.sslVerify=false push -u origin singlesite
+  args:
+    chdir: /opt/network-repo
+
+###############################################
+# multi site branch
+###############################################
+- name: checkout multisite branch
+  command: sudo -u git git checkout -B multisite
+  args:
+    chdir: /opt/network-repo
+
+- name: delete pointtopointservice
+  ansible.builtin.file:
+    path: /opt/network-repo/pointtopointservice-ptp1.yaml
+    state: absent
+
+- name: push network files
+  ansible.builtin.copy:
+    src: "{{item}}"
+    dest: "/opt/network-repo/{{item}}"
+    owner: git
+    group: git
+    mode: '0644'
+  loop:
+   - Readme.md
+   - userplanefunction-upf.yaml
+   - datanetwork-dnn.yaml
+   - controlplane-controlplane.yaml
+   - meshservice-meshservice1.yaml
+   - ueransim-cellsite1-ueransim.yaml
+   - ueransim-cellsite2-ueransim.yaml
+
+- name: push templated network files
+  ansible.builtin.template:
+    src: "{{item}}"
+    dest: "/opt/network-repo/{{item}}"
+    owner: git
+    group: git
+    mode: '0644'
+  loop: 
+   - core-network-location.yaml
+   - internet-network-location.yaml
+   - cellsite1-network-location.yaml
+   - cellsite2-network-location.yaml
+
+- name: add to singlesite branch in network repo
+  command: sudo -u git git add .
+  args:
+    chdir: /opt/network-repo
+
+- name: network files commit 
+  command: sudo -u git git commit -m "add all multisite files"
+  args:
+    chdir: /opt/network-repo
+
+- name: push to multisite repo
+  command: sudo -u git git -c http.sslVerify=false push -u origin multisite
+  args:
+    chdir: /opt/network-repo

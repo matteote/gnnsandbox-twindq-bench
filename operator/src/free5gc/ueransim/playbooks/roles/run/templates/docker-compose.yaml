@@ -1,0 +1,19 @@
+version: '3.8'
+
+services:
+  ueransim:
+    container_name: ueransim
+    image: {{GOOGLE_REGION}}-docker.pkg.dev/{{GOOGLE_PROJECT}}/networkagent/ueransim:latest
+    command: ./nr-gnb -c ./config/gnbcfg.yaml
+    volumes:
+      - /opt/gnbcfg.yaml:/ueransim/config/gnbcfg.yaml
+      - /opt/uecfg.yaml:/ueransim/config/uecfg.yaml
+    devices:
+      - "/dev/net/tun"
+    cap_add:
+      - NET_ADMIN
+    network_mode: host
+    labels:
+      free5gc_name: ueransim
+
+

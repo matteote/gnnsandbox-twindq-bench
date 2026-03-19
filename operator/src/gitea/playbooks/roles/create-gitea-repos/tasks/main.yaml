@@ -1,0 +1,53 @@
+# Copyright 2024-2025 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+########################################################
+# Get API token
+########################################################
+- name: authenticate with gitea
+  command: "curl -H 'Content-Type: application/json' -d '{\"name\":\"root-repo\", \"scopes\":[\"write:repository\", \"write:user\", \"write:admin\"]}' -u {{ lookup('env', 'WEBAPPS_LOGIN') }}:{{ lookup('env', 'WEBAPPS_PWD') }} https://{{external_ip_address}}:3000/api/v1/users/{{ lookup('env', 'WEBAPPS_LOGIN') }}/tokens --insecure"
+  register: result
+
+- set_fact:
+    token_result: "{{ result.stdout | from_json }}"
+
+- debug:
+    var: token_result
+
+########################################################
+# Create Repos
+########################################################
+- name: create root-repo
+  command: "curl -k  -H 'Content-Type: application/json'  -H 'Authorization: token {{ token_result['sha1'] }}' https://{{external_ip_address}}:3000/api/v1/user/repos -d '{\"name\": \"root-repo\"}' --insecure"
+  when: token_result.sha1 is defined
+
+- name: create network repo
+  command: "curl -k  -H 'Content-Type: application/json'  -H 'Authorization: token {{ token_result['sha1'] }}' https://{{external_ip_address}}:3000/api/v1/user/repos -d '{\"name\": \"network\"}' --insecure"
+  when: token_result.sha1 is defined
+
+- name: create networkdesign repo
+  command: "curl -k  -H 'Content-Type: application/json'  -H 'Authorization: token {{ token_result['sha1'] }}' https://{{external_ip_address}}:3000/api/v1/user/repos -d '{\"name\": \"networkdesign\"}' --insecure"
+  when: token_result.sha1 is defined
+
+- name: create incidents repo
+  command: "curl -k  -H 'Content-Type: application/json'  -H 'Authorization: token {{ token_result['sha1'] }}' https://{{external_ip_address}}:3000/api/v1/user/repos -d '{\"name\": \"incidents\"}' --insecure"
+  when: token_result.sha1 is defined
+
+########################################################
+# NetworkAgent SSH Key
+########################################################
+- name: create ssh key for networkagent user
+  command: "curl -k -H 'Content-Type: application/json'  -H 'Authorization: token {{ token_result['sha1'] }}' https://{{external_ip_address}}:3000/api/v1/user/keys -d '{\"title\": \"NetworkAgent key\", \"key\": \"{{ GOOGLE_SSH_KEY }}\"}' --insecure"
+  register: out
+  when: token_result.sha1 is defined

@@ -1,0 +1,26 @@
+---
+- hosts: all
+  become: true
+  gather_facts: true
+
+  tasks:
+    - name: Remove tc bandwidth limits from non-management bridge
+      shell: |
+        tc qdisc del dev {{ network_name }} root 2>/dev/null || true
+      when: network_type != 'management'
+      ignore_errors: yes
+
+    - name: Bring down non-management bridge before deletion
+      command: ip link set {{ network_name }} down
+      ignore_errors: yes
+
+    - name: Delete native Linux bridge network (brctl)
+      command: brctl delbr {{ network_name }}
+      register: network_result
+      ignore_errors: yes # Ignore errors if the bridge does not exist
+
+  handlers:
+    - name: restart docker
+      systemd:
+        name: docker
+        state: restarted

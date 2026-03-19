@@ -1,0 +1,776 @@
+# Copyright 2024-2025 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+import logging
+import ipaddress
+import kubernetes
+from typing import Dict, List, Any, Optional
+
+logger = logging.getLogger(__name__)
+
+#########################################################################
+# Validation Functions
+#########################################################################
+
+def validate_network_topology(spec: Dict[str, Any]) -> Dict[str, Any]:
+    """Validate the network topology for consistency and conflicts"""
+    try:
+        networks = spec.get('networks', [])
+        routers = spec.get('routers', [])
+        qos_policies = spec.get('qos', {}).get('policies', [])
+        firewall_policies = spec.get('security', {}).get('firewall', {}).get('policies', [])
+        
+        # Validate management network requirement
+        management_validation = validate_management_network(networks)
+        if not management_validation['valid']:
+            return management_validation
+
+        # Validate management interface assignments
+        management_interface_validation = validate_management_interface_assignments(networks, routers)
+        if not management_interface_validation['valid']:
+            return management_interface_validation
+
+        # Validate IP address assignments
+        ip_validation = validate_ip_assignments(networks, routers)
+        if not ip_validation['valid']:
+            return ip_validation
+        
+        # Validate router interface mappings
+        interface_validation = validate_interface_mappings(networks, routers)
+        if not interface_validation['valid']:
+            return interface_validation
+        
+        # Validate policy references
+        policy_validation = validate_policy_references(routers, qos_policies, firewall_policies)
+        if not policy_validation['valid']:
+            return policy_validation
+        
+        return {'valid': True}
+        
+    except Exception as e:
+        return {'valid': False, 'error': f"Validation error: {str(e)}"}
+
+def validate_management_network(networks: List[Dict]) -> Dict[str, Any]:
+    """Validate that there is exactly one management network"""
+    try:
+        management_networks = [
+            network for network in networks 
+            if network.get('network_type') == 'management'
+        ]
+        
+        if len(management_networks) == 0:
+            return {
+                'valid': False, 
+                'error': "Network topology must include exactly one network with network_type 'management'"
+            }
+        elif len(management_networks) > 1:
+            management_names = [net['name'] for net in management_networks]
+            return {
+                'valid': False,
+                'error': f"Network topology must have only one management network, but found {len(management_networks)}: {', '.join(management_names)}"
+            }
+        # check if the network has a vlan defined
+        if management_networks[0].get('vlan'):
+            return {
+                'valid': False,
+                'error': "Management network must not have a 'vlan' defined"
+            }
+        return {'valid': True}
+        
+    except Exception as e:
+        return {'valid': False, 'error': f"Management network validation error: {str(e)}"}
+
+def get_management_network_name(networks: List[Dict]) -> Optional[str]:
+    """Get the name of the management network from the network list"""
+    try:
+        management_networks = [
+            network for network in networks 
+            if network.get('network_type') == 'management'
+        ]
+        
+        # Return the name of the first (and should be only) management network
+        return management_networks[0]['name'] if management_networks else None
+        
+    except Exception as e:
+        logger.warning(f"Error getting management network name: {str(e)}")
+        return None
+
+def validate_management_interface_assignments(networks: List[Dict], routers: List[Dict]) -> Dict[str, Any]:
+    """Validate that each router uses the management network as its first interface"""
+    try:
+        # Get the management network name
+        management_network_name = get_management_network_name(networks)
+        if not management_network_name:
+            # This should be caught by validate_management_network, but being defensive
+            return {
+                'valid': False,
+                'error': "No management network found for interface validation"
+            }
+        
+        # Check each router's interface assignments
+        for router in routers:
+            router_name = router['name']
+            interfaces = router.get('interfaces', [])
+            
+            # Check that router has at least one interface
+            if not interfaces:
+                return {
+                    'valid': False,
+                    'error': f"Router {router_name} must have at least one interface defined"
+                }
+            
+            # Get the first interface (should be management)
+            first_interface = interfaces[0]
+            
+            # Validate first interface points to management network
+            if first_interface['network'] != management_network_name:
+                return {
+                    'valid': False,
+                    'error': f"Router {router_name} first interface ({first_interface['name']}) must connect to management network '{management_network_name}', but is connected to '{first_interface['network']}'"
+                }
+        
+        # Also validate that the management network connects all routers via their first interface
+        management_network = None
+        for network in networks:
+            if network['name'] == management_network_name:
+                management_network = network
+                break
+        
+        if management_network:
+            connected_routers = management_network.get('connected_routers', [])
+            for router_conn in connected_routers:
+                router_name = router_conn['router_name']
+                interface_name = router_conn['interface']
+                
+                # Find the corresponding router to check if this is its first interface
+                router = None
+                for r in routers:
+                    if r['name'] == router_name:
+                        router = r
+                        break
+                
+                if router and router.get('interfaces'):
+                    first_interface_name = router['interfaces'][0]['name']
+                    if interface_name != first_interface_name:
+                        return {
+                            'valid': False,
+                            'error': f"Management network '{management_network_name}' must connect router {router_name} via its first interface ({first_interface_name}), but uses {interface_name}"
+                        }
+        
+        return {'valid': True}
+        
+    except Exception as e:
+        return {'valid': False, 'error': f"Management interface validation error: {str(e)}"}
+
+def validate_ip_assignments(networks: List[Dict], routers: List[Dict]) -> Dict[str, Any]:
+    """Validate IP address assignments for conflicts and consistency"""
+    try:
+        # Build a map of network subnets
+        network_subnets = {}
+        for network in networks:
+            network_name = network['name']
+            subnet = ipaddress.ip_network(network['subnet'])
+            network_subnets[network_name] = subnet
+        
+        # Check for subnet overlaps
+        subnet_list = list(network_subnets.values())
+        for i, subnet1 in enumerate(subnet_list):
+            for j, subnet2 in enumerate(subnet_list[i+1:], i+1):
+                if subnet1.overlaps(subnet2):
+                    return {'valid': False, 'error': f"Subnet overlap detected: {subnet1} and {subnet2}"}
+        
+        # Validate router interface IP assignments
+        for network in networks:
+            network_name = network['name']
+            subnet = network_subnets[network_name]
+            connected_routers = network.get('connected_routers', [])
+            
+            used_ips = set()
+            for router_conn in connected_routers:
+                ip_addr = ipaddress.ip_address(router_conn['ip_address'])
+                
+                # Check if IP is in the network subnet
+                if ip_addr not in subnet:
+                    return {'valid': False, 'error': f"IP {ip_addr} not in subnet {subnet} for network {network_name}"}
+                
+                # Check for duplicate IP assignments
+                if ip_addr in used_ips:
+                    return {'valid': False, 'error': f"Duplicate IP assignment {ip_addr} in network {network_name}"}
+                
+                used_ips.add(ip_addr)
+        
+        return {'valid': True}
+        
+    except Exception as e:
+        return {'valid': False, 'error': f"IP validation error: {str(e)}"}
+
+def validate_interface_mappings(networks: List[Dict], routers: List[Dict]) -> Dict[str, Any]:
+    """Validate router interface to network mappings"""
+    try:
+        # Build network connection map
+        network_connections = {}
+        for network in networks:
+            network_name = network['name']
+            connected_routers = network.get('connected_routers', [])
+            network_connections[network_name] = {
+                conn['router_name']: conn['interface'] for conn in connected_routers
+            }
+        
+        # Validate router interface definitions
+        for router in routers:
+            router_name = router['name']
+            interfaces = router.get('interfaces', [])
+            
+            for interface in interfaces:
+                interface_name = interface['name']
+                network_name = interface['network']
+                
+                # Skip loopback interfaces
+                if interface_name == 'lo':
+                    continue
+                
+                # Check if network exists
+                if network_name not in network_connections:
+                    return {'valid': False, 'error': f"Router {router_name} references non-existent network {network_name}"}
+                
+                # Check if router is connected to this network
+                if router_name not in network_connections[network_name]:
+                    return {'valid': False, 'error': f"Router {router_name} not connected to network {network_name}"}
+                
+                # Check if interface matches
+                expected_interface = network_connections[network_name][router_name]
+                if interface_name != expected_interface:
+                    return {'valid': False, 'error': f"Interface mismatch for router {router_name}: expected {expected_interface}, got {interface_name}"}
+        
+        return {'valid': True}
+        
+    except Exception as e:
+        return {'valid': False, 'error': f"Interface mapping validation error: {str(e)}"}
+
+def validate_policy_references(routers: List[Dict], qos_policies: List[Dict], firewall_policies: List[Dict]) -> Dict[str, Any]:
+    """Validate that all policy references exist"""
+    try:
+        # Build policy name sets
+        qos_policy_names = {policy['name'] for policy in qos_policies}
+        firewall_policy_names = {policy['name'] for policy in firewall_policies}
+        
+        # Check router policy references
+        for router in routers:
+            router_name = router['name']
+            
+            # Check QoS policy references
+            qos_policies_applied = router.get('qos_policies', [])
+            for qos_policy in qos_policies_applied:
+                policy_name = qos_policy['policy_name']
+                if policy_name not in qos_policy_names:
+                    return {'valid': False, 'error': f"Router {router_name} references non-existent QoS policy {policy_name}"}
+            
+            # Check firewall policy references
+            firewall_policies_applied = router.get('firewall_policies', [])
+            for firewall_policy in firewall_policies_applied:
+                policy_name = firewall_policy['policy_name']
+                if policy_name not in firewall_policy_names:
+                    return {'valid': False, 'error': f"Router {router_name} references non-existent firewall policy {policy_name}"}
+        
+        return {'valid': True}
+        
+    except Exception as e:
+        return {'valid': False, 'error': f"Policy reference validation error: {str(e)}"}
+
+#########################################################################
+# CR Generation
+#########################################################################
+
+def generate_linux_networks(spec: Dict[str, Any], parent_name: str, parent_namespace: str, parent_uid: str, parent_kind: str) -> List[Dict[str, Any]]:
+    """Generate LinuxNetwork CRs from parent spec"""
+    networks = spec.get('networks', [])
+    linux_network_crs = []
+    
+    for network in networks:
+        # Skip loopback networks - they don't need Linux networks
+        if network['name'] == 'loopbacks':
+            continue
+        
+        linux_network_cr = {
+            'apiVersion': 'google.dev/v1',
+            'kind': 'LinuxNetwork',
+            'metadata': {
+                'name': network['name'],
+                'namespace': parent_namespace,
+                'labels': {
+                    'parent-kind': parent_kind,
+                    'parent-name': parent_name,
+                    'network-type': network.get('network_type', 'p2p'),
+                    'environment': 'lab'
+                },
+                'ownerReferences': [{
+                    'apiVersion': 'google.dev/v1',
+                    'kind': parent_kind,
+                    'name': parent_name,
+                    'uid': parent_uid,
+                    'controller': True,
+                    'blockOwnerDeletion': True
+                }]
+            },
+            'spec': {
+                'name': network['name'],
+                'description': network.get('description', ''),
+                'source_network': parent_name,
+                'network_type': network.get('network_type', 'p2p'),
+                'bandwidth': network.get('bandwidth'),
+                'connected_routers': network.get('connected_routers', [])
+            }
+        }
+
+        # Add gateway if specified
+        if 'gateway' in network:
+            linux_network_cr['spec']['gateway'] = network['gateway']
+        
+        linux_network_crs.append(linux_network_cr)
+    
+    return linux_network_crs
+
+def generate_vyos_routers(spec: Dict[str, Any], parent_name: str, parent_namespace: str, parent_uid: str, parent_kind: str) -> List[Dict[str, Any]]:
+    """Generate VyOSRouter CRs from parent spec"""
+    routers = spec.get('routers', [])
+    networks = spec.get('networks', [])
+    vyos_router_crs = []
+    
+    # Build network lookup for IP address resolution
+    network_lookup = build_network_lookup(networks)
+    
+    for router in routers:
+        vyos_router_cr = {
+            'apiVersion': 'google.dev/v1',
+            'kind': 'VyOSRouter',
+            'metadata': {
+                'name': router['name'],
+                'namespace': parent_namespace,
+                'labels': {
+                    'parent-kind': parent_kind,
+                    'parent-name': parent_name,
+                },
+                'ownerReferences': [{
+                    'apiVersion': 'google.dev/v1',
+                    'kind': parent_kind,
+                    'name': parent_name,
+                    'uid': parent_uid,
+                    'controller': True,
+                    'blockOwnerDeletion': True
+                }]
+            },
+            'spec': {
+                'hostname': router['hostname'],
+                'router_id': router['router_id'],
+                'image': router.get('image', 'vyos:1.5'),
+                'source_network': parent_name,
+                'location': router.get('location', {}),
+                'interfaces': generate_router_interfaces(router, network_lookup),
+                'vrfs': router.get('vrfs', []),
+                'protocols': generate_router_protocols(router),
+                'services': router.get('services', {}),
+                'qos': generate_router_qos_config(router),
+                'firewall': generate_router_firewall_config(router),
+                'traffic_policy': router.get('traffic_policy', {}),
+                'role': router.get('role', 'P')
+            }
+        }
+        
+        vyos_router_crs.append(vyos_router_cr)
+    
+    return vyos_router_crs
+
+def build_network_lookup(networks: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+    """Build a lookup table for network information"""
+    network_lookup = {}
+    
+    for network in networks:
+        network_name = network['name']
+        connected_routers = network.get('connected_routers', [])
+        
+        # Build router to IP mapping for this network
+        router_ips = {}
+        for conn in connected_routers:
+            router_ips[conn['router_name']] = {
+                'ip_address': conn['ip_address'],
+                'interface': conn['interface']
+            }
+        
+        network_lookup[network_name] = {
+            'subnet': network['subnet'],
+            'mtu': network.get('mtu', 1500),
+            'vlan': network.get('vlan'),
+            'router_ips': router_ips,
+            'linux_network': network_name if network_name != 'loopbacks' else None
+        }
+
+        # if there is gateway defined, add it
+        if 'gateway' in network:
+            network_lookup[network_name]['gateway'] = network['gateway']
+
+    return network_lookup
+
+def generate_router_interfaces(router: Dict[str, Any], network_lookup: Dict[str, Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Generate interface configuration for a router"""
+    interfaces = []
+    router_name = router['name']
+    
+    for interface_def in router.get('interfaces', []):
+        interface_name = interface_def['name']
+        network_name = interface_def['network']
+        
+        # Handle loopback interfaces
+        if interface_name == 'lo':
+            interfaces.append({
+                'name': 'lo',
+                'description': interface_def.get('description', 'Loopback interface'),
+                'address': f"{router['router_id']}/32",
+                'mtu': 1500,
+                'enabled': True
+            })
+            continue
+        
+        # Get network information
+        if network_name not in network_lookup:
+            logger.warning(f"Network {network_name} not found for router {router_name}")
+            continue
+        
+        network_info = network_lookup[network_name]
+        router_ip_info = network_info['router_ips'].get(router_name)
+        
+        if not router_ip_info:
+            logger.warning(f"No IP assignment found for router {router_name} on network {network_name}")
+            continue
+        
+        # Calculate subnet mask from network subnet
+        subnet = ipaddress.ip_network(network_info['subnet'])
+        ip_with_mask = f"{router_ip_info['ip_address']}/{subnet.prefixlen}"
+        
+        interface_config = {
+            'name': interface_name,
+            'description': interface_def.get('description', ''),
+            'address': ip_with_mask,
+            'mtu': network_info['mtu'],
+            'enabled': interface_def.get('enabled', True)
+        }
+
+        # Add bandwidth if specified
+        if 'bandwidth' in interface_def:
+            interface_config['bandwidth'] = interface_def['bandwidth']
+
+        # Add gateway if specified
+        if 'gateway' in network_info:
+            interface_config['gateway'] = network_info['gateway']
+
+        # Add VRF if specified
+        if 'vrf' in interface_def:
+            interface_config['vrf'] = interface_def['vrf']
+        
+        # Add Linux network reference
+        if network_info['linux_network']:
+            interface_config['linux_network'] = network_info['linux_network']
+        
+        # Add VLAN if specified
+        if network_info['vlan'] is not None:
+            interface_config['vlan'] = network_info['vlan']
+        
+        interfaces.append(interface_config)
+    
+    return interfaces
+
+def generate_router_protocols(router: Dict[str, Any]) -> Dict[str, Any]:
+    """Generate protocol configuration for a router"""
+    protocols = {}
+    router_protocols = router.get('protocols', {})
+    
+    # OSPF configuration
+    if 'ospf' in router_protocols and router_protocols['ospf'].get('enabled'):
+        ospf_config = {
+            'router_id': router['router_id'],
+            'areas': []
+        }
+        
+        for area_id in router_protocols['ospf'].get('areas', []):
+            networks = []
+            
+            # Add connected interface networks to the appropriate OSPF area
+            for interface in router.get('interfaces', []):
+                if interface['name'] == 'lo':
+                    continue
+                if interface.get('vrf'):
+                    continue
+                # Note: Actual subnets are populated by the generator using the specification
+                pass
+            
+            # Add loopback network for all areas (router-id advertisement)
+            if area_id == '0.0.0.0':  # Backbone area gets the loopback
+                networks.append(f"{router['router_id']}/32")
+            
+            area_config = {
+                'area': area_id,
+                'networks': networks,
+                'type': 'standard' if area_id != '0.0.0.0' else 'backbone'
+            }
+            ospf_config['areas'].append(area_config)
+        
+        # Add passive interfaces if specified
+        if 'passive_interfaces' in router_protocols['ospf']:
+            ospf_config['passive_interfaces'] = router_protocols['ospf']['passive_interfaces']
+        
+        protocols['ospf'] = ospf_config
+    
+    # BGP configuration
+    if 'bgp' in router_protocols and router_protocols['bgp'].get('enabled'):
+        bgp_config = {
+            'as_number': router_protocols['bgp']['as_number'],
+            'router_id': router['router_id'],
+            'route_reflector': router_protocols['bgp'].get('route_reflector', False),
+            'neighbors': router_protocols['bgp'].get('neighbors', []),
+            'vrfs': router_protocols['bgp'].get('vrfs', [])
+        }
+        
+        # Add address families if specified
+        if 'address_families' in router_protocols['bgp']:
+            bgp_config['address_families'] = router_protocols['bgp']['address_families']
+        else:
+            # Auto-enable VPNv4 address family for PE routers (with VRFs) and route reflectors
+            has_vrfs = len(router.get('vrfs', [])) > 0
+            is_route_reflector = router_protocols['bgp'].get('route_reflector', False)
+            
+            if has_vrfs or is_route_reflector:
+                bgp_config['address_families'] = [{'family': 'vpnv4'}]
+        
+        protocols['bgp'] = bgp_config
+    
+    # MPLS configuration
+    if 'mpls' in router_protocols and router_protocols['mpls'].get('enabled'):
+        mpls_config = {
+            'enabled': True,
+            'ldp': {
+                'router_id': router['router_id'],
+                'interfaces': router_protocols['mpls'].get('ldp_interfaces', [])
+            }
+        }
+        protocols['mpls'] = mpls_config
+    
+    # Static routes configuration
+    if 'static' in router_protocols and router_protocols['static'].get('routes'):
+        static_config = {
+            'routes': router_protocols['static']['routes']
+        }
+        protocols['static'] = static_config
+    
+    return protocols
+
+def generate_router_qos_config(router: Dict[str, Any]) -> Dict[str, Any]:
+    """Generate QoS configuration for a router"""
+    qos_config = {'policies': []}
+    
+    for qos_policy in router.get('qos_policies', []):
+        qos_config['policies'].append({
+            'name': qos_policy['policy_name'],
+            'interface': qos_policy['interface'],
+            'direction': qos_policy.get('direction', 'out')
+        })
+    
+    return qos_config
+
+def generate_router_firewall_config(router: Dict[str, Any]) -> Dict[str, Any]:
+    """Generate firewall configuration for a router"""
+    firewall_config = {'policies': []}
+    
+    for firewall_policy in router.get('firewall_policies', []):
+        firewall_config['policies'].append({
+            'name': firewall_policy['policy_name'],
+            'interface': firewall_policy['interface'],
+            'direction': firewall_policy['direction']
+        })
+    
+    return firewall_config
+
+#########################################################################
+# Kubernetes API Operations
+#########################################################################
+
+async def create_linux_network(network_cr: Dict[str, Any], namespace: str):
+    """Create a LinuxNetwork custom resource"""
+    client = kubernetes.dynamic.DynamicClient(kubernetes.client.ApiClient())
+    api = client.resources.get(api_version='google.dev/v1', kind='LinuxNetwork')
+    
+    try:
+        api.create(network_cr)
+    except kubernetes.client.rest.ApiException as e:
+        if e.status == 409:  # Already exists
+            logger.info(f"LinuxNetwork {network_cr['metadata']['name']} already exists")
+        else:
+            raise
+
+async def create_vyos_router(router_cr: Dict[str, Any], namespace: str):
+    """Create a VyOSRouter custom resource"""
+    client = kubernetes.dynamic.DynamicClient(kubernetes.client.ApiClient())
+    api = client.resources.get(api_version='google.dev/v1', kind='VyOSRouter')
+    
+    try:
+        api.create(router_cr)
+    except kubernetes.client.rest.ApiException as e:
+        if e.status == 409:  # Already exists
+            logger.info(f"VyOSRouter {router_cr['metadata']['name']} already exists, updating...")
+            try:
+                # Patch the existing router to ensure it stays in sync
+                await patch_vyos_router(
+                    router_cr['metadata']['name'],
+                    router_cr['metadata']['namespace'],
+                    {
+                        'metadata': {'labels': router_cr['metadata']['labels']},
+                        'spec': router_cr['spec']
+                    }
+                )
+            except Exception as patch_error:
+                logger.error(f"Failed to update existing VyOSRouter {router_cr['metadata']['name']}: {patch_error}")
+        else:
+            raise
+
+async def update_status(name: str, namespace: str, kind: str, phase: str, message: str, 
+                       networks: Optional[List[str]] = None, routers: Optional[List[str]] = None):
+    """Update the status of a Custom Resource"""
+    logger.info(f"Updating {kind} {name} status to {phase}: {message}")
+
+    client = kubernetes.dynamic.DynamicClient(kubernetes.client.ApiClient())
+    api = client.resources.get(api_version='google.dev/v1', kind=kind)
+    
+    try:
+        resource = api.get(name=name, namespace=namespace)
+        if not resource:
+            logger.error(f"{kind} {name} not found in namespace {namespace} for status update")
+            return
+
+        resource_dict = resource.to_dict()
+
+        if 'status' not in resource_dict:
+            resource_dict['status'] = {}
+
+        status = {
+            'phase': phase,
+            'message': message
+        }
+        if networks:
+            status['networks'] = networks
+        if routers:
+            status['routers'] = routers
+
+        resource_dict['status'].update(status)
+        
+        api.patch(
+            namespace=namespace,
+            name=name,
+            body=resource_dict,
+            content_type='application/merge-patch+json',
+            subresource='status'
+        )
+    except kubernetes.client.rest.ApiException as e:
+        if e.status == 422 and "status" in str(e):
+            logger.warning(f"Status subresource not enabled for {kind} {name}, skipping status update.")
+        else:
+            logger.error(f"Failed to update status for {kind} {name}: {e}")
+    except Exception as e:
+        logger.error(f"Unexpected error updating status for {kind} {name}: {e}")
+
+async def patch_vyos_router(name: str, namespace: str, patch: Dict[str, Any]):
+    """Patch a VyOSRouter custom resource"""
+    client = kubernetes.dynamic.DynamicClient(kubernetes.client.ApiClient())
+    api = client.resources.get(api_version='google.dev/v1', kind='VyOSRouter')
+    
+    try:
+        api.patch(
+            namespace=namespace,
+            name=name,
+            body=patch,
+            content_type='application/merge-patch+json'
+        )
+        logger.info(f"Patched VyOSRouter: {name}")
+    except kubernetes.client.rest.ApiException as e:
+        logger.error(f"Failed to patch VyOSRouter {name}: {e}")
+        raise
+
+async def check_and_update_parent_status(parent_name: str, parent_kind: str, namespace: str, logger):
+    """Check if all child VyOSRouters and LinuxNetworks are Ready and update parent status accordingly"""
+    logger.info(f"Checking parent {parent_kind} {parent_name} status for child readiness")
+    
+    try:
+        # Get the parent resource
+        client = kubernetes.dynamic.DynamicClient(kubernetes.client.ApiClient())
+        parent_api = client.resources.get(api_version='google.dev/v1', kind=parent_kind)
+        vyosrouter_api = client.resources.get(api_version='google.dev/v1', kind='VyOSRouter')
+        
+        # Get the parent
+        try:
+            parent_res = parent_api.get(name=parent_name, namespace=namespace)
+        except kubernetes.client.rest.ApiException as e:
+            if e.status == 404:
+                logger.info(f"Parent {parent_kind} {parent_name} not found, may have been deleted")
+                return
+            else:
+                raise
+        
+        # Check current status - only update if currently in Building/Creating state
+        current_status = parent_res.get('status', {})
+        current_phase = current_status.get('phase', '')
+        
+        if current_phase not in ['Creating', 'Updating']:
+            logger.info(f"Parent {parent_kind} {parent_name} is in {current_phase} state - skipping check")
+            return
+        
+        # Get all child VyOSRouters that belong to this parent
+        all_routers = vyosrouter_api.get(namespace=namespace)
+        child_routers = []
+        
+        for router in all_routers.items:
+            owner_references = router.get('metadata', {}).get('ownerReferences', [])
+            for owner in owner_references:
+                if owner.get('kind') == parent_kind and owner.get('name') == parent_name:
+                    child_routers.append(router)
+                    break
+                
+        if not child_routers:
+            logger.warning(f"No child resources found for {parent_kind} {parent_name}")
+            return
+        
+        # Check if all child routers are Ready (status.phase == "Running")
+        ready_routers = []
+        not_ready_routers = []
+        
+        for router in child_routers:
+            router_name = router.get('metadata', {}).get('name', 'unknown')
+            router_status = router.get('status', {})
+            router_phase = router_status.get('phase', 'Unknown')
+            
+            if router_phase == 'Running':
+                ready_routers.append(router_name)
+            else:
+                not_ready_routers.append(f"{router_name}({router_phase})")
+                
+        total_routers = len(child_routers)
+        ready_router_count = len(ready_routers)
+        
+        all_ready = (ready_router_count == total_routers)
+        
+        if all_ready:
+            success_message = f"All {total_routers} routers are ready"
+            await update_status(parent_name, namespace, parent_kind, "Ready", success_message)
+        else:
+            status_message = f"Waiting for: {', '.join(not_ready_routers)} ({ready_router_count}/{total_routers} ready)"
+            await update_status(parent_name, namespace, parent_kind, "Creating", status_message)
+            
+    except Exception as e:
+        logger.error(f"Failed to check parent status for {parent_name}: {e}")

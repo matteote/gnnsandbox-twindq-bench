@@ -1,0 +1,103 @@
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: networkoperator-rolebinding-cluster
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin
+subjects:
+  - kind: ServiceAccount
+    name: networkoperator-account
+    namespace: "automation"
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{NETWORK_OPERATOR}}
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      application: {{NETWORK_OPERATOR}}
+  template:
+    metadata:
+      labels:
+        application: {{NETWORK_OPERATOR}}
+    spec:
+      serviceAccountName: networkoperator-account
+      containers:
+      - name: {{NETWORK_OPERATOR}}
+        image: {{GOOGLE_REGION}}-docker.pkg.dev/{{GOOGLE_PROJECT}}/{{GOOGLE_REPO}}/networkoperator:latest
+        imagePullPolicy: Always
+        env:
+        - name: BASEDIR
+          value: "/operator"
+        - name: GOOGLE_ORG_NAME
+          value: "{{GOOGLE_ORG_NAME}}"
+        - name: GOOGLE_PROJECT
+          value: {{GOOGLE_PROJECT}}
+        - name: GOOGLE_PROJECT_NUMBER
+          value: "{{GOOGLE_PROJECT_NUMBER}}"
+        - name: GOOGLE_REGION
+          value: {{GOOGLE_REGION}}
+        - name: GOOGLE_ZONE
+          value: {{GOOGLE_ZONE}}
+        - name: GOOGLE_VM_USER
+          value: {{GOOGLE_VM_USER}}
+        - name: NETWORK_AGENT_FILE
+          value: "/operator/networkagent.json"
+        - name: FREE5GC
+          value: "yes"
+        - name: VPN
+          value: "yes"
+        - name: GRAPH
+          value: "yes"
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{GIT_OPERATOR}}
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      application: {{GIT_OPERATOR}}
+  template:
+    metadata:
+      labels:
+        application: {{GIT_OPERATOR}}
+    spec:
+      serviceAccountName: networkoperator-account
+      containers:
+      - name: {{GIT_OPERATOR}}
+        image: {{GOOGLE_REGION}}-docker.pkg.dev/{{GOOGLE_PROJECT}}/{{GOOGLE_REPO}}/networkoperator:latest
+        imagePullPolicy: Always
+        env:
+        - name: BASEDIR
+          value: "/operator"
+        - name: GOOGLE_ORG_NAME
+          value: "{{GOOGLE_ORG_NAME}}"
+        - name: GOOGLE_PROJECT
+          value: {{GOOGLE_PROJECT}}
+        - name: GOOGLE_REGION
+          value: {{GOOGLE_REGION}}
+        - name: GOOGLE_ZONE
+          value: {{GOOGLE_ZONE}}
+        - name: GOOGLE_VM_USER
+          value: {{GOOGLE_VM_USER}}
+        - name: NETWORK_AGENT_FILE
+          value: "/operator/networkagent.json"
+        - name: WEBAPPS_LOGIN
+          value: {{WEBAPPS_LOGIN}}
+        - name: WEBAPPS_PWD
+          value: "{{WEBAPPS_PWD}}"
+        - name: GITEA
+          value: "yes"

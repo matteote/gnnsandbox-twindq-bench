@@ -1,0 +1,90 @@
+---
+- name: Manage Device Container
+  hosts: all
+  become: true
+  gather_facts: no
+  vars:
+    veth_host: "{{ device_name[:8] }}-h"  # Truncate to 8 chars + "-h" = 10 chars
+    veth_device: "{{ device_name[:8] }}-c"   # Truncate to 8 chars + "-c" = 10 chars
+    container_name: "{{ device_name }}"
+    device_image: "device:latest"
+
+  tasks:
+    - name: Debug operation
+      debug:
+        msg: "Performing {{ operation }} on Device {{ device_name }}"
+
+    - block:
+
+        - name: Create Device container
+          community.docker.docker_container:
+            name: "{{ container_name }}"
+            image: "{{ device_image }}"
+            hostname: "{{ device_name }}"
+            network_mode: "none"
+            privileged: true
+            capabilities:
+              - NET_ADMIN
+          register: container_result
+
+        - name: Create veth pair and attach to container
+          shell: |
+            # Create veth pair (ignore if already exists)
+            ip link add {{ veth_host }} type veth peer name {{ veth_device }} || true
+            
+            # Configure host side
+            ip link set {{ veth_host }} master {{ network_name }}
+            ip link set {{ veth_host }} up
+
+            # Attach the other end to the Device container
+            pid=$(docker inspect -f '{% raw %}{{.State.Pid}}{% endraw %}' {{ container_name }})
+            ip link set {{ veth_device }} netns $pid
+
+            # Configure container side
+            docker exec {{ container_name }} ip link set {{ veth_device }} name eth0
+            docker exec {{ container_name }} ip link set eth0 up
+          register: veth_result
+
+        - name: Configure VLAN interface
+          shell: |
+            docker exec {{ container_name }} ip link add link eth0 name eth0.{{ vlan }} type vlan id {{ vlan }}
+            docker exec {{ container_name }} ip addr add {{ ip_address }}/24 dev eth0.{{ vlan }}
+            docker exec {{ container_name }} ip link set eth0.{{ vlan }} up
+          when: vlan != ''
+
+        - name: Configure non-VLAN interface
+          shell: |
+            docker exec {{ container_name }} ip addr add {{ ip_address }}/24 dev eth0
+          when: vlan == ''
+
+        - name: Configure default gateway
+          shell: |
+            docker exec {{ container_name }} ip route add default via {{ gateway }}
+          when: gateway != ''
+
+        - name: Set operation result
+          set_fact:
+            operation_result: "Device {{ device_name }} created successfully"
+
+      when: operation == "create"
+
+    - block:
+        - name: Stop and remove Device container
+          shell: "docker rm -f {{ container_name }}"
+          register: remove_result
+          failed_when: false
+
+        - name: Remove veth pair (host side)
+          shell: "ip link delete {{ veth_host }}"
+          register: veth_remove_result
+          failed_when: false
+
+        - name: Set operation result
+          set_fact:
+            operation_result: "Device {{ device_name }} removed successfully"
+
+      when: operation == "delete"
+
+    - name: Display result
+      debug:
+        msg: "{{ operation_result }}"

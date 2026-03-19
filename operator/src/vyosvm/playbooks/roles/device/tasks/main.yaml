@@ -1,0 +1,41 @@
+# check if images exists
+- name: Check if Device image exists
+  shell: docker images -q {{ device_image }}
+  register: image_check
+  changed_when: false
+
+- name: Create build directory
+  file:
+    path: "{{ build_context }}"
+    state: directory
+    mode: '0777'
+  when: image_check.stdout == ""
+
+- name: Copy Dockerfile to target
+  copy:
+    src: files/Dockerfile
+    dest: "{{ build_context }}/Dockerfile"
+    mode: '0644'
+  when: image_check.stdout == ""
+
+- name: Copy entrypoint script to target
+  copy:
+    src: files/entrypoint.sh
+    dest: "{{ build_context }}/entrypoint.sh"
+    mode: '0755'
+  when: image_check.stdout == ""
+
+- name: Build Device image using tar context
+  shell: |
+    cd {{ build_context }} && tar -czf - . | docker build -t {{ device_image }} -
+  when: image_check.stdout == ""
+
+- name: Display build result
+  debug:
+    msg: "Device image already exists"
+  when: image_check.stdout != ""
+
+- name: Display build result
+  debug:
+    msg: "Device image built successfully"
+  when: image_check.stdout == ""

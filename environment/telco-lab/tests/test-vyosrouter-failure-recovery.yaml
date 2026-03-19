@@ -1,0 +1,59 @@
+---
+# VyOSRouter Failure Recovery Test
+# Tests the transient error handling and idempotent retry logic added to lifecycle.py
+#
+# Scenarios tested:
+#   1. Dependency wait  - Router created before network is ready (tests Pending retry)
+#   2. Container exists - Simulates partial creation from previous failed attempt
+#   3. State recovery   - Router goes Failed then recovers to Running
+#
+# Usage:
+#   # Step 1: Apply this file (creates the network and router)
+#   kubectl apply -f test-vyosrouter-failure-recovery.yaml
+#
+#   # Step 2: Watch the lifecycle in real time
+#   kubectl get vyosrouter test-recovery-router -n automation -w
+#
+#   # Step 3: Follow the operator logs
+#   kubectl logs -n automation deployment/operator -f | grep test-recovery-router
+
+# Network for the router to attach to
+apiVersion: google.dev/v1
+kind: LinuxNetwork
+metadata:
+  name: test-recovery-net
+  namespace: automation
+  labels:
+    test: failure-recovery
+spec:
+  name: test-recovery
+  network_type: custom
+  subnet: 10.99.1.0/24
+  gateway: 10.99.1.1
+  bandwidth: 1gbit
+  description: "Network for failure recovery testing"
+
+---
+# Router that depends on the above network
+# Apply this together with the network to test the Pending->retry->Running flow
+apiVersion: google.dev/v1
+kind: VyOSRouter
+metadata:
+  name: test-recovery-router
+  namespace: automation
+  labels:
+    test: failure-recovery
+spec:
+  hostname: recovery-router
+  router_id: 10.99.1.100
+  image: vyos:1.5
+
+  interfaces:
+    - name: eth0
+      address: 10.99.1.100/24
+      linux_network: test-recovery-net
+      description: "Test recovery interface"
+      enabled: true
+
+  protocols: {}
+  services: {}

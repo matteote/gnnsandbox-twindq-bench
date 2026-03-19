@@ -1,0 +1,2 @@
+from endpoints.socketendpoint import SocketEndpoint
+from endpoints.restendpoint import RestEndpoint

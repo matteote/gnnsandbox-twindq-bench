@@ -1,0 +1,40 @@
+# Copyright 2024-2025 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+info:
+  version: 1.0.2
+  description: NRF initial local configuration
+
+configuration:
+  MongoDBName: free5gc # database name in MongoDB
+  MongoDBUrl: mongodb://db:27017 # a valid URL of the mongodb
+  sbi: # Service-based interface information
+    scheme: http # the protocol for sbi (http or https)
+    registerIPv4: nrf.free5gc.org # IP used to serve NFs or register to another NRF
+    bindingIPv4: nrf.free5gc.org  # IP used to bind the service
+    port: 8000 # port used to bind the service
+    tls: # the local path of TLS key
+      pem: cert/nrf.pem # NRF TLS Certificate
+      key: cert/nrf.key # NRF TLS Private key
+  DefaultPlmnId:
+    mcc: 208 # Mobile Country Code (3 digits string, digit: 0~9)
+    mnc: 93 # Mobile Network Code (2 or 3 digits string, digit: 0~9)
+  serviceNameList: # the SBI services provided by this NRF, refer to TS 29.510
+    - nnrf-nfm # Nnrf_NFManagement service
+    - nnrf-disc # Nnrf_NFDiscovery service
+
+logger: # log output setting
+  enable: true # true or false
+  level: info # how detailed to output, value: trace, debug, info, warn, error, fatal, panic
+  reportCaller: false # enable the caller report or not, value: true or false

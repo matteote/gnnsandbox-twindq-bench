@@ -1,0 +1,106 @@
+---
+- hosts: all
+  become: true
+  gather_facts: true
+
+  tasks:
+    - name: Get bridge operational state
+      shell: |
+        # Check if bridge exists and get state
+        if brctl show {{ network_name }} >/dev/null 2>&1; then
+          # Get bridge details
+          STATE=$(cat /sys/class/net/{{ network_name }}/operstate 2>/dev/null || echo "unknown")
+          MTU=$(cat /sys/class/net/{{ network_name }}/mtu 2>/dev/null || echo "1500")
+          MAC=$(cat /sys/class/net/{{ network_name }}/address 2>/dev/null || echo "")
+          IP=$(ip -4 addr show {{ network_name }} | grep inet | awk '{print $2}' | cut -d/ -f1 || echo "")
+          
+          # Get bridge statistics
+          RX_PACKETS=$(cat /sys/class/net/{{ network_name }}/statistics/rx_packets 2>/dev/null || echo "0")
+          TX_PACKETS=$(cat /sys/class/net/{{ network_name }}/statistics/tx_packets 2>/dev/null || echo "0")
+          RX_BYTES=$(cat /sys/class/net/{{ network_name }}/statistics/rx_bytes 2>/dev/null || echo "0")
+          TX_BYTES=$(cat /sys/class/net/{{ network_name }}/statistics/tx_bytes 2>/dev/null || echo "0")
+          RX_ERRORS=$(cat /sys/class/net/{{ network_name }}/statistics/rx_errors 2>/dev/null || echo "0")
+          TX_ERRORS=$(cat /sys/class/net/{{ network_name }}/statistics/tx_errors 2>/dev/null || echo "0")
+          
+          echo "EXISTS=true"
+          echo "STATE=${STATE}"
+          echo "MTU=${MTU}"
+          echo "MAC=${MAC}"
+          echo "IP=${IP}"
+          echo "RX_PACKETS=${RX_PACKETS}"
+          echo "TX_PACKETS=${TX_PACKETS}"
+          echo "RX_BYTES=${RX_BYTES}"
+          echo "TX_BYTES=${TX_BYTES}"
+          echo "RX_ERRORS=${RX_ERRORS}"
+          echo "TX_ERRORS=${TX_ERRORS}"
+        else
+          echo "EXISTS=false"
+        fi
+      register: bridge_status_raw
+      changed_when: false
+
+    - name: Parse bridge status
+      set_fact:
+        bridge_exists: "{{ 'EXISTS=true' in bridge_status_raw.stdout }}"
+        bridge_state: "{{ (bridge_status_raw.stdout | regex_search('STATE=([^\\n]+)', '\\1') or ['unknown']) | first }}"
+        bridge_mtu: "{{ (bridge_status_raw.stdout | regex_search('MTU=([^\\n]+)', '\\1') or ['1500']) | first | int }}"
+        bridge_mac: "{{ (bridge_status_raw.stdout | regex_search('MAC=([^\\n]+)', '\\1') or ['']) | first }}"
+        bridge_ip: "{{ (bridge_status_raw.stdout | regex_search('IP=([^\\n]*)', '\\1') or ['']) | first }}"
+        bridge_metrics:
+          rx_packets: "{{ (bridge_status_raw.stdout | regex_search('RX_PACKETS=([^\\n]+)', '\\1') or ['0']) | first | int }}"
+          tx_packets: "{{ (bridge_status_raw.stdout | regex_search('TX_PACKETS=([^\\n]+)', '\\1') or ['0']) | first | int }}"
+          rx_bytes: "{{ (bridge_status_raw.stdout | regex_search('RX_BYTES=([^\\n]+)', '\\1') or ['0']) | first | int }}"
+          tx_bytes: "{{ (bridge_status_raw.stdout | regex_search('TX_BYTES=([^\\n]+)', '\\1') or ['0']) | first | int }}"
+          rx_errors: "{{ (bridge_status_raw.stdout | regex_search('RX_ERRORS=([^\\n]+)', '\\1') or ['0']) | first | int }}"
+          tx_errors: "{{ (bridge_status_raw.stdout | regex_search('TX_ERRORS=([^\\n]+)', '\\1') or ['0']) | first | int }}"
+
+    - name: Get attached veth pairs
+      shell: |
+        brctl show {{ network_name }} | tail -n +2 | awk '{print $NF}' | grep -E '^[a-zA-Z0-9]'
+      register: attached_veths
+      when: bridge_exists | bool
+      changed_when: false
+      failed_when: false
+
+    - name: Get veth pair details
+      shell: |
+        # For each veth attached to bridge, emit one JSON object per line
+        {% if attached_veths.stdout_lines is defined %}
+        {% for veth in attached_veths.stdout_lines %}
+        if [ -n "{{ veth }}" ]; then
+          # Get host-side veth state
+          HOST_STATE=$(cat /sys/class/net/{{ veth }}/operstate 2>/dev/null || echo "unknown")
+
+          # Get TC bandwidth limit if configured
+          BW_LIMIT=$(tc -j class show dev {{ veth }} 2>/dev/null | jq -r '.[0].options.rate // "none"' 2>/dev/null || echo "none")
+
+          # Get veth statistics
+          RX_PACKETS=$(cat /sys/class/net/{{ veth }}/statistics/rx_packets 2>/dev/null || echo "0")
+          TX_PACKETS=$(cat /sys/class/net/{{ veth }}/statistics/tx_packets 2>/dev/null || echo "0")
+          RX_BYTES=$(cat /sys/class/net/{{ veth }}/statistics/rx_bytes 2>/dev/null || echo "0")
+          TX_BYTES=$(cat /sys/class/net/{{ veth }}/statistics/tx_bytes 2>/dev/null || echo "0")
+
+          echo "{\"VETH\":\"{{ veth }}\",\"STATE\":\"${HOST_STATE}\",\"BW\":\"${BW_LIMIT}\",\"RX_PKTS\":${RX_PACKETS},\"TX_PKTS\":${TX_PACKETS},\"RX_BYTES\":${RX_BYTES},\"TX_BYTES\":${TX_BYTES}}"
+        fi
+        {% endfor %}
+        {% endif %}
+      register: veth_details_raw
+      when: bridge_exists | bool
+      changed_when: false
+      failed_when: false
+
+    - name: Parse veth details
+      set_fact:
+        veth_pairs: "{{ veth_details_raw.stdout_lines | default([]) | select | map('from_json') | list }}"
+      when: bridge_exists | bool
+
+    - name: Display bridge status
+      debug:
+        msg:
+          exists: "{{ bridge_exists }}"
+          state: "{{ bridge_state }}"
+          mtu: "{{ bridge_mtu }}"
+          mac: "{{ bridge_mac }}"
+          ip: "{{ bridge_ip }}"
+          metrics: "{{ bridge_metrics }}"
+          veth_pairs: "{{ veth_pairs | default([]) }}"

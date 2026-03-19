@@ -1,0 +1,1189 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: traffictests.google.dev
+  labels:
+    type: network
+spec:
+  scope: Namespaced
+  group: google.dev
+  names:
+    kind: TrafficTest
+    plural: traffictests
+    singular: traffictest
+    shortNames:
+      - tt
+  versions:
+    - name: v1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          description: |
+            TrafficTest defines comprehensive network traffic testing scenarios between devices for performance validation and network characterization.
+            
+            The TrafficTest resource enables:
+            - End-to-end connectivity validation between customer devices
+            - Network performance measurement (throughput, latency, packet loss)
+            - Service level agreement (SLA) verification and compliance testing
+            - Network capacity planning and bandwidth utilization analysis
+            - Quality of Service (QoS) policy validation and traffic prioritization testing
+            - Real-world traffic pattern simulation for network stress testing
+            
+            Traffic Test Architecture:
+            - Source and destination devices must be connected through the network topology
+            - Tests can traverse multiple network segments including L3VPN tunnels
+            - Supports both TCP and UDP protocols for different application scenarios
+            - Configurable traffic patterns simulate real-world application behavior
+            - Metrics collection enables performance analysis and trend monitoring
+            
+            Use Cases:
+            - Customer onboarding: Validate connectivity and performance before service activation
+            - SLA compliance: Verify contracted bandwidth and latency requirements
+            - Network troubleshooting: Isolate performance issues and identify bottlenecks
+            - Capacity planning: Understand network utilization and plan for growth
+            - QoS validation: Ensure traffic prioritization policies work as designed
+            - Change validation: Test network performance after configuration changes
+          required:
+            - spec
+          properties:
+            spec:
+              type: object
+              required:
+                - source_devices
+                - destination_device
+                - protocol
+              properties:
+                source_devices:
+                  type: array
+                  minItems: 1
+                  items:
+                    type: string
+                  description: |
+                    List of source devices that will initiate traffic tests to the destination.
+                    All sources use the same traffic pattern, bandwidth, and configuration.
+                    
+                    Multi-Source Use Cases:
+                    - Load testing: Multiple clients sending to single server to test aggregate capacity
+                    - Hub testing: Multiple spoke sites sending to central hub simultaneously
+                    - Aggregate bandwidth measurement: Combined throughput from multiple sources
+                    - Network stress testing: Simulate realistic multi-client scenarios
+                    - Capacity planning: Understand how network handles concurrent traffic flows
+                    
+                    Device Selection:
+                    - Each device must reference a Device resource defined in the same namespace
+                    - All devices must have network connectivity and traffic generation capabilities
+                    - Devices should be reachable from the destination through the network
+                    - Consider network topology when selecting multiple sources
+                    
+                    Traffic Pattern:
+                    - All sources use identical traffic configuration (pattern, bandwidth, duration)
+                    - Traffic generators run independently on each source
+                    - Metrics collected per-source and aggregated for total view
+                    - Each source maintains separate iperf3 connection to destination
+                    
+                    Common Source Device Types:
+                    - Customer CPE routers for end-to-end connectivity testing
+                    - Branch office devices for site-to-site performance validation
+                    - Test probes for network monitoring and performance measurement
+                    - Application servers for service-specific traffic simulation
+                    
+                    Examples:
+                    - ["customer-a-cpe"] - Single source (equivalent to previous single-device behavior)
+                    - ["branch-1", "branch-2", "branch-3"] - Three branch offices testing hub
+                    - ["probe-east", "probe-west", "probe-central"] - Geographic distribution test
+                    - ["client-1", "client-2", "client-3", "client-4", "client-5"] - Load testing with 5 clients
+                destination_device:
+                  type: string
+                  description: |
+                    Name of the destination device that will receive the traffic test.
+                    
+                    Device Selection:
+                    - Must reference a Device resource defined in the same namespace
+                    - Should be reachable from the source device through the network
+                    - Can be another CPE, server, or dedicated test endpoint
+                    - Location determines the network path and segments being tested
+                    
+                    Network Path Considerations:
+                    - Different destinations test different network segments and policies
+                    - Hub-spoke topologies: Test spoke-to-hub and spoke-to-spoke connectivity
+                    - Multi-site networks: Validate inter-site communication paths
+                    - Internet access: Test connectivity to external services and applications
+                    
+                    Examples:
+                    - "customer-b-cpe" - Customer B's CPE for inter-customer testing
+                    - "datacenter-server" - Central datacenter service endpoint
+                    - "internet-gateway" - Internet access validation endpoint
+                protocol:
+                  type: string
+                  enum:
+                    - TCP
+                    - UDP
+                  description: |
+                    Network protocol to use for the traffic test, determines connection behavior and reliability characteristics.
+                    
+                    Protocol Selection Guidelines:
+                    
+                    TCP (Transmission Control Protocol):
+                    - Connection-oriented protocol with reliability guarantees
+                    - Automatic retransmission of lost packets
+                    - Flow control and congestion management
+                    - Suitable for applications requiring data integrity
+                    - Use cases: Web traffic, file transfers, database connections, email
+                    - Provides accurate throughput measurements under congestion
+                    - Higher overhead due to connection establishment and acknowledgments
+                    
+                    UDP (User Datagram Protocol):
+                    - Connectionless protocol with minimal overhead
+                    - No automatic retransmission or flow control
+                    - Lower latency due to reduced protocol overhead
+                    - Suitable for real-time applications and streaming
+                    - Use cases: Voice/video calls, gaming, DNS queries, streaming media
+                    - Better for latency-sensitive applications and jitter measurement
+                    - May not fully utilize available bandwidth under ideal conditions
+                    
+                    Selection Criteria:
+                    - Choose TCP for bandwidth and reliability testing
+                    - Choose UDP for latency, jitter, and real-time application testing
+                    - Consider the actual applications that will use the network path
+                port:
+                  type: integer
+                  minimum: 1
+                  maximum: 65535
+                  description: |
+                    TCP or UDP port number for the traffic test destination.
+                    
+                    Port Selection Considerations:
+                    - Must be available and not blocked by firewalls or security policies
+                    - Should match the intended application or service being tested
+                    - Consider QoS policies that may prioritize specific port ranges
+                    - Avoid well-known system ports (1-1023) unless specifically testing those services
+                    
+                    Common Port Ranges:
+                    - 80, 443: HTTP/HTTPS web traffic simulation
+                    - 22: SSH administrative traffic testing
+                    - 53: DNS query simulation
+                    - 5060-5061: SIP voice traffic testing
+                    - 1024-65535: User/application ports for general testing
+                    
+                    QoS and Firewall Impact:
+                    - Some ports may receive different QoS treatment
+                    - Firewall rules may allow/block specific ports
+                    - Port selection can affect traffic classification and prioritization
+                    
+                    Examples:
+                    - 80: Web traffic simulation
+                    - 5001: iperf3 default port for bandwidth testing
+                    - 8080: Alternative HTTP port for testing
+                duration:
+                  type: integer
+                  minimum: 1
+                  description: |
+                    Duration of the traffic test in seconds, determines test length and measurement accuracy.
+                    
+                    Duration Planning Guidelines:
+                    - Longer tests provide more accurate and stable measurements
+                    - Consider network conditions and traffic patterns during test period
+                    - Account for test startup and stabilization time
+                    - Balance measurement accuracy with resource utilization
+                    
+                    Recommended Durations:
+                    - Quick connectivity test: 10-30 seconds
+                    - Basic performance test: 60-300 seconds (1-5 minutes)
+                    - Comprehensive analysis: 600-1800 seconds (10-30 minutes)
+                    - Long-term monitoring: 3600+ seconds (1+ hours)
+                    
+                    Factors Affecting Duration:
+                    - Network stability: Unstable networks need longer tests
+                    - Traffic patterns: Periodic patterns need multiple cycles
+                    - Measurement precision: Longer tests reduce statistical variance
+                    - Resource constraints: Consider impact on production traffic
+                    
+                    Examples:
+                    - 60: One-minute basic connectivity test
+                    - 300: Five-minute performance validation
+                    - 1800: Thirty-minute comprehensive analysis
+                bandwidth:
+                  type: string
+                  pattern: '^[0-9]+(Kbps|Mbps|Gbps)$'
+                  description: |
+                    Target bandwidth for the traffic test, defines the intended traffic rate.
+                    
+                    Bandwidth Specification:
+                    - Kbps: Kilobits per second (1,000 bits/second)
+                    - Mbps: Megabits per second (1,000,000 bits/second)  
+                    - Gbps: Gigabits per second (1,000,000,000 bits/second)
+                    
+                    Bandwidth Selection Guidelines:
+                    - Should not exceed the physical interface capacity
+                    - Consider contracted service levels and SLA requirements
+                    - Account for protocol overhead (TCP ~5-10%, UDP ~1-2%)
+                    - Leave headroom for other traffic and network overhead
+                    
+                    Common Bandwidth Targets:
+                    - 1Mbps-10Mbps: Small office/home office connections
+                    - 10Mbps-100Mbps: Business broadband and branch offices
+                    - 100Mbps-1Gbps: Enterprise connections and data centers
+                    - 1Gbps+: High-performance computing and backbone links
+                    
+                    Testing Strategies:
+                    - Start with lower bandwidth and increase gradually
+                    - Test at contracted bandwidth to verify SLA compliance
+                    - Test above contracted bandwidth to find actual capacity
+                    - Use multiple concurrent tests to simulate real-world usage
+                    
+                    Examples:
+                    - "10Mbps": Small business connection test
+                    - "100Mbps": Standard enterprise connection
+                    - "1Gbps": High-speed data center link
+                pattern_type:
+                  type: string
+                  enum:
+                    - constant
+                    - periodic
+                    - burst
+                    - poisson
+                  default: constant
+                  description: |
+                    Type of traffic pattern to generate, simulates different application behaviors and network conditions.
+                    
+                    Traffic Pattern Types:
+                    
+                    "constant": Steady, continuous traffic at fixed rate
+                    - Maintains consistent bandwidth throughout test duration
+                    - Ideal for baseline performance measurement and capacity testing
+                    - Simulates applications with steady data transfer (file downloads, streaming)
+                    - Provides stable measurements for throughput and latency analysis
+                    - Use cases: Bandwidth validation, network capacity planning, SLA verification
+                    
+                    "periodic": Cyclical traffic with configurable wave patterns
+                    - Traffic varies in regular cycles (sine, square, sawtooth waves)
+                    - Simulates applications with predictable usage patterns
+                    - Tests network behavior under varying load conditions
+                    - Useful for QoS testing and congestion management validation
+                    - Use cases: Business hour simulation, batch processing, scheduled backups
+                    
+                    "burst": High-intensity traffic bursts with idle periods
+                    - Alternates between high-rate bursts and low-rate idle periods
+                    - Simulates bursty applications and user behavior patterns
+                    - Tests network buffer management and burst handling capabilities
+                    - Reveals performance under sudden traffic spikes
+                    - Use cases: Web browsing, email, interactive applications, database queries
+                    
+                    "poisson": Stochastic traffic based on Poisson arrival process
+                    - Random user arrivals following statistical distribution
+                    - Simulates realistic user behavior and session patterns
+                    - Tests network performance under unpredictable load variations
+                    - Models concurrent user sessions and think times
+                    - Use cases: Web applications, user session simulation, realistic load testing
+                    
+                    Selection Guidelines:
+                    - Use "constant" for baseline measurements and capacity validation
+                    - Use "periodic" for predictable load variations and QoS testing
+                    - Use "burst" for applications with intermittent high-bandwidth needs
+                    - Use "poisson" for realistic user behavior and application simulation
+                pattern_config:
+                  type: object
+                  description: |
+                    Configuration parameters specific to the selected traffic pattern type.
+                    
+                    Pattern-Specific Configuration:
+                    - Different pattern types require different configuration parameters
+                    - Parameters control the shape, timing, and characteristics of traffic generation
+                    - Proper configuration is essential for realistic traffic simulation
+                    - Invalid combinations may result in test failure or unexpected behavior
+                    
+                    Configuration Validation:
+                    - Only parameters relevant to the selected pattern_type are used
+                    - Unused parameters are ignored but should be omitted for clarity
+                    - Required parameters depend on the pattern type selected
+                    - Default values are applied when optional parameters are omitted
+                  properties:
+                    wave_type:
+                      type: string
+                      enum:
+                        - sine
+                        - square
+                        - sawtooth
+                      description: |
+                        Wave shape for periodic traffic patterns, determines how traffic varies over time.
+                        
+                        Wave Types (used with pattern_type: "periodic"):
+                        
+                        "sine": Smooth sinusoidal wave pattern
+                        - Gradual transitions between minimum and maximum rates
+                        - Natural, smooth traffic variations
+                        - Good for simulating organic usage patterns
+                        - Minimal sudden changes, easier on network buffers
+                        - Use cases: Daily usage cycles, seasonal variations, gradual load changes
+                        
+                        "square": Rectangular wave with sharp transitions
+                        - Abrupt changes between high and low traffic rates
+                        - Tests network response to sudden load changes
+                        - Simulates on/off application behavior
+                        - Stresses network buffer management and QoS policies
+                        - Use cases: Batch processing, scheduled tasks, binary application states
+                        
+                        "sawtooth": Linear ramp up followed by sharp drop
+                        - Gradual increase to peak followed by immediate return to base
+                        - Simulates accumulating load with periodic resets
+                        - Tests network behavior under gradually increasing load
+                        - Useful for capacity planning and threshold testing
+                        - Use cases: Queue buildup and drain cycles, progressive loading
+                        
+                        Selection Guidelines:
+                        - Choose "sine" for smooth, realistic traffic variations
+                        - Choose "square" for testing network response to sudden changes
+                        - Choose "sawtooth" for progressive loading and capacity testing
+                    period:
+                      type: integer
+                      minimum: 1
+                      description: |
+                        Period duration in seconds for periodic traffic patterns.
+                        
+                        Period Configuration (used with pattern_type: "periodic"):
+                        - Defines the time for one complete cycle of the wave pattern
+                        - Shorter periods create more frequent traffic variations
+                        - Longer periods create slower, more gradual changes
+                        - Should be appropriate for the application being simulated
+                        
+                        Period Selection Guidelines:
+                        - Business applications: 3600 seconds (1 hour) for daily cycles
+                        - Interactive applications: 60-300 seconds for user session cycles
+                        - Batch processing: 1800-7200 seconds (30 minutes to 2 hours)
+                        - Real-time applications: 1-60 seconds for rapid variations
+                        
+                        Considerations:
+                        - Period should be shorter than total test duration for meaningful results
+                        - Multiple complete cycles provide better measurement accuracy
+                        - Very short periods may not allow network to stabilize between changes
+                        - Very long periods may not complete full cycles during test duration
+                        
+                        Examples:
+                        - 60: One-minute cycles for rapid testing
+                        - 300: Five-minute cycles for moderate variations
+                        - 3600: One-hour cycles for daily pattern simulation
+                    base_rate:
+                      type: string
+                      pattern: '^[0-9]+(Kbps|Mbps|Gbps)$'
+                      description: |
+                        Base traffic rate for periodic patterns, defines the minimum or center point of traffic variation.
+                        
+                        Base Rate Configuration (used with pattern_type: "periodic"):
+                        - Represents the baseline or average traffic rate
+                        - Traffic oscillates around this base rate according to the wave pattern
+                        - Should be set considering network capacity and other traffic
+                        - Combined with amplitude to determine actual traffic range
+                        
+                        Base Rate Planning:
+                        - Set to expected average traffic rate for realistic simulation
+                        - Consider contracted bandwidth and SLA requirements
+                        - Account for other traffic sharing the same network path
+                        - Ensure base_rate + amplitude doesn't exceed interface capacity
+                        
+                        Relationship with Amplitude:
+                        - Sine wave: Traffic varies from (base_rate - amplitude) to (base_rate + amplitude)
+                        - Square wave: Alternates between base_rate and (base_rate + amplitude)
+                        - Sawtooth: Ramps from base_rate to (base_rate + amplitude)
+                        
+                        Examples:
+                        - "50Mbps": 50 Mbps baseline for enterprise connection
+                        - "10Mbps": 10 Mbps baseline for branch office
+                        - "500Mbps": 500 Mbps baseline for data center link
+                    amplitude:
+                      type: string
+                      pattern: '^[0-9]+(Kbps|Mbps|Gbps)$'
+                      description: |
+                        Traffic variation amplitude for periodic patterns, defines the range of traffic fluctuation.
+                        
+                        Amplitude Configuration (used with pattern_type: "periodic"):
+                        - Determines how much traffic varies from the base rate
+                        - Larger amplitude creates more dramatic traffic variations
+                        - Should be realistic for the application being simulated
+                        - Must not cause total traffic to exceed interface capacity
+                        
+                        Amplitude Effects by Wave Type:
+                        - Sine wave: ±amplitude variation around base_rate
+                        - Square wave: +amplitude above base_rate during high periods
+                        - Sawtooth: +amplitude peak above base_rate
+                        
+                        Amplitude Selection:
+                        - Small amplitude (10-25% of base_rate): Subtle variations
+                        - Medium amplitude (25-50% of base_rate): Moderate variations
+                        - Large amplitude (50-100% of base_rate): Dramatic variations
+                        
+                        Validation:
+                        - Ensure base_rate + amplitude ≤ interface capacity
+                        - Ensure base_rate - amplitude ≥ 0 (for sine waves)
+                        - Consider impact on other network traffic
+                        
+                        Examples:
+                        - "25Mbps": 25 Mbps variation for moderate fluctuation
+                        - "100Mbps": 100 Mbps variation for high dynamic range
+                        - "5Mbps": 5 Mbps variation for subtle changes
+                    burst_duration:
+                      type: integer
+                      minimum: 1
+                      description: |
+                        Duration of high-rate burst periods in seconds.
+                        
+                        Burst Duration Configuration (used with pattern_type: "burst"):
+                        - Defines how long each high-traffic burst lasts
+                        - Shorter bursts simulate quick data transfers or user interactions
+                        - Longer bursts simulate sustained high-bandwidth applications
+                        - Should be realistic for the application being modeled
+                        
+                        Duration Guidelines:
+                        - Web page loads: 1-5 seconds
+                        - File downloads: 10-60 seconds
+                        - Video streaming startup: 5-15 seconds
+                        - Database queries: 1-10 seconds
+                        - Backup operations: 60-300 seconds
+                        
+                        Network Impact:
+                        - Short bursts test network responsiveness and buffer management
+                        - Long bursts test sustained performance and congestion handling
+                        - Very short bursts may not fully utilize available bandwidth
+                        - Very long bursts approach constant traffic behavior
+                        
+                        Relationship with Burst Interval:
+                        - burst_duration should be shorter than burst_interval
+                        - Ratio determines the duty cycle (burst_duration / burst_interval)
+                        - Higher duty cycles create more sustained load
+                        
+                        Examples:
+                        - 5: Five-second bursts for web traffic simulation
+                        - 30: Thirty-second bursts for file transfer simulation
+                        - 120: Two-minute bursts for batch processing simulation
+                    burst_interval:
+                      type: integer
+                      minimum: 1
+                      description: |
+                        Time interval between burst periods in seconds.
+                        
+                        Burst Interval Configuration (used with pattern_type: "burst"):
+                        - Defines the total time from start of one burst to start of the next
+                        - Includes both the burst duration and the idle period
+                        - Determines the frequency of burst events
+                        - Should reflect realistic application usage patterns
+                        
+                        Interval Planning:
+                        - Interactive applications: 10-60 seconds between user actions
+                        - Batch processing: 300-3600 seconds between job runs
+                        - Monitoring systems: 60-300 seconds between data collections
+                        - Backup systems: 3600-86400 seconds between backup runs
+                        
+                        Duty Cycle Calculation:
+                        - Duty cycle = burst_duration / burst_interval
+                        - Low duty cycle (< 0.1): Infrequent, short bursts
+                        - Medium duty cycle (0.1-0.5): Regular burst activity
+                        - High duty cycle (> 0.5): Frequent, sustained bursts
+                        
+                        Network Planning:
+                        - Shorter intervals create more frequent network stress
+                        - Longer intervals allow network to recover between bursts
+                        - Consider impact on other traffic and network stability
+                        
+                        Examples:
+                        - 30: Thirty-second intervals for frequent user activity
+                        - 300: Five-minute intervals for periodic batch jobs
+                        - 3600: One-hour intervals for scheduled maintenance tasks
+                    burst_rate:
+                      type: string
+                      pattern: '^[0-9]+(Kbps|Mbps|Gbps)$'
+                      description: |
+                        Traffic rate during burst periods.
+                        
+                        Burst Rate Configuration (used with pattern_type: "burst"):
+                        - Defines the high traffic rate during active burst periods
+                        - Should represent peak application bandwidth requirements
+                        - Must not exceed interface or network path capacity
+                        - Typically much higher than idle_rate to create meaningful bursts
+                        
+                        Burst Rate Selection:
+                        - Should reflect actual application peak bandwidth needs
+                        - Consider QoS policies that may limit burst traffic
+                        - Account for protocol overhead and network efficiency
+                        - Leave headroom for other traffic and network overhead
+                        
+                        Application Examples:
+                        - Web browsing: 1-10 Mbps for page loads
+                        - File downloads: 10-100 Mbps for large files
+                        - Video streaming: 5-50 Mbps for high-quality content
+                        - Database queries: 1-100 Mbps depending on data volume
+                        - Backup operations: 100-1000 Mbps for bulk data transfer
+                        
+                        Network Considerations:
+                        - High burst rates test network buffer capacity
+                        - May trigger QoS policies and traffic shaping
+                        - Can reveal network bottlenecks and congestion points
+                        - Should be sustainable for the specified burst_duration
+                        
+                        Examples:
+                        - "50Mbps": 50 Mbps bursts for enterprise applications
+                        - "200Mbps": 200 Mbps bursts for high-bandwidth transfers
+                        - "10Mbps": 10 Mbps bursts for moderate application loads
+                    idle_rate:
+                      type: string
+                      pattern: '^[0-9]+(Kbps|Mbps|Gbps)$'
+                      description: |
+                        Traffic rate during idle periods between bursts.
+                        
+                        Idle Rate Configuration (used with pattern_type: "burst"):
+                        - Defines the low traffic rate during periods between bursts
+                        - Represents background or keepalive traffic
+                        - Should be significantly lower than burst_rate to create contrast
+                        - Can be zero for complete idle periods or small for minimal background traffic
+                        
+                        Idle Rate Selection:
+                        - Zero rate: Complete silence between bursts
+                        - Low rate (1-10% of burst_rate): Minimal keepalive traffic
+                        - Moderate rate (10-25% of burst_rate): Background application activity
+                        - Should reflect realistic application behavior during idle periods
+                        
+                        Application Patterns:
+                        - Web browsing: Near zero during page reading
+                        - Interactive applications: Small keepalive packets
+                        - Streaming applications: Minimal control traffic
+                        - Database connections: Periodic heartbeat traffic
+                        - File transfers: Zero between transfer sessions
+                        
+                        Network Impact:
+                        - Very low idle rates allow network to recover between bursts
+                        - Moderate idle rates maintain connection state and routing tables
+                        - Helps distinguish burst behavior from constant traffic patterns
+                        - Affects overall average bandwidth utilization
+                        
+                        Examples:
+                        - "0Kbps": Complete idle periods for maximum contrast
+                        - "1Mbps": Minimal background traffic for connection maintenance
+                        - "5Mbps": Light background activity during idle periods
+                    arrival_rate:
+                      type: number
+                      minimum: 0.1
+                      description: |
+                        User arrival rate per second for Poisson traffic patterns.
+                        
+                        Arrival Rate Configuration (used with pattern_type: "poisson"):
+                        - Defines the average rate at which new user sessions begin
+                        - Based on Poisson distribution for realistic user behavior modeling
+                        - Higher rates create more concurrent sessions and traffic
+                        - Should reflect expected user load and application usage patterns
+                        
+                        Arrival Rate Planning:
+                        - Low rate (0.1-1.0): Light user load, few concurrent sessions
+                        - Medium rate (1.0-10.0): Moderate user load, typical business applications
+                        - High rate (10.0+): Heavy user load, popular web applications
+                        - Consider peak usage periods and capacity planning requirements
+                        
+                        Poisson Distribution Characteristics:
+                        - Random arrival times with specified average rate
+                        - Natural clustering and gaps in user arrivals
+                        - More realistic than fixed-interval user arrivals
+                        - Creates varying load patterns that test network adaptability
+                        
+                        Relationship with Other Parameters:
+                        - Combined with concurrent_users to determine maximum active sessions
+                        - Works with session_duration to control session lifecycle
+                        - Interacts with think_time to model user behavior patterns
+                        - Affects overall traffic volume and network utilization
+                        
+                        Examples:
+                        - 0.5: One new user every 2 seconds on average
+                        - 2.0: Two new users per second for moderate load
+                        - 10.0: Ten new users per second for high-traffic applications
+                concurrent_users:
+                  type: integer
+                  minimum: 1
+                  default: 1
+                  description: |
+                    Maximum number of concurrent user sessions or connections.
+                    
+                    Concurrent Users Configuration:
+                    - Defines the maximum number of simultaneous active sessions
+                    - Limits resource usage and prevents overwhelming the network
+                    - Should reflect realistic application usage and system capacity
+                    - Applies to all pattern types but most relevant for "poisson" patterns
+                    
+                    Concurrency Planning:
+                    - Small applications: 1-10 concurrent users
+                    - Business applications: 10-100 concurrent users  
+                    - Web applications: 100-1000+ concurrent users
+                    - Consider server capacity and network bandwidth limitations
+                    
+                    Impact on Traffic Patterns:
+                    - Higher concurrency creates more aggregate traffic
+                    - Multiple sessions may have different phases (startup, active, idle)
+                    - Concurrent sessions can create traffic bursts during synchronized events
+                    - Affects network resource utilization and congestion behavior
+                    
+                    Resource Considerations:
+                    - Each concurrent user consumes network and system resources
+                    - TCP connections require memory and file descriptors
+                    - UDP sessions require less overhead but still consume bandwidth
+                    - Monitor system limits and network capacity
+                    
+                    Examples:
+                    - 1: Single user session for basic connectivity testing
+                    - 50: Moderate load for business application testing
+                    - 500: High load for web application performance testing
+                session_duration:
+                  type: integer
+                  minimum: 1
+                  description: |
+                    Average duration of individual user sessions in seconds.
+                    
+                    Session Duration Configuration:
+                    - Defines how long each user session remains active
+                    - Used with Poisson arrival patterns to model realistic user behavior
+                    - Affects the lifecycle of connections and overall traffic patterns
+                    - Should reflect typical application usage patterns
+                    
+                    Duration Guidelines by Application Type:
+                    - Web browsing: 300-1800 seconds (5-30 minutes)
+                    - Interactive applications: 600-3600 seconds (10-60 minutes)
+                    - File transfers: 60-600 seconds (1-10 minutes)
+                    - Streaming media: 1800-7200 seconds (30 minutes-2 hours)
+                    - Database sessions: 300-1800 seconds (5-30 minutes)
+                    
+                    Session Lifecycle Impact:
+                    - Shorter sessions create more frequent connection setup/teardown
+                    - Longer sessions create more sustained traffic patterns
+                    - Session duration affects resource utilization and connection pooling
+                    - Influences overall network load and connection state management
+                    
+                    Relationship with Arrival Rate:
+                    - Combined with arrival_rate determines steady-state concurrent users
+                    - Steady state ≈ arrival_rate × session_duration
+                    - Affects network resource planning and capacity requirements
+                    - Influences connection table sizes and memory usage
+                    
+                    Examples:
+                    - 600: Ten-minute sessions for typical business applications
+                    - 1800: Thirty-minute sessions for interactive applications
+                    - 3600: One-hour sessions for long-running processes
+                think_time:
+                  type: integer
+                  minimum: 0
+                  default: 0
+                  description: |
+                    Pause duration between user requests or actions in seconds.
+                    
+                    Think Time Configuration:
+                    - Models realistic user behavior with pauses between actions
+                    - Simulates time users spend reading, processing, or deciding
+                    - Affects traffic patterns and network utilization
+                    - Zero think time creates continuous traffic generation
+                    
+                    Think Time Guidelines by Application:
+                    - Web browsing: 5-30 seconds between page requests
+                    - Interactive applications: 10-60 seconds between actions
+                    - Database applications: 1-10 seconds between queries
+                    - File transfers: 0 seconds for continuous transfer
+                    - Gaming applications: 0.1-2 seconds for real-time interaction
+                    
+                    Impact on Traffic Patterns:
+                    - Longer think times reduce average traffic rate
+                    - Creates more realistic bursty traffic patterns
+                    - Affects concurrent connection requirements
+                    - Influences network resource utilization efficiency
+                    
+                    Network Planning Considerations:
+                    - Think time reduces effective bandwidth utilization
+                    - Allows network to handle more concurrent users
+                    - Creates opportunities for statistical multiplexing
+                    - Affects QoS policy effectiveness and traffic shaping
+                    
+                    Examples:
+                    - 0: Continuous traffic for maximum load testing
+                    - 15: Fifteen-second pauses for web browsing simulation
+                    - 60: One-minute pauses for document review applications
+                metrics_enabled:
+                  type: boolean
+                  default: false
+                  description: |
+                    Enable comprehensive metrics collection during traffic testing.
+                    
+                    Metrics Collection Benefits:
+                    - Real-time performance monitoring and analysis
+                    - Historical data for trend analysis and capacity planning
+                    - SLA compliance verification and reporting
+                    - Network troubleshooting and performance optimization
+                    - Quality of Service (QoS) policy validation
+                    
+                    Collected Metrics Include:
+                    - Throughput: Actual data transfer rates (bits per second)
+                    - Latency: Round-trip time and response delays (milliseconds)
+                    - Packet Loss: Lost packet percentage and retransmission rates
+                    - Jitter: Variation in packet arrival times (milliseconds)
+                    - Connection Statistics: Active connections, setup/teardown rates
+                    
+                    Performance Impact:
+                    - Metrics collection adds minimal overhead to traffic generation
+                    - Storage requirements increase with longer test durations
+                    - Network bandwidth used for metrics transmission to storage
+                    - Consider impact on test accuracy for high-precision measurements
+                    
+                    Use Cases:
+                    - Enable for performance analysis and SLA verification
+                    - Enable for network troubleshooting and optimization
+                    - Disable for simple connectivity testing to reduce overhead
+                    - Enable for long-term monitoring and trend analysis
+                    
+                    Integration:
+                    - Metrics can be stored in time-series database
+                    - Compatible with visualization and alerting tools
+                    - Supports automated analysis and reporting workflows
+                metrics_interval:
+                  type: integer
+                  minimum: 1
+                  default: 5
+                  description: |
+                    Metrics sampling and reporting interval in seconds.
+                    
+                    Sampling Interval Configuration:
+                    - Determines how frequently metrics are collected and stored
+                    - Shorter intervals provide higher resolution data
+                    - Longer intervals reduce storage requirements and overhead
+                    - Should balance measurement precision with resource usage
+                    
+                    Interval Selection Guidelines:
+                    - High-precision testing: 1-2 seconds for detailed analysis
+                    - Standard performance testing: 5-10 seconds for good resolution
+                    - Long-term monitoring: 30-60 seconds for trend analysis
+                    - Capacity planning: 60-300 seconds for aggregate statistics
+                    
+                    Storage and Performance Impact:
+                    - Shorter intervals generate more data points and storage requirements
+                    - Very short intervals may impact test accuracy due to measurement overhead
+                    - Network bandwidth used for metrics transmission increases with frequency
+                    - Database performance affected by ingestion rate
+                    
+                    Data Resolution Considerations:
+                    - Should be shorter than expected performance variations
+                    - Network events may occur faster than sampling interval
+                    - Consider test duration when selecting interval (avoid excessive data)
+                    - Balance between measurement accuracy and system resources
+                    
+                    Examples:
+                    - 1: One-second intervals for high-precision analysis
+                    - 5: Five-second intervals for standard performance testing
+                    - 30: Thirty-second intervals for long-term monitoring
+            status:
+              type: object
+              description: |
+                Current status and runtime information for the traffic test execution.
+                
+                Status Tracking provides:
+                - Real-time test execution phase and progress monitoring
+                - Performance metrics and measurement results per source device
+                - Aggregate metrics across all source devices
+                - Error reporting and troubleshooting information
+                - Test lifecycle management and completion status
+                - Historical data for analysis and reporting
+              properties:
+                source_count:
+                  type: integer
+                  description: |
+                    Total number of source devices participating in the traffic test.
+                    
+                    Provides quick overview of test scale:
+                    - Single source: Traditional point-to-point test
+                    - Multiple sources: Load testing or aggregate capacity measurement
+                    - Useful for capacity planning and resource allocation
+                source_status:
+                  type: object
+                  additionalProperties:
+                    type: object
+                    description: Per-source device status and metrics
+                    properties:
+                      phase:
+                        type: string
+                        enum:
+                          - Pending
+                          - Running
+                          - Completed
+                          - Failed
+                        description: Current phase of this specific source device
+                      message:
+                        type: string
+                        description: Status message specific to this source device
+                      metrics:
+                        type: object
+                        description: Performance metrics for this source device
+                        properties:
+                          throughput_bps:
+                            type: number
+                            description: Throughput from this source in bits per second
+                          latency_ms:
+                            type: number
+                            description: Latency measured from this source in milliseconds
+                          packet_loss_pct:
+                            type: number
+                            description: Packet loss percentage from this source
+                          active_connections:
+                            type: integer
+                            description: Number of active connections from this source
+                          retransmissions:
+                            type: integer
+                            description: Number of retransmissions from this source
+                  description: |
+                    Per-source device status and metrics tracking.
+                    
+                    Structure: Map of device name to status object
+                    - Key: Source device name (e.g., "branch-1")
+                    - Value: Status object with phase, message, and metrics
+                    
+                    Use Cases:
+                    - Identify which sources are performing well vs struggling
+                    - Detect individual source failures without failing entire test
+                    - Compare performance across different network paths
+                    - Debug connectivity issues for specific sources
+                    
+                    Example:
+                    source_status:
+                      branch-1:
+                        phase: Running
+                        metrics:
+                          throughput_bps: 98000000
+                          latency_ms: 12.5
+                      branch-2:
+                        phase: Running
+                        metrics:
+                          throughput_bps: 95000000
+                          latency_ms: 15.2
+                aggregate_metrics:
+                  type: object
+                  description: |
+                    Aggregated performance metrics across all source devices.
+                    
+                    Aggregation Methods:
+                    - Throughput: Sum of all source throughputs (total bandwidth)
+                    - Latency: Average across all sources
+                    - Packet Loss: Average across all sources
+                    - Connections: Sum of all source connections
+                    
+                    Use Cases:
+                    - Total network capacity measurement
+                    - Overall SLA compliance verification
+                    - Aggregate performance trending
+                    - Capacity planning and forecasting
+                  properties:
+                    total_throughput_bps:
+                      type: number
+                      description: |
+                        Sum of throughput from all source devices in bits per second.
+                        Represents total aggregate bandwidth to destination.
+                    avg_latency_ms:
+                      type: number
+                      description: |
+                        Average latency across all source devices in milliseconds.
+                        Provides overall network latency characteristic.
+                    avg_packet_loss_pct:
+                      type: number
+                      description: |
+                        Average packet loss percentage across all source devices.
+                        Indicates overall network quality.
+                    total_connections:
+                      type: integer
+                      description: |
+                        Sum of active connections from all source devices.
+                        Represents total concurrent sessions.
+                phase:
+                  type: string
+                  enum:
+                    - Pending
+                    - Deploying
+                    - Running
+                    - Completed
+                    - Failed
+                    - Stopped
+                  description: |
+                    Current execution phase of the traffic test, indicates test lifecycle state.
+                    
+                    Test Lifecycle Phases:
+                    
+                    "Pending": Test has been created but not yet started
+                    - Initial state after TrafficTest resource creation
+                    - Waiting for operator to process and validate configuration
+                    - Resources not yet allocated or deployed
+                    - No traffic generation or measurement active
+                    
+                    "Deploying": Test infrastructure is being set up
+                    - Operator is creating necessary pods and network connections
+                    - Traffic generation tools being deployed to source/destination devices
+                    - Network connectivity and reachability being verified
+                    - Configuration being applied to test infrastructure
+                    
+                    "Running": Test is actively executing and generating traffic
+                    - Traffic generation is active between source and destination
+                    - Metrics collection and measurement in progress
+                    - Test duration timer is counting down
+                    - Real-time performance data being collected and reported
+                    
+                    "Completed": Test finished successfully with results available
+                    - Test duration elapsed or stopped by user request
+                    - All metrics collected and final results calculated
+                    - Test infrastructure cleaned up and resources released
+                    - Results available for analysis and reporting
+                    
+                    "Failed": Test encountered an error and could not complete
+                    - Configuration validation failed or network connectivity issues
+                    - Infrastructure deployment problems or resource constraints
+                    - Runtime errors during traffic generation or measurement
+                    - Check message field for specific error details
+                    
+                    "Stopped": Test was manually stopped before completion
+                    - User-initiated test termination via operator commands
+                    - Partial results may be available depending on stop timing
+                    - Test infrastructure cleaned up and resources released
+                    - Useful for debugging or adjusting test parameters
+                message:
+                  type: string
+                  description: |
+                    Human-readable status message providing detailed information about current test state.
+                    
+                    Message Content by Phase:
+                    - Pending: "Waiting for test deployment" or validation details
+                    - Deploying: "Setting up traffic generators on devices" or progress updates
+                    - Running: "Test in progress, X seconds remaining" or current status
+                    - Completed: "Test completed successfully, results available" or summary
+                    - Failed: Specific error messages and troubleshooting guidance
+                    - Stopped: "Test stopped by user" or termination reason
+                    
+                    Error Message Examples:
+                    - "Source device 'customer-a-cpe' not found or not ready"
+                    - "Network connectivity test failed between source and destination"
+                    - "Insufficient bandwidth available for requested test rate"
+                    - "Traffic generation tool deployment failed on source device"
+                    
+                    Troubleshooting Information:
+                    - Messages include actionable information for problem resolution
+                    - Reference specific configuration parameters that may need adjustment
+                    - Provide guidance for network connectivity or resource issues
+                    - Include relevant error codes or system messages when available
+                start_time:
+                  type: string
+                  format: date-time
+                  description: |
+                    Timestamp when the traffic test began execution (ISO 8601 format).
+                    
+                    Start Time Significance:
+                    - Marks the beginning of actual traffic generation and measurement
+                    - Used for calculating test duration and progress tracking
+                    - Enables correlation with network events and system logs
+                    - Provides baseline for performance trend analysis
+                    
+                    Timing Considerations:
+                    - Set when test transitions from "Deploying" to "Running" phase
+                    - Accounts for infrastructure setup time before traffic starts
+                    - Used with end_time to calculate actual test execution duration
+                    - May differ from resource creation time due to deployment delays
+                    
+                    Format Examples:
+                    - "2024-01-15T10:30:00Z" - UTC timestamp
+                    - "2024-01-15T10:30:00-05:00" - Timezone-aware timestamp
+                    - Used for scheduling, reporting, and log correlation
+                end_time:
+                  type: string
+                  format: date-time
+                  description: |
+                    Timestamp when the traffic test completed or stopped (ISO 8601 format).
+                    
+                    End Time Significance:
+                    - Marks the completion of traffic generation and final measurement
+                    - Used for calculating actual test duration and performance analysis
+                    - Enables correlation with network events and system changes
+                    - Provides completion marker for automated workflows and reporting
+                    
+                    Completion Scenarios:
+                    - Normal completion: Set when configured duration expires
+                    - Manual stop: Set when user terminates test before completion
+                    - Error termination: Set when test fails and cannot continue
+                    - Resource cleanup: Marks when test infrastructure is fully cleaned up
+                    
+                    Duration Calculation:
+                    - Actual test duration = end_time - start_time
+                    - May be shorter than configured duration if stopped early
+                    - Used for performance normalization and rate calculations
+                    - Important for SLA compliance and billing calculations
+                current_metrics:
+                  type: object
+                  description: |
+                    Real-time performance metrics collected during test execution.
+                    
+                    Metrics Collection provides:
+                    - Live performance monitoring during test execution
+                    - Immediate feedback on network behavior and test progress
+                    - Early detection of performance issues or network problems
+                    - Data for real-time dashboards and alerting systems
+                    
+                    Metrics Update Frequency:
+                    - Updated according to metrics_interval configuration
+                    - Provides near real-time visibility into test performance
+                    - Enables dynamic test adjustment and early termination if needed
+                    - Supports automated monitoring and threshold-based alerting
+                    
+                    Data Accuracy:
+                    - Represents current measurement window averages
+                    - May show temporary fluctuations due to network conditions
+                    - More stable over longer measurement intervals
+                    - Final results available after test completion for analysis
+                  properties:
+                    throughput_bps:
+                      type: number
+                      description: |
+                        Current measured throughput in bits per second.
+                        
+                        Throughput Measurement:
+                        - Actual data transfer rate achieved during current measurement interval
+                        - May be lower than configured bandwidth due to network conditions
+                        - Includes protocol overhead and network efficiency factors
+                        - Represents end-to-end application-layer data transfer rate
+                        
+                        Interpretation Guidelines:
+                        - Compare with configured bandwidth to assess network performance
+                        - Sustained values below target may indicate network bottlenecks
+                        - Fluctuations normal due to network conditions and traffic patterns
+                        - Use for real-time performance monitoring and SLA verification
+                        
+                        Factors Affecting Throughput:
+                        - Network congestion and available bandwidth
+                        - Protocol overhead (TCP acknowledgments, UDP packet loss)
+                        - Device processing capacity and system resources
+                        - QoS policies and traffic shaping configurations
+                        
+                        Examples:
+                        - 95000000: 95 Mbps actual throughput
+                        - 1000000000: 1 Gbps line-rate performance
+                        - 50000000: 50 Mbps with some network limitations
+                    latency_ms:
+                      type: number
+                      description: |
+                        Current measured round-trip latency in milliseconds.
+                        
+                        Latency Measurement:
+                        - Round-trip time between source and destination devices
+                        - Includes network propagation delay and processing time
+                        - Measured at application layer for end-to-end perspective
+                        - Averaged over current measurement interval for stability
+                        
+                        Latency Components:
+                        - Propagation delay: Physical distance and medium characteristics
+                        - Transmission delay: Time to transmit packet onto network
+                        - Processing delay: Router and device processing time
+                        - Queuing delay: Time spent in network buffers and queues
+                        
+                        Performance Implications:
+                        - Low latency critical for real-time applications (voice, gaming)
+                        - High latency affects interactive application responsiveness
+                        - Consistent latency important for streaming and video applications
+                        - Latency spikes may indicate network congestion or issues
+                        
+                        Typical Values:
+                        - Local network: 0.1-1 ms
+                        - Metropolitan area: 1-10 ms
+                        - Regional/national: 10-50 ms
+                        - International: 50-200+ ms
+                    packet_loss_pct:
+                      type: number
+                      description: |
+                        Current measured packet loss percentage.
+                        
+                        Packet Loss Measurement:
+                        - Percentage of packets lost during transmission
+                        - Calculated as (lost_packets / total_packets) × 100
+                        - Measured over current interval for real-time monitoring
+                        - Critical indicator of network quality and congestion
+                        
+                        Loss Impact by Application:
+                        - TCP applications: Automatic retransmission reduces throughput
+                        - UDP applications: Data loss affects application quality
+                        - Real-time applications: Loss causes audio/video artifacts
+                        - File transfers: Increased completion time due to retransmissions
+                        
+                        Acceptable Loss Levels:
+                        - Excellent: 0-0.01% packet loss
+                        - Good: 0.01-0.1% packet loss
+                        - Acceptable: 0.1-1% packet loss (depending on application)
+                        - Poor: >1% packet loss (significant impact on performance)
+                        
+                        Causes of Packet Loss:
+                        - Network congestion and buffer overflow
+                        - Interface errors and physical layer issues
+                        - QoS policies dropping low-priority traffic
+                        - Device overload and processing limitations
+                    active_connections:
+                      type: integer
+                      description: |
+                        Number of currently active network connections.
+                        
+                        Connection Tracking:
+                        - Count of established TCP connections or active UDP sessions
+                        - Reflects current concurrency level and resource utilization
+                        - Important for understanding network and system load
+                        - Varies based on traffic pattern and user behavior simulation
+                        
+                        Connection Lifecycle:
+                        - TCP: Established connections in ESTABLISHED state
+                        - UDP: Active sessions with recent packet exchange
+                        - Includes both data transfer and idle connections
+                        - Excludes connections in setup or teardown phases
+                        
+                        Scaling Implications:
+                        - Higher connection counts require more system resources
+                        - Network devices have connection table size limitations
+                        - Affects memory usage and processing overhead
+                        - Important for capacity planning and resource allocation
+                        
+                        Pattern-Specific Behavior:
+                        - Constant pattern: Steady connection count
+                        - Burst pattern: Fluctuating based on burst/idle cycles
+                        - Poisson pattern: Variable based on user arrival/departure
+                        - Periodic pattern: Cyclical variation with traffic waves
+                    retransmissions:
+                      type: integer
+                      description: |
+                        Total number of packet retransmissions (TCP only).
+                        
+                        Retransmission Tracking:
+                        - Count of TCP segments that required retransmission
+                        - Indicates network reliability and congestion levels
+                        - Directly impacts throughput and application performance
+                        - Not applicable to UDP traffic (no automatic retransmission)
+                        
+                        Retransmission Causes:
+                        - Packet loss due to network congestion
+                        - Timeout due to high latency or jitter
+                        - Duplicate acknowledgments indicating out-of-order delivery
+                        - Network path changes causing temporary connectivity loss
+                        
+                        Performance Impact:
+                        - Reduces effective throughput due to repeated transmissions
+                        - Increases latency for affected data segments
+                        - Consumes additional network bandwidth
+                        - May trigger TCP congestion control mechanisms
+                        
+                        Analysis Guidelines:
+                        - Low retransmissions (< 1% of total packets): Good network quality
+                        - Moderate retransmissions (1-5%): Some network stress or congestion
+                        - High retransmissions (> 5%): Significant network issues requiring investigation
+                        - Trend analysis more important than absolute numbers
+      additionalPrinterColumns:
+        - name: Phase
+          type: string
+          jsonPath: .status.phase
+        - name: Sources
+          type: string
+          jsonPath: .status.source_count
+          description: Number of source devices
+        - name: Destination
+          type: string
+          jsonPath: .spec.destination_device
+        - name: Pattern
+          type: string
+          jsonPath: .spec.pattern_type
+        - name: Duration
+          type: integer
+          jsonPath: .spec.duration

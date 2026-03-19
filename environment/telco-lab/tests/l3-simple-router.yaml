@@ -1,0 +1,138 @@
+---
+# Simple single-router topology
+#
+# Topology:
+#
+#   dev-a (10.10.1.10) ── lan-a ── r1 ── lan-b ── dev-b (10.10.2.10)
+#                                (eth1)  (eth2)
+#
+# r1 routes traffic between lan-a (10.10.1.0/24) and lan-b (10.10.2.0/24)
+# using a single OSPF area.  No MPLS / BGP / VRF required.
+#
+# Usage:
+#   kubectl apply -f l3-simple-router.yaml
+#
+#   # Wait for the router to be ready
+#   kubectl get vyosinfrastructure,vyosunderlay,device -n default
+#
+#   # Verify routing by exec-ing into the device pods and pinging across
+#   kubectl exec -it dev-a -- ping 10.10.2.10
+
+apiVersion: google.dev/v1
+kind: VyOSInfrastructure
+metadata:
+  name: l3-simple-router-infra
+  namespace: default
+  labels:
+    type: telco-lab
+    environment: test
+spec:
+  description: "Simple single-router: two devices routed through one box"
+
+  networks:
+    # Management network (OOB access to the router)
+    - name: mgmt
+      subnet: "192.168.122.0/24"
+      gateway: "192.168.122.1"
+      network_type: "management"
+      connected_routers:
+        - router_name: "r1"
+          interface: "eth0"
+          ip_address: "192.168.122.11"
+
+    # LAN A — dev-a lives here
+    - name: lan-a
+      subnet: "10.10.1.0/24"
+      gateway: "10.10.1.1"
+      network_type: "multi-access"
+      connected_routers:
+        - router_name: "r1"
+          interface: "eth1"
+          ip_address: "10.10.1.1"
+
+    # LAN B — dev-b lives here
+    - name: lan-b
+      subnet: "10.10.2.0/24"
+      gateway: "10.10.2.1"
+      network_type: "multi-access"
+      connected_routers:
+        - router_name: "r1"
+          interface: "eth2"
+          ip_address: "10.10.2.1"
+
+    - name: loopbacks
+      subnet: "10.0.0.0/24"
+      network_type: "loopback"
+
+  routers:
+    - name: "r1"
+      hostname: "r1"
+      router_id: "10.0.0.1"
+      role: "PE"
+      location:
+        latitude: 37.7749
+        longitude: -122.4194
+        city: "TestLab"
+        country: "US"
+        site: "TestLab-DC1"
+      interfaces:
+        - name: "eth0"
+          network: "mgmt"
+        - name: "eth1"
+          network: "lan-a"
+        - name: "eth2"
+          network: "lan-b"
+        - name: "lo"
+          network: "loopbacks"
+
+---
+apiVersion: google.dev/v1
+kind: VyOSUnderlay
+metadata:
+  name: l3-simple-router-underlay
+  namespace: default
+spec:
+  infrastructureRef: l3-simple-router-infra
+  routing:
+    ospf:
+      router_id_source: "loopback"
+      areas:
+        - area_id: "0.0.0.0"
+          type: "backbone"
+  routers:
+    - name: "r1"
+      protocols:
+        ospf:
+          router_id: "10.0.0.1"
+          areas:
+            - area: "0.0.0.0"
+              type: "backbone"
+              # Advertise both LAN subnets into OSPF so connected devices
+              # receive routes via their default gateway (r1).
+              networks:
+                - "10.10.1.0/24"
+                - "10.10.2.0/24"
+
+---
+# Device on LAN A
+apiVersion: google.dev/v1
+kind: Device
+metadata:
+  name: dev-a
+  namespace: default
+spec:
+  network_name: "lan-a"
+  ip_address: "10.10.1.10"
+  gateway: "10.10.1.1"
+
+---
+# Device on LAN B
+apiVersion: google.dev/v1
+kind: Device
+metadata:
+  name: dev-b
+  namespace: default
+spec:
+  network_name: "lan-b"
+  ip_address: "10.10.2.10"
+  gateway: "10.10.2.1"

@@ -1,0 +1,2 @@
+device_image: "device:latest"
+build_context: "/tmp/device-build"

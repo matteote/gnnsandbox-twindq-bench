@@ -1,0 +1,16 @@
+---
+apiVersion: google.dev/v1
+kind: TrafficTest
+metadata:
+  name: simple-test
+  namespace: default
+spec:
+  source_devices:
+    - dev-a  # First source device
+  destination_device: dev-b
+  protocol: TCP
+  port: 5201 # base port, each source gets its own port
+  duration: 14400  # 240 minutes
+  bandwidth: 5Mbps  # Each source sends 5Mbps
+  pattern_type: constant
+  concurrent_users: 10

@@ -1,0 +1,1015 @@
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import '../appstate.dart';
+import '../models/agent.dart';
+import '../utils/APIService.dart';
+import '../models/available_agent.dart';
+
+class SettingsScreen extends StatelessWidget {
+  const SettingsScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return DefaultTabController(
+      length: 2,
+      child: Scaffold(
+        appBar: AppBar(
+          title: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Google logo
+              ClipRRect(
+                borderRadius: BorderRadius.circular(12),
+                child: Image.asset(
+                  'assets/images/google.png',
+                  width: 24,
+                  height: 24,
+                  fit: BoxFit.cover,
+                ),
+              ),
+              const SizedBox(width: 12),
+              const Text(
+                'Settings',
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ],
+          ),
+          backgroundColor: const Color(0xFF0D47A1),
+          foregroundColor: Colors.white,
+          centerTitle: true,
+          actions: [
+            IconButton(
+              icon: const Icon(Icons.refresh),
+              onPressed: () {
+                // Implementation left empty for now
+              },
+              tooltip: 'Refresh',
+            ),
+          ],
+          bottom: const TabBar(
+            labelColor: Colors.white,
+            unselectedLabelColor: Colors.white70,
+            indicatorColor: Colors.white,
+            tabs: [
+              Tab(
+                icon: Icon(Icons.engineering),
+                text: 'Agent Settings',
+              ),
+              Tab(
+                icon: Icon(Icons.storage),
+                text: 'Spanner',
+              ),
+            ],
+          ),
+        ),
+        body: const TabBarView(
+          children: [
+            Padding(
+              padding: EdgeInsets.all(16.0),
+              child: AgentSettingsSection(),
+            ),
+            Padding(
+              padding: EdgeInsets.all(16.0),
+              child: SpannerSection(),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class AgentSettingsSection extends StatelessWidget {
+  const AgentSettingsSection({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  'Agents',
+                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                        fontWeight: FontWeight.bold,
+                        color: const Color(0xFF0D47A1),
+                      ),
+                ),
+                Row(
+                  children: [
+                    ElevatedButton.icon(
+                      onPressed: () => _showAvailableAgentsDialog(context),
+                      icon: const Icon(Icons.list),
+                      label: const Text('Available Agents'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF0D47A1),
+                        foregroundColor: Colors.white,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    ElevatedButton.icon(
+                      onPressed: () => _showAddAgentDialog(context),
+                      icon: const Icon(Icons.add),
+                      label: const Text('Add Agent'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF0D47A1),
+                        foregroundColor: Colors.white,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            const Text(
+              'Configure network agents with their description and URL.',
+              style: TextStyle(
+                color: Colors.grey,
+                fontSize: 14,
+              ),
+            ),
+            const SizedBox(height: 24),
+            const Expanded(
+              child: AgentList(),
+            ),
+          ],
+        );
+      }
+    );
+  }
+
+  void _showAddAgentDialog(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (context) => const AddAgentDialog(),
+    );
+  }
+
+  void _showAvailableAgentsDialog(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (context) => const AvailableAgentsDialog(),
+    );
+  }
+}
+
+class AgentList extends StatelessWidget {
+  const AgentList({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final appState = Provider.of<Appstate>(context);
+    final agents = appState.agents;
+
+    if (agents.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.engineering,
+              size: 64,
+              color: Colors.grey[400],
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'No agents configured',
+              style: TextStyle(
+                fontSize: 18,
+                color: Colors.grey[600],
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Add an agent to get started',
+              style: TextStyle(
+                fontSize: 14,
+                color: Colors.grey[500],
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return Expanded(
+      child: ListView.builder(
+        itemCount: agents.length,
+        itemBuilder: (context, index) {
+          final agent = agents[index];
+          return AgentListItem(agent: agent);
+        },
+      ),
+    );
+  }
+}
+
+class AgentListItem extends StatelessWidget {
+  final Agent agent;
+
+  const AgentListItem({super.key, required this.agent});
+
+  @override
+  Widget build(BuildContext context) {
+    final appState = Provider.of<Appstate>(context, listen: false);
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      child: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Google logo image on the left side
+            Image.asset(
+              agent.name == "Anomaly Resolution Agent" ? 'assets/images/Zinkworks.png' : 'assets/images/google.png',
+              width: 80,
+              height: 40,
+              fit: BoxFit.contain,
+            ),
+            const SizedBox(width: 16), // Spacing between image and content
+            // Main content column
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Expanded(
+                        child: Text(
+                          agent.name.isNotEmpty ? agent.name : 'Unnamed Agent',
+                          style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 16,
+                          ),
+                        ),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.delete_outline, color: Colors.red),
+                        onPressed: () => _confirmDelete(context, appState),
+                        tooltip: 'Remove Agent',
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Description: ${agent.description}',
+                    style: TextStyle(
+                      color: Colors.grey[700],
+                      fontSize: 14,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'URL: ${agent.url}',
+                    style: TextStyle(
+                      color: Colors.grey[700],
+                      fontSize: 14,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _confirmDelete(BuildContext context, Appstate appState) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Remove Agent'),
+        content: Text('Are you sure you want to remove "${agent.name.isNotEmpty ? agent.name : 'Unnamed Agent'}"?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () async {
+              await appState.removeAgent(agent.id);
+              if (context.mounted) {
+                Navigator.of(context).pop();
+              }
+            },
+            child: const Text('Remove', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class AddAgentDialog extends StatefulWidget {
+  const AddAgentDialog({super.key});
+
+  @override
+  State<AddAgentDialog> createState() => _AddAgentDialogState();
+}
+
+class _AddAgentDialogState extends State<AddAgentDialog> {
+  final _urlController = TextEditingController();
+  final _focusNode = FocusNode();
+  
+  @override
+  void initState() {
+    super.initState();
+    // Request focus after the dialog is built
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _focusNode.requestFocus();
+    });
+  }
+  
+  @override
+  void dispose() {
+    _urlController.dispose();
+    _focusNode.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Add Agent URL'),
+      content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+             TextField(
+              controller: _urlController,
+              focusNode: _focusNode,
+              decoration: const InputDecoration(
+                hintText: 'Enter agent URL',
+                border: OutlineInputBorder(),
+                contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              ),
+              autofocus: true,
+              onSubmitted: (_) => _addAgent(),
+            ),
+          ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
+        ),
+        TextButton(
+          onPressed: _addAgent,
+          child: const Text('Add'),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _addAgent() async {
+    final appState = Provider.of<Appstate>(context, listen: false);
+    await appState.addAgent(
+      _urlController.text.trim(),
+    );
+    if (context.mounted) {
+      Navigator.of(context).pop();
+    }
+  }
+}
+
+class AvailableAgentsDialog extends StatefulWidget {
+  const AvailableAgentsDialog({super.key});
+
+  @override
+  State<AvailableAgentsDialog> createState() => _AvailableAgentsDialogState();
+}
+
+class _AvailableAgentsDialogState extends State<AvailableAgentsDialog> {
+  late Future<List<AvailableAgent>> _availableAgentsFuture;
+  final APIService _apiService = APIService();
+
+  @override
+  void initState() {
+    super.initState();
+    _availableAgentsFuture = _apiService.getAvailableAgents();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final appState = Provider.of<Appstate>(context);
+    final addedAgentUrls = appState.agents.map((a) => a.url).toSet();
+
+    return Dialog(
+      child: Container(
+        width: MediaQuery.of(context).size.width * 0.8,
+        height: MediaQuery.of(context).size.height * 0.7,
+        padding: const EdgeInsets.all(24.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  'Available Agents',
+                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                        fontWeight: FontWeight.bold,
+                        color: const Color(0xFF0D47A1),
+                      ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.close),
+                  onPressed: () => Navigator.of(context).pop(),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'The following agents are currently running and can be added to your dashboard.',
+              style: TextStyle(color: Colors.grey, fontSize: 14),
+            ),
+            const SizedBox(height: 16),
+            Expanded(
+              child: FutureBuilder<List<AvailableAgent>>(
+                future: _availableAgentsFuture,
+                builder: (context, snapshot) {
+                  if (snapshot.connectionState == ConnectionState.waiting) {
+                    return const Center(child: CircularProgressIndicator());
+                  } else if (snapshot.hasError) {
+                    return Center(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(
+                            Icons.error_outline,
+                            size: 64,
+                            color: Colors.grey[400],
+                          ),
+                          const SizedBox(height: 16),
+                          Text(
+                            'Error fetching available agents',
+                            style: TextStyle(
+                              fontSize: 18,
+                              color: Colors.grey[600],
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            '${snapshot.error}',
+                            style: TextStyle(
+                              fontSize: 14,
+                              color: Colors.grey[500],
+                            ),
+                            textAlign: TextAlign.center,
+                          ),
+                        ],
+                      ),
+                    );
+                  } else if (!snapshot.hasData || snapshot.data!.isEmpty) {
+                    return Center(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(
+                            Icons.engineering,
+                            size: 64,
+                            color: Colors.grey[400],
+                          ),
+                          const SizedBox(height: 16),
+                          Text(
+                            'No available agents found',
+                            style: TextStyle(
+                              fontSize: 18,
+                              color: Colors.grey[600],
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            'No agents are currently running',
+                            style: TextStyle(
+                              fontSize: 14,
+                              color: Colors.grey[500],
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  }
+
+                  final availableAgents = snapshot.data!;
+                  final agentsToShow = availableAgents.where((a) => !addedAgentUrls.contains(a.url)).toList();
+
+                  if (agentsToShow.isEmpty) {
+                    return Center(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(
+                            Icons.check_circle_outline,
+                            size: 64,
+                            color: Colors.green[400],
+                          ),
+                          const SizedBox(height: 16),
+                          Text(
+                            'All available agents added',
+                            style: TextStyle(
+                              fontSize: 18,
+                              color: Colors.grey[600],
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            'All running agents have been added to your dashboard',
+                            style: TextStyle(
+                              fontSize: 14,
+                              color: Colors.grey[500],
+                            ),
+                            textAlign: TextAlign.center,
+                          ),
+                        ],
+                      ),
+                    );
+                  }
+
+                  return SingleChildScrollView(
+                    child: DataTable(
+                      columns: const [
+                        DataColumn(label: Text('Name', style: TextStyle(fontWeight: FontWeight.bold))),
+                        DataColumn(label: Text('URL', style: TextStyle(fontWeight: FontWeight.bold))),
+                        DataColumn(label: Text('Action', style: TextStyle(fontWeight: FontWeight.bold))),
+                      ],
+                      rows: agentsToShow.map((agent) => DataRow(cells: [
+                        DataCell(Text(agent.name)),
+                        DataCell(Text(agent.url)),
+                        DataCell(
+                          ElevatedButton(
+                            onPressed: () async {
+                              await appState.addAgent(agent.url);
+                              if (context.mounted) {
+                                Navigator.of(context).pop();
+                              }
+                            },
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: const Color(0xFF0D47A1),
+                              foregroundColor: Colors.white,
+                            ),
+                            child: const Text('Add'),
+                          ),
+                        ),
+                      ])).toList(),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class SpannerSection extends StatefulWidget {
+  const SpannerSection({super.key});
+
+  @override
+  State<SpannerSection> createState() => _SpannerSectionState();
+}
+
+class _SpannerSectionState extends State<SpannerSection> {
+  bool _isDeleting = false;
+  bool _isDeletingLogs = false;
+  bool _isDeletingIncidents = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Spanner Database Management',
+          style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                fontWeight: FontWeight.bold,
+                color: const Color(0xFF0D47A1),
+              ),
+        ),
+        const SizedBox(height: 16),
+        const Text(
+          'Manage performance metrics and logs stored in Spanner database.',
+          style: TextStyle(
+            color: Colors.grey,
+            fontSize: 14,
+          ),
+        ),
+        const SizedBox(height: 32),
+        
+        // Performance Metrics Section
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(20.0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(
+                      Icons.analytics,
+                      color: const Color(0xFF0D47A1),
+                      size: 24,
+                    ),
+                    const SizedBox(width: 12),
+                    Text(
+                      'Performance Metrics',
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.bold,
+                          ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                const Text(
+                  'Delete all performance metrics data from the Spanner database. This action cannot be undone.',
+                  style: TextStyle(
+                    color: Colors.grey,
+                    fontSize: 14,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                ElevatedButton.icon(
+                  onPressed: _isDeleting ? null : () => _showDeleteMetricsDialog(context),
+                  icon: _isDeleting 
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                        ),
+                      )
+                    : const Icon(Icons.delete),
+                  label: Text(_isDeleting ? 'Deleting...' : 'Delete Performance Metrics'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.red,
+                    foregroundColor: Colors.white,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        
+        const SizedBox(height: 20),
+        
+        // Logs Section
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(20.0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(
+                      Icons.description,
+                      color: const Color(0xFF0D47A1),
+                      size: 24,
+                    ),
+                    const SizedBox(width: 12),
+                    Text(
+                      'System Logs',
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.bold,
+                          ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                const Text(
+                  'Remove all system logs from the Spanner database. This action cannot be undone.',
+                  style: TextStyle(
+                    color: Colors.grey,
+                    fontSize: 14,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                ElevatedButton.icon(
+                  onPressed: _isDeletingLogs ? null : () => _showDeleteLogsDialog(context),
+                  icon: _isDeletingLogs 
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                        ),
+                      )
+                    : const Icon(Icons.delete),
+                  label: Text(_isDeletingLogs ? 'Removing...' : 'Remove All Logs'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.red,
+                    foregroundColor: Colors.white,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        
+        const SizedBox(height: 20),
+        
+        // Incidents Section
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(20.0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(
+                      Icons.warning,
+                      color: const Color(0xFF0D47A1),
+                      size: 24,
+                    ),
+                    const SizedBox(width: 12),
+                    Text(
+                      'Incidents',
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.bold,
+                          ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                const Text(
+                  'Delete all incidents from the Spanner database. This action cannot be undone.',
+                  style: TextStyle(
+                    color: Colors.grey,
+                    fontSize: 14,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                ElevatedButton.icon(
+                  onPressed: _isDeletingIncidents ? null : () => _showDeleteIncidentsDialog(context),
+                  icon: _isDeletingIncidents 
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                        ),
+                      )
+                    : const Icon(Icons.delete),
+                  label: Text(_isDeletingIncidents ? 'Deleting...' : 'Delete All Incidents'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.red,
+                    foregroundColor: Colors.white,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  void _showDeleteMetricsDialog(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Row(
+          children: [
+            Icon(Icons.warning, color: Colors.orange),
+            SizedBox(width: 8),
+            Text('Delete Performance Metrics'),
+          ],
+        ),
+        content: const Text(
+          'Are you sure you want to delete all performance metrics? This action cannot be undone and will permanently remove all stored performance data.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => _deleteMetrics(context),
+            child: const Text(
+              'Delete',
+              style: TextStyle(color: Colors.red),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showDeleteLogsDialog(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Row(
+          children: [
+            Icon(Icons.warning, color: Colors.orange),
+            SizedBox(width: 8),
+            Text('Remove All Logs'),
+          ],
+        ),
+        content: const Text(
+          'Are you sure you want to remove all system logs? This action cannot be undone and will permanently delete all log entries.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => _deleteLogs(context),
+            child: const Text(
+              'Remove',
+              style: TextStyle(color: Colors.red),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showDeleteIncidentsDialog(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Row(
+          children: [
+            Icon(Icons.warning, color: Colors.orange),
+            SizedBox(width: 8),
+            Text('Delete All Incidents'),
+          ],
+        ),
+        content: const Text(
+          'Are you sure you want to delete all incidents? This action cannot be undone and will permanently remove all incident records.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => _deleteIncidents(context),
+            child: const Text(
+              'Delete',
+              style: TextStyle(color: Colors.red),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _deleteMetrics(BuildContext context) async {
+    Navigator.of(context).pop(); // Close the confirmation dialog first
+    
+    // Set loading state
+    setState(() {
+      _isDeleting = true;
+    });
+
+    try {
+      print('Starting metrics deletion...');
+      final apiService = APIService();
+      final success = await apiService.resetMetrics();
+      print('Metrics deletion completed. Success: $success');
+      
+      // Clear loading state
+      if (mounted) {
+        setState(() {
+          _isDeleting = false;
+        });
+      }
+      
+      // Show the result in console for now
+      if (mounted) {
+        if (success) {
+          print('SUCCESS: Performance metrics deleted successfully');
+        } else {
+          print('ERROR: Failed to delete performance metrics');
+        }
+      }
+    } catch (e) {
+      print('Error during metrics deletion: $e');
+      
+      // Clear loading state
+      if (mounted) {
+        setState(() {
+          _isDeleting = false;
+        });
+      }
+      
+      // Show the error in console
+      if (mounted) {
+        print('ERROR: Error deleting performance metrics: ${e.toString()}');
+      }
+    }
+  }
+
+  Future<void> _deleteLogs(BuildContext context) async {
+    Navigator.of(context).pop(); // Close the confirmation dialog first
+    
+    // Set loading state
+    setState(() {
+      _isDeletingLogs = true;
+    });
+
+    try {
+      print('Starting logs deletion...');
+      final apiService = APIService();
+      final success = await apiService.deleteLogs();
+      print('Logs deletion completed. Success: $success');
+      
+      // Clear loading state
+      if (mounted) {
+        setState(() {
+          _isDeletingLogs = false;
+        });
+      }
+      
+      // Show the result in console for now
+      if (mounted) {
+        if (success) {
+          print('SUCCESS: All logs removed successfully');
+        } else {
+          print('ERROR: Failed to remove logs');
+        }
+      }
+    } catch (e) {
+      print('Error during logs deletion: $e');
+      
+      // Clear loading state
+      if (mounted) {
+        setState(() {
+          _isDeletingLogs = false;
+        });
+      }
+      
+      // Show the error in console
+      if (mounted) {
+        print('ERROR: Error removing logs: ${e.toString()}');
+      }
+    }
+  }
+
+  Future<void> _deleteIncidents(BuildContext context) async {
+    Navigator.of(context).pop(); // Close the confirmation dialog first
+    
+    // Set loading state
+    setState(() {
+      _isDeletingIncidents = true;
+    });
+
+    try {
+      print('Starting incidents deletion...');
+      final apiService = APIService();
+      final success = await apiService.deleteAllIncidents();
+      print('Incidents deletion completed. Success: $success');
+      
+      // Clear loading state
+      if (mounted) {
+        setState(() {
+          _isDeletingIncidents = false;
+        });
+      }
+      
+      // Show the result in console for now
+      if (mounted) {
+        if (success) {
+          print('SUCCESS: All incidents deleted successfully');
+        } else {
+          print('ERROR: Failed to delete incidents');
+        }
+      }
+    } catch (e) {
+      print('Error during incidents deletion: $e');
+      
+      // Clear loading state
+      if (mounted) {
+        setState(() {
+          _isDeletingIncidents = false;
+        });
+      }
+      
+      // Show the error in console
+      if (mounted) {
+        print('ERROR: Error deleting incidents: ${e.toString()}');
+      }
+    }
+  }
+}

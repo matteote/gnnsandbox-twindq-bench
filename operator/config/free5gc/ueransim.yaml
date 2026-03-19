@@ -1,0 +1,86 @@
+# Copyright 2024-2025 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: ueransims.google.dev
+  labels:
+    type: networkservices
+spec:
+  scope: Namespaced
+  group: google.dev
+  names:
+    kind: UERanSIM
+    plural: ueransims
+    singular: ueransim
+    shortNames:
+      - ue
+      - ueransim
+  versions:
+    - name: v1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          description: |
+            This network service is a 5G Virtual Radio Network Simulator (of kind UERanSIM). The UERanSIM instance requires a
+            ControlPlane network service to be running and specified below. 
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                cellid:
+                  type: string
+                  description: the radio cell id. this must be unique across all UERanSim instances
+                  default: "0x000000010"
+                interface: 
+                  description: The VPC network location to attach to
+                  type: object
+                  properties:
+                    name:
+                      description: name of the vpc
+                      type: string
+                controlplane:
+                  description: the ControlPlane network service instance to this UERanSim instance to 
+                  type: object
+                  properties:
+                    name: 
+                      description: Name of the control plane
+                      type: string
+                ue: 
+                  description:  |
+                    User Equipment subscriber details. The following rules apply to the ue data provided
+                      - the combination of imsi and plmnId must be unique across all UERanSim instances. 
+                      - MSISDN must be unique across UERANSIM instances. 
+                    Check this is the case when adding a new UERanSim by using tools to discover what existing UERanSim services are configured.
+                  type: object
+                  properties:
+                    imsi: 
+                      description: subscriber identifier, a 15 digit string. ensure the value provided is enclosed in quotes
+                      type: string
+                      default: "208930000000001"
+                    msisdn:
+                      description: MSISDN identifier, a 10 digit string. ensure the value provided is enclosed in quotes
+                      type: string
+                      default: "0900000000"
+                    plmnId:
+                      description: plmnid for the radio site - this does not change - it is always the default. ensure the value provided is enclosed in quotes
+                      type: string
+                      default: "20893"
+              x-kubernetes-preserve-unknown-fields: true
+            status:
+              type: object
+              x-kubernetes-preserve-unknown-fields: true

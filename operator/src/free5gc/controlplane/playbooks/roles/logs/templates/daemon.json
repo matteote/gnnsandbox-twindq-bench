@@ -1,0 +1,8 @@
+{
+    "log-driver": "gcplogs",
+    "log-opts": {
+        "gcp-meta-name": "{{VMNAME}}",
+        "gcp-project": "{{GOOGLE_PROJECT}}",
+        "labels": "free5gc_name"
+    }
+}

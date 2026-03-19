@@ -1,0 +1,11 @@
+google-cloud-spanner
+google-cloud-storage
+torch
+torch-geometric
+transformers
+scikit-learn
+joblib
+tqdm
+numpy
+aiohttp
+aiohttp_cors
