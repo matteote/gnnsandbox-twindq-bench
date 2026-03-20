@@ -37,6 +37,8 @@ The lab GCP deployment architecture is shown in the diagram below.
 ## Running the demo
 
 * [Installation Instructions](/INSTALL.md)
+* [Transport RCA Scenario](/docs/scenarios/transport.md)
+* 5g Scenario coming
 
 ## LICENSES
 
