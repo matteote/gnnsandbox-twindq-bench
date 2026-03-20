@@ -78,14 +78,14 @@ The **install.sh** script provides flexible installation options:
 ```bash
 Autonomous Network Agent (ANA) environment manager.
 
-Syntax: install.sh [-c|-s|-b|-o|-l|-f|-r|-n|-k|-d|-g|-i|-w|--all|--deploy] [-y|-N]
+Syntax: install.sh [-c|-s|-o|-l|-m|-n|-k|-d|-g|-i|--all|--deploy] [-y|-N]
 
 long options:
 -------------
   --all  install everything (comprehensive setup: create env if needed, build image if needed, start runtime, deploy all agents)
          can be combined with -y or -N flags (e.g., ./install.sh -all -y)
   --deploy component1 component2
-         (re)deploy specific components (valid components : spanner, operator, logcapture, git)
+         (re)deploy specific components (valid components : spanner, operator, logcapture, git, gnn, metricscollector)
 
 short options:
 --------------
@@ -93,16 +93,15 @@ short options:
   -s     build and start network agent runtime (incl. the operator)
   -o     build and deploy the network operator (same as --deploy operator)
   -l     build and deploy the logs capture function (same as --deploy logcapture)
-  -f     build and deploy the fault capture and trigger service
+  -m     build and deploy the metrics collector service (same as --deploy metricscollector)
   -n     build and deploy the network dashboard and network agents
          can be followed by a comma-separated list of agent names to (re)deploy selectively
-         valid agent names: all, networktools, supervisor, engineer, dashboard, operations, test, resolver
+         valid agent names: all, networktools, supervisor, dashboard, test
          example: -n dashboard,operations or -n all (to deploy all agents)
   -k     stop and delete the network agent runtime (GKE cluster, VMS, DB, etc..)
   -d     delete the network agent environment (keys, manifests...).
   -g     display active GCP environment (user, project, GKE cluster,...)
   -i     display demo information
-  -w     wipe out the entire autonomous network agent demo resources (ptp, mesh, uetest,...)
   -y     answer 'yes' to all questions (no ask for confirmation)
   -N     answer 'no' to all questions (no ask for confirmation)
 

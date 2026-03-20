@@ -1490,7 +1490,7 @@ Help()
    # Display Help
    echo "Network Agent environment manager."
    echo
-   echo "Syntax: install.sh [-c|-s|-o|-l|-r|-n|-k|-d|-g|-i|-w|--all|--deploy] [-y|-N]"
+   echo "Syntax: install.sh [-c|-s|-o|-l|-m|-n|-k|-d|-g|-i|--all|--deploy] [-y|-N]"
    echo 
    echo "long options:"
    echo "-------------"
@@ -1505,6 +1505,7 @@ Help()
    echo "  -s     build and start network agent runtime (incl. the operator)"
    echo "  -o     build and deploy the network operator (same as --deploy operator)"
    echo "  -l     build and deploy the logs capture function (same as --deploy logcapture)"
+   echo "  -m     build and deploy the metrics collector service (same as --deploy metricscollector)"
    echo "  -n     build and deploy the network dashboard and network agents"
    echo "         can be followed by a comma-separated list of agent names to (re)deploy selectively"
    echo "         valid agent names: all, networktools, supervisor, dashboard, test"
@@ -1513,7 +1514,6 @@ Help()
    echo "  -d     delete the network agent environment (keys, manifests...)."
    echo "  -g     display active GCP environment (user, project, GKE cluster,...)"
    echo "  -i     display demo information"
-   echo "  -w     wipe out the entire autonomous network agent demo resources"
    echo "  -y     answer 'yes' to all questions (no ask for confirmation)"
    echo "  -N     answer 'no' to all questions (no ask for confirmation)"
    echo 
@@ -1604,7 +1604,7 @@ fi
 
 # If func_calls is already set (from -all), skip getopts
 if [[ -z $func_calls ]]; then
-    while getopts "hcsolmbn:kdpgiyN" option; do
+    while getopts "hcsolmn:kdgiyN" option; do
        case $option in
           h) 
             func_calls="Help"
