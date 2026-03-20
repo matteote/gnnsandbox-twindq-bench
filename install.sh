@@ -317,8 +317,6 @@ Create()
     echo "###################################################"
     cp google-compute operator/src
     cp google-compute.pub operator/src
-    cp google-compute ui/incident/src
-    cp google-compute.pub ui/incident/src
 
     echo "Add ssh key to OS login"
     if ! gcloud compute os-login ssh-keys list --project=$GOOGLE_PROJECT | grep -q "$(cat google-compute.pub)"; then

@@ -111,3 +111,4 @@ lib/build
 **/*egg-info
 
 **/submit_pipeline.py
+**/gnn_pipeline.yaml
