@@ -15,6 +15,7 @@
 import kopf
 import logging
 from utils.compute import *
+from utils.vyosnetwork import update_status
 from vyosvm.lifecycle_tasks import *
 
 logger = logging.getLogger(__name__)
@@ -22,6 +23,7 @@ logger = logging.getLogger(__name__)
 @kopf.on.create('google.dev','v1','vyosvm')
 async def create_vyosvm(spec, meta, name, namespace, logger, **kwargs):
     logger.info("Create vyosvm")
+    await update_status(name, namespace, "VyosVM", "Creating", "Provisioning IP and VM")
 
     # Create IP address
     await create_external_ip(namespace, name, os.getenv("GOOGLE_REGION"), graph=False)
@@ -44,6 +46,8 @@ async def create_vyosvm(spec, meta, name, namespace, logger, **kwargs):
                          scopes="cloud-platform") 
 
     # Install Gitea
+    await update_status(name, namespace, "VyosVM", "Installing", "Running Ansible playbook")
     await run_vyosvm_install(namespace, name, external_ip_address)
 
-    return {"status": "Running", "external_ip_address": external_ip_address}
+    await update_status(name, namespace, "VyosVM", "Ready", "VM is fully provisioned")
+    return {"status": "Ready", "external_ip_address": external_ip_address}

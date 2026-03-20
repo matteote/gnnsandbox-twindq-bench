@@ -13,7 +13,7 @@ kubectl apply -f environment/telco-lab/l3vpn-hub-spoke.yaml
 You can see the current state of the routers by running the following command. All VyosRouters should have a state of `Ready`.
 
 ```
-kubectl get VyosRouter
+kubectl get VyosRouter -n default
 ```
 
 You can demonstrate some [spanner queries](/docs/spanner/demo.md) directly in Spanner Studio that render the network topology. 

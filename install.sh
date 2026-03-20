@@ -669,6 +669,16 @@ Start()
 
     # start the network and git repos
     kubectl apply -f environment/networkvm.yaml
+
+    echo "############################################################################"
+    echo "Waiting for VyosVM networkvm to be ready (this can take up to 10 minutes)..."
+    echo "############################################################################"
+    while [[ $(kubectl get vyosvm networkvm -n $GOOGLE_NAMESPACE -o 'jsonpath={..status.phase}' 2>/dev/null) != "Ready" ]]; do
+        sleep 60
+        echo "waiting for networkvm to be ready, sleeping for 60 secs..."
+    done
+    echo "VyosVM networkvm is Ready!"
+
     # kubectl apply -f environment/bigquery.yaml
 
     # DeployGit
