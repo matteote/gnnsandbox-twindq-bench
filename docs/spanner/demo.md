@@ -10,9 +10,6 @@ This document contains ready-to-execute queries for demonstrating network topolo
 3. Traffic running: `kubectl apply -f environment/telco-lab/l3vpn-test.yaml`
 4. GNN model training and inferencing deployed: `install.sh --deploy gnn`
 5. Metrics being collected by metricscollector: `install.sh --deploy metricscollector`
-6. After 20 mins train the GNN: `curl <train-gnn cloud run service>/train`
-   - note that when you have trained the model its weights will be stored in a bucket, so the next time you run the demo you can skip the training phase.
-7. Start the embedding generation: `curl <serve-gnn cloud run service>/start`
 ---
 
 ## A) Show Live Topology Visualization

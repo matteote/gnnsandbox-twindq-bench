@@ -1479,8 +1479,8 @@ InstallAll()
     echo "Deploying the metrics collector service"
     DeployMetricsCollector
 
-    echo "Deploying GNN"
-    DeployGNN
+    # echo "Deploying GNN"
+    # DeployGNN
 
     # Display demo information summary
     DisplayDemoInfo
