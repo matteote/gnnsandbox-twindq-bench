@@ -129,11 +129,12 @@ async def _run_ansible_playbook(ip_address:str, playbook: str, extravars: Dict[s
     logger.info(f"Running Ansible playbook: {playbook}")
     logger.info(f"Extra vars: {extravars}")
     
-    def run_ansible():
+    def run_ansible(temp_dir):
         """Wrapper function to run ansible_runner.run_async"""
         try:
             thread, runner = ansible_runner.run_async(
-                private_data_dir=constants.basedir + "/linuxnetwork/playbooks",
+                private_data_dir=temp_dir,
+                project_dir=constants.basedir + "/linuxnetwork/playbooks",
                 inventory={'all': hosts},
                 playbook=playbook,
                 extravars=extravars,
@@ -150,111 +151,117 @@ async def _run_ansible_playbook(ip_address:str, playbook: str, extravars: Dict[s
     # Throttle concurrent Ansible executions using semaphore
     async with semaphore:
         logger.info(f"Acquired Ansible semaphore for playbook: {playbook}")
-        # Execute in thread pool to avoid blocking the async event loop
-        loop = asyncio.get_event_loop()
-        runner = await loop.run_in_executor(None, run_ansible)
-        
-        if runner is None:
-            return {
-                'success': False,
-                'error': 'Failed to execute Ansible playbook'
-            }
-        
-        if runner.status == 'successful':
-            # Extract results from Ansible facts if available
-            result_data = {}
+        import tempfile
+        import shutil
+        temp_dir = tempfile.mkdtemp(prefix="ansible_network_")
+        try:
+            # Execute in thread pool to avoid blocking the async event loop
+            loop = asyncio.get_event_loop()
+            runner = await loop.run_in_executor(None, run_ansible, temp_dir)
             
-            # Try to get results from all events
-            for event in runner.events:
-                if event.get('event') == 'runner_on_ok':
-                    event_data = event.get('event_data', {})
-                    res = event_data.get('res', {})
-                    
-                    # Extract ansible_facts if they exist
-                    if 'ansible_facts' in res:
-                        ansible_facts = res['ansible_facts']
+            if runner is None:
+                return {
+                    'success': False,
+                    'error': 'Failed to execute Ansible playbook'
+                }
+            
+            if runner.status == 'successful':
+                # Extract results from Ansible facts if available
+                result_data = {}
+                
+                # Try to get results from all events
+                for event in runner.events:
+                    if event.get('event') == 'runner_on_ok':
+                        event_data = event.get('event_data', {})
+                        res = event_data.get('res', {})
                         
-                        # Extract default_interface if present
-                        if 'default_interface' in ansible_facts:
-                            result_data['default_interface'] = ansible_facts['default_interface']
-                            logger.info(f"Captured default_interface: {ansible_facts['default_interface']}")
-                        
-                        # Extract default_gateway if present
-                        if 'default_gateway' in ansible_facts:
-                            result_data['default_gateway'] = ansible_facts['default_gateway']
-                            logger.info(f"Captured default_gateway: {ansible_facts['default_gateway']}")
+                        # Extract ansible_facts if they exist
+                        if 'ansible_facts' in res:
+                            ansible_facts = res['ansible_facts']
+                            
+                            # Extract default_interface if present
+                            if 'default_interface' in ansible_facts:
+                                result_data['default_interface'] = ansible_facts['default_interface']
+                                logger.info(f"Captured default_interface: {ansible_facts['default_interface']}")
+                            
+                            # Extract default_gateway if present
+                            if 'default_gateway' in ansible_facts:
+                                result_data['default_gateway'] = ansible_facts['default_gateway']
+                                logger.info(f"Captured default_gateway: {ansible_facts['default_gateway']}")
 
-                        # Extract interface_ip if present
-                        if 'interface_ip' in ansible_facts:
-                            result_data['interface_ip'] = ansible_facts['interface_ip']
-                            logger.info(f"Captured interface_ip: {ansible_facts['interface_ip']}")
-                        
-                        # Extract exists fact (for status check)
-                        if 'exists' in ansible_facts:
-                            result_data['exists'] = ansible_facts['exists']
-                            logger.info(f"Captured exists: {ansible_facts['exists']}")
-                        
-                        # Extract network_info (for status check)
-                        if 'network_info' in ansible_facts:
-                            result_data['network_info'] = ansible_facts['network_info']
-                            logger.info(f"Captured network_info: {ansible_facts['network_info']}")
-                        
-                        # Extract detailed bridge status (for detailed_status_network.yaml)
-                        if 'bridge_exists' in ansible_facts:
-                            result_data['bridge_exists'] = ansible_facts['bridge_exists']
-                            logger.info(f"Captured bridge_exists: {ansible_facts['bridge_exists']}")
-                        
-                        if 'bridge_state' in ansible_facts:
-                            result_data['bridge_state'] = ansible_facts['bridge_state']
-                            logger.info(f"Captured bridge_state: {ansible_facts['bridge_state']}")
-                        
-                        if 'bridge_mtu' in ansible_facts:
-                            result_data['bridge_mtu'] = ansible_facts['bridge_mtu']
-                            logger.info(f"Captured bridge_mtu: {ansible_facts['bridge_mtu']}")
-                        
-                        if 'bridge_mac' in ansible_facts:
-                            result_data['bridge_mac'] = ansible_facts['bridge_mac']
-                            logger.info(f"Captured bridge_mac: {ansible_facts['bridge_mac']}")
-                        
-                        if 'bridge_ip' in ansible_facts:
-                            result_data['bridge_ip'] = ansible_facts['bridge_ip']
-                            logger.info(f"Captured bridge_ip: {ansible_facts['bridge_ip']}")
-                        
-                        if 'bridge_metrics' in ansible_facts:
-                            result_data['bridge_metrics'] = ansible_facts['bridge_metrics']
-                            logger.info(f"Captured bridge_metrics: {ansible_facts['bridge_metrics']}")
-                        
-                        if 'veth_pairs' in ansible_facts:
-                            veth_pairs_raw = ansible_facts['veth_pairs']
-                            if isinstance(veth_pairs_raw, list):
-                                result_data['veth_pairs'] = veth_pairs_raw
-                            else:
-                                logger.warning(f"veth_pairs Ansible fact is not a list (got {type(veth_pairs_raw).__name__}), ignoring")
-                                result_data['veth_pairs'] = []
-                            logger.info(f"Captured veth_pairs: {result_data['veth_pairs']}")
+                            # Extract interface_ip if present
+                            if 'interface_ip' in ansible_facts:
+                                result_data['interface_ip'] = ansible_facts['interface_ip']
+                                logger.info(f"Captured interface_ip: {ansible_facts['interface_ip']}")
+                            
+                            # Extract exists fact (for status check)
+                            if 'exists' in ansible_facts:
+                                result_data['exists'] = ansible_facts['exists']
+                                logger.info(f"Captured exists: {ansible_facts['exists']}")
+                            
+                            # Extract network_info (for status check)
+                            if 'network_info' in ansible_facts:
+                                result_data['network_info'] = ansible_facts['network_info']
+                                logger.info(f"Captured network_info: {ansible_facts['network_info']}")
+                            
+                            # Extract detailed bridge status (for detailed_status_network.yaml)
+                            if 'bridge_exists' in ansible_facts:
+                                result_data['bridge_exists'] = ansible_facts['bridge_exists']
+                                logger.info(f"Captured bridge_exists: {ansible_facts['bridge_exists']}")
+                            
+                            if 'bridge_state' in ansible_facts:
+                                result_data['bridge_state'] = ansible_facts['bridge_state']
+                                logger.info(f"Captured bridge_state: {ansible_facts['bridge_state']}")
+                            
+                            if 'bridge_mtu' in ansible_facts:
+                                result_data['bridge_mtu'] = ansible_facts['bridge_mtu']
+                                logger.info(f"Captured bridge_mtu: {ansible_facts['bridge_mtu']}")
+                            
+                            if 'bridge_mac' in ansible_facts:
+                                result_data['bridge_mac'] = ansible_facts['bridge_mac']
+                                logger.info(f"Captured bridge_mac: {ansible_facts['bridge_mac']}")
+                            
+                            if 'bridge_ip' in ansible_facts:
+                                result_data['bridge_ip'] = ansible_facts['bridge_ip']
+                                logger.info(f"Captured bridge_ip: {ansible_facts['bridge_ip']}")
+                            
+                            if 'bridge_metrics' in ansible_facts:
+                                result_data['bridge_metrics'] = ansible_facts['bridge_metrics']
+                                logger.info(f"Captured bridge_metrics: {ansible_facts['bridge_metrics']}")
+                            
+                            if 'veth_pairs' in ansible_facts:
+                                veth_pairs_raw = ansible_facts['veth_pairs']
+                                if isinstance(veth_pairs_raw, list):
+                                    result_data['veth_pairs'] = veth_pairs_raw
+                                else:
+                                    logger.warning(f"veth_pairs Ansible fact is not a list (got {type(veth_pairs_raw).__name__}), ignoring")
+                                    result_data['veth_pairs'] = []
+                                logger.info(f"Captured veth_pairs: {result_data['veth_pairs']}")
 
-            logger.info(f"Final extracted data: {result_data}")
-            return {
-                'success': True,
-                **result_data
-            }
-        else:
-            # Extract error information
-            error_msg = f"Ansible playbook failed with status: {runner.status}"
-            
-            # Try to get more detailed error from events
-            for event in runner.events:
-                if event.get('event') == 'runner_on_failed':
-                    event_data = event.get('event_data', {})
-                    res = event_data.get('res', {})
-                    if 'msg' in res:
-                        error_msg = res['msg']
-                    elif 'stderr' in res:
-                        error_msg = res['stderr']
-                    break
-            
-            logger.error(f"Ansible playbook execution failed: {error_msg}")
-            return {
-                'success': False,
-                'error': error_msg
-            }
+                logger.info(f"Final extracted data: {result_data}")
+                return {
+                    'success': True,
+                    **result_data
+                }
+            else:
+                # Extract error information
+                error_msg = f"Ansible playbook failed with status: {runner.status}"
+                
+                # Try to get more detailed error from events
+                for event in runner.events:
+                    if event.get('event') == 'runner_on_failed':
+                        event_data = event.get('event_data', {})
+                        res = event_data.get('res', {})
+                        if 'stderr' in res and res['stderr']:
+                            error_msg = res['stderr']
+                        elif 'msg' in res:
+                            error_msg = res['msg']
+                        break
+                
+                logger.error(f"Ansible playbook execution failed: {error_msg}")
+                return {
+                    'success': False,
+                    'error': error_msg
+                }
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)

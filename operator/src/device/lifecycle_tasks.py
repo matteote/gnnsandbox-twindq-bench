@@ -107,11 +107,12 @@ async def _run_ansible_playbook(networkvm_ip_address:str, playbook: str, extrava
     logger.info(f"Running Ansible playbook: {playbook}")
     logger.info(f"Extra vars: {extravars}")
     
-    def run_ansible():
+    def run_ansible(temp_dir):
         """Wrapper function to run ansible_runner.run_async"""
         try:
             thread, runner = ansible_runner.run_async(
-                private_data_dir=constants.basedir + "/device/playbooks",
+                private_data_dir=temp_dir,
+                project_dir=constants.basedir + "/device/playbooks",
                 inventory={'all': hosts},
                 playbook=playbook,
                 extravars=extravars,
@@ -128,57 +129,63 @@ async def _run_ansible_playbook(networkvm_ip_address:str, playbook: str, extrava
     # Throttle concurrent Ansible executions using semaphore
     async with semaphore:
         logger.info(f"Acquired Ansible semaphore for playbook: {playbook}")
-        # Execute in thread pool to avoid blocking the async event loop
-        loop = asyncio.get_event_loop()
-        runner = await loop.run_in_executor(None, run_ansible)
-        
-        if runner is None:
-            return {
-                'success': False,
-                'error': 'Failed to execute Ansible playbook'
-            }
-        
-        if runner.status == 'successful':
-            # Extract results from Ansible facts if available
-            result_data = {}
-        
-            # Try to get results from the last event
-            for event in runner.events:
-                if event.get('event') == 'runner_on_ok':
-                    event_data = event.get('event_data', {})
-                    res = event_data.get('res', {})
-                    
-                    # Extract network information from Ansible results
-                    if 'network_id' in res:
-                        result_data['network_id'] = res['network_id']
-                    if 'created_at' in res:
-                        result_data['created_at'] = res['created_at']
-                    if 'exists' in res:
-                        result_data['exists'] = res['exists']
-                    if 'network_info' in res:
-                        result_data['network_info'] = res['network_info']
+        import tempfile
+        import shutil
+        temp_dir = tempfile.mkdtemp(prefix="ansible_device_")
+        try:
+            # Execute in thread pool to avoid blocking the async event loop
+            loop = asyncio.get_event_loop()
+            runner = await loop.run_in_executor(None, run_ansible, temp_dir)
             
-            return {
-                'success': True,
-                **result_data
-            }
-        else:
-            # Extract error information
-            error_msg = f"Ansible playbook failed with status: {runner.status}"
+            if runner is None:
+                return {
+                    'success': False,
+                    'error': 'Failed to execute Ansible playbook'
+                }
             
-            # Try to get more detailed error from events
-            for event in runner.events:
-                if event.get('event') == 'runner_on_failed':
-                    event_data = event.get('event_data', {})
-                    res = event_data.get('res', {})
-                    if 'msg' in res:
-                        error_msg = res['msg']
-                    elif 'stderr' in res:
-                        error_msg = res['stderr']
-                    break
-        
-        logger.error(f"Ansible playbook execution failed: {error_msg}")
-        return {
-            'success': False,
-            'error': error_msg
-        }
+            if runner.status == 'successful':
+                # Extract results from Ansible facts if available
+                result_data = {}
+            
+                # Try to get results from the last event
+                for event in runner.events:
+                    if event.get('event') == 'runner_on_ok':
+                        event_data = event.get('event_data', {})
+                        res = event_data.get('res', {})
+                        
+                        # Extract network information from Ansible results
+                        if 'network_id' in res:
+                            result_data['network_id'] = res['network_id']
+                        if 'created_at' in res:
+                            result_data['created_at'] = res['created_at']
+                        if 'exists' in res:
+                            result_data['exists'] = res['exists']
+                        if 'network_info' in res:
+                            result_data['network_info'] = res['network_info']
+                
+                return {
+                    'success': True,
+                    **result_data
+                }
+            else:
+                # Extract error information
+                error_msg = f"Ansible playbook failed with status: {runner.status}"
+                
+                # Try to get more detailed error from events
+                for event in runner.events:
+                    if event.get('event') == 'runner_on_failed':
+                        event_data = event.get('event_data', {})
+                        res = event_data.get('res', {})
+                        if 'stderr' in res and res['stderr']:
+                            error_msg = res['stderr']
+                        elif 'msg' in res:
+                            error_msg = res['msg']
+                        break
+                
+                logger.error(f"Ansible playbook execution failed: {error_msg}")
+                return {
+                    'success': False,
+                    'error': error_msg
+                }
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)

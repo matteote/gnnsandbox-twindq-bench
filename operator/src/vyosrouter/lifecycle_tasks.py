@@ -173,11 +173,12 @@ async def _run_ansible_playbook(ip_address:str, playbook: str, extravars: Dict[s
     logger.info(f"Running Ansible playbook: {playbook}")
     logger.info(f"Extra vars: {extravars}")
     
-    def run_ansible():
+    def run_ansible(temp_dir):
         """Wrapper function to run ansible_runner.run_async"""
         try:
             thread, runner = ansible_runner.run_async(
-                private_data_dir=constants.basedir + "/vyosrouter/playbooks",
+                private_data_dir=temp_dir,
+                project_dir=constants.basedir + "/vyosrouter/playbooks",
                 inventory={'all': hosts},
                 playbook=playbook,
                 extravars=extravars,
@@ -194,76 +195,82 @@ async def _run_ansible_playbook(ip_address:str, playbook: str, extravars: Dict[s
     # Throttle concurrent Ansible executions using semaphore
     async with semaphore:
         logger.info(f"Acquired Ansible semaphore for playbook: {playbook}")
-        # Execute in thread pool to avoid blocking the async event loop
-        loop = asyncio.get_event_loop()
-        runner = await loop.run_in_executor(None, run_ansible)
-        
-        if runner is None:
-            return {
-                'success': False,
-                'error': 'Failed to execute Ansible playbook'
-            }
-        
-        if runner.status == 'successful':
-            # Extract results from Ansible facts if available
-            result_data = {}
+        import tempfile
+        import shutil
+        temp_dir = tempfile.mkdtemp(prefix="ansible_vyosrouter_")
+        try:
+            # Execute in thread pool to avoid blocking the async event loop
+            loop = asyncio.get_event_loop()
+            runner = await loop.run_in_executor(None, run_ansible, temp_dir)
             
-            # Try to get results from the last event
-            for event in runner.events:
-                if event.get('event') == 'runner_on_ok':
-                    event_data = event.get('event_data', {})
-                    res = event_data.get('res', {})
-                    task_name = event_data.get('task', '')
-                    
-                    # Extract router information from Ansible results
-                    if task_name == "Capture VyOS configuration":
-                        result_data['applied_config'] = res.get('vyos_config_commands', '')
+            if runner is None:
+                return {
+                    'success': False,
+                    'error': 'Failed to execute Ansible playbook'
+                }
+            
+            if runner.status == 'successful':
+                # Extract results from Ansible facts if available
+                result_data = {}
+                
+                # Try to get results from the last event
+                for event in runner.events:
+                    if event.get('event') == 'runner_on_ok':
+                        event_data = event.get('event_data', {})
+                        res = event_data.get('res', {})
+                        task_name = event_data.get('task', '')
                         
-                    if 'container_id' in res:
-                        result_data['container_id'] = res['container_id']
-                    if 'management_ip' in res:
-                        result_data['management_ip'] = res['management_ip']
-                    if 'running' in res:
-                        result_data['running'] = res['running']
-                    
-                    # Extract from ansible_facts if they exist
-                    if 'ansible_facts' in res:
-                        ansible_facts = res['ansible_facts']
-                        if 'running' in ansible_facts:
-                            result_data['running'] = ansible_facts['running']
-                        if 'interface_status' in ansible_facts:
-                            raw = ansible_facts['interface_status']
-                            result_data['interface_status'] = raw if isinstance(raw, list) else []
-                            if not isinstance(raw, list):
-                                logger.warning(f"interface_status Ansible fact is not a list (got {type(raw).__name__}), ignoring")
-            
-            logger.info(f"Extracted VyOS status data: running={result_data.get('running')}, "
-                       f"interfaces={len(result_data.get('interface_status', []))}")
-            
-            return {
-                'success': True,
-                **result_data
-            }
-        else:
-            # Extract error information
-            error_msg = f"Ansible playbook failed with status: {runner.status}"
-            
-            # Try to get more detailed error from events
-            for event in runner.events:
-                if event.get('event') == 'runner_on_failed':
-                    event_data = event.get('event_data', {})
-                    res = event_data.get('res', {})
-                    if 'msg' in res:
-                        error_msg = res['msg']
-                    elif 'stderr' in res:
-                        error_msg = res['stderr']
-                    break
-            
-            logger.error(f"Ansible playbook execution failed: {error_msg}")
-            return {
-                'success': False,
-                'error': error_msg
-            }
+                        # Extract router information from Ansible results
+                        if task_name == "Capture VyOS configuration":
+                            result_data['applied_config'] = res.get('vyos_config_commands', '')
+                            
+                        if 'container_id' in res:
+                            result_data['container_id'] = res['container_id']
+                        if 'management_ip' in res:
+                            result_data['management_ip'] = res['management_ip']
+                        if 'running' in res:
+                            result_data['running'] = res['running']
+                        
+                        # Extract from ansible_facts if they exist
+                        if 'ansible_facts' in res:
+                            ansible_facts = res['ansible_facts']
+                            if 'running' in ansible_facts:
+                                result_data['running'] = ansible_facts['running']
+                            if 'interface_status' in ansible_facts:
+                                raw = ansible_facts['interface_status']
+                                result_data['interface_status'] = raw if isinstance(raw, list) else []
+                                if not isinstance(raw, list):
+                                    logger.warning(f"interface_status Ansible fact is not a list (got {type(raw).__name__}), ignoring")
+                
+                logger.info(f"Extracted VyOS status data: running={result_data.get('running')}, "
+                           f"interfaces={len(result_data.get('interface_status', []))}")
+                
+                return {
+                    'success': True,
+                    **result_data
+                }
+            else:
+                # Extract error information
+                error_msg = f"Ansible playbook failed with status: {runner.status}"
+                
+                # Try to get more detailed error from events
+                for event in runner.events:
+                    if event.get('event') == 'runner_on_failed':
+                        event_data = event.get('event_data', {})
+                        res = event_data.get('res', {})
+                        if 'msg' in res:
+                            error_msg = res['msg']
+                        elif 'stderr' in res:
+                            error_msg = res['stderr']
+                        break
+                
+                logger.error(f"Ansible playbook execution failed: {error_msg}")
+                return {
+                    'success': False,
+                    'error': error_msg
+                }
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
 
 
 #########################################################################
