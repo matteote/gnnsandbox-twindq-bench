@@ -156,18 +156,6 @@ class _NetworkDashboardState extends State<NetworkDashboard>
     });
   }
 
-  // Markdown content for the drawer
-  String get _markdownContent =>
-      '''
-# Network Agent Resources
-
-* [GCP project ${EnvironmentConfig.gcpProject}](https://console.cloud.google.com/home/dashboard?project=${EnvironmentConfig.gcpProject})
-* [Spanner Graph database](https://console.cloud.google.com/spanner/instances/networktopology-instance/databases/networktopology-db/details/tables?invt=Abiyrw&project=${EnvironmentConfig.gcpProject})
-* [Cluster Config status](https://console.cloud.google.com/kubernetes/config_management/packages?project=${EnvironmentConfig.gcpProject})
-* [GitOps repository](${EnvironmentConfig.giteaUrl}/${EnvironmentConfig.username})
-* [Demo Scenario](https://docs.google.com/document/d/1Cq-5Ns4aIPec7MiJSOb4ECnEc0qrDgJfuvoLhsNMoN8/edit?usp=sharing&resourcekey=0-FqKStuCPLuhee9IkbDNFcQ)
-''';
-
   @override
   Widget build(BuildContext context) {
     final appState = Provider.of<Appstate>(context);
@@ -178,40 +166,40 @@ class _NetworkDashboardState extends State<NetworkDashboard>
         backgroundColor: const Color(0xFF0D47A1), // Dark blue
         foregroundColor: Colors.white,
         centerTitle: true, // Center the title
-        leading: Consumer<Appstate>(
-          builder: (context, appState, child) {
-            final notificationCount = appState.pushNotifications.length;
-            final incidentCount = appState.incidents
-                .where((i) => !i.hasResolution)
-                .length;
-            final hasAnyAlerts = notificationCount > 0 || incidentCount > 0;
+        // leading: Consumer<Appstate>(
+        //   builder: (context, appState, child) {
+        //     final notificationCount = appState.pushNotifications.length;
+        //     final incidentCount = appState.incidents
+        //         .where((i) => !i.hasResolution)
+        //         .length;
+        //     final hasAnyAlerts = notificationCount > 0 || incidentCount > 0;
 
-            return AnimatedBuilder(
-              animation: _vibrationAnimation,
-              builder: (context, child) {
-                return Transform.scale(
-                  scale: _vibrationAnimation.value,
-                  child: IconButton(
-                    icon: Icon(
-                      Icons.notifications,
-                      color: hasAnyAlerts ? Colors.red : Colors.white,
-                    ),
-                    onPressed: () {
-                      // Navigate to the notification screen
-                      Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (context) => const NotificationScreen(),
-                        ),
-                      );
-                    },
-                    tooltip:
-                        'Notifications & Incidents (${notificationCount + incidentCount})',
-                  ),
-                );
-              },
-            );
-          },
-        ),
+        //     return AnimatedBuilder(
+        //       animation: _vibrationAnimation,
+        //       builder: (context, child) {
+        //         return Transform.scale(
+        //           scale: _vibrationAnimation.value,
+        //           child: IconButton(
+        //             icon: Icon(
+        //               Icons.notifications,
+        //               color: hasAnyAlerts ? Colors.red : Colors.white,
+        //             ),
+        //             onPressed: () {
+        //               // Navigate to the notification screen
+        //               Navigator.of(context).push(
+        //                 MaterialPageRoute(
+        //                   builder: (context) => const NotificationScreen(),
+        //                 ),
+        //               );
+        //             },
+        //             tooltip:
+        //                 'Notifications & Incidents (${notificationCount + incidentCount})',
+        //           ),
+        //         );
+        //       },
+        //     );
+        //   },
+        // ),
         title: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -269,23 +257,23 @@ class _NetworkDashboardState extends State<NetworkDashboard>
             onPressed: () => _toggleChat(),
             tooltip: 'Toggle Chat',
           ),
-          // Topology view toggle button
-          Consumer<Appstate>(
-            builder: (context, appState, child) {
-              return IconButton(
-                icon: Icon(
-                  appState.currentTopologyView == TopologyViewType.map
-                      ? Icons.map
-                      : Icons.device_hub,
-                  color: Colors.white,
-                ),
-                onPressed: () => appState.toggleTopologyView(),
-                tooltip: appState.currentTopologyView == TopologyViewType.map
-                    ? 'Switch to Logical View'
-                    : 'Switch to Map View',
-              );
-            },
-          ),
+          // // Topology view toggle button
+          // Consumer<Appstate>(
+          //   builder: (context, appState, child) {
+          //     return IconButton(
+          //       icon: Icon(
+          //         appState.currentTopologyView == TopologyViewType.map
+          //             ? Icons.map
+          //             : Icons.device_hub,
+          //         color: Colors.white,
+          //       ),
+          //       onPressed: () => appState.toggleTopologyView(),
+          //       tooltip: appState.currentTopologyView == TopologyViewType.map
+          //           ? 'Switch to Logical View'
+          //           : 'Switch to Map View',
+          //     );
+          //   },
+          // ),
           // Anomaly toggle button
           Consumer<Appstate>(
              builder: (context, appState, child) {
@@ -327,23 +315,15 @@ class _NetworkDashboardState extends State<NetworkDashboard>
               );
             },
           ),
-          // Log toggle button
-          IconButton(
-            icon: Icon(
-              Icons.list_alt,
-              color: _showLogs ? Colors.amber : Colors.white,
-            ),
-            onPressed: _toggleLogs,
-            tooltip: 'Toggle Logs',
-          ),
-          IconButton(
-            icon: const Icon(Icons.menu_book),
-            onPressed: () {
-              // Open the drawer when the documentation icon is pressed
-              _scaffoldKey.currentState?.openEndDrawer();
-            },
-            tooltip: 'Documentation',
-          ),
+          // // Log toggle button
+          // IconButton(
+          //   icon: Icon(
+          //     Icons.list_alt,
+          //     color: _showLogs ? Colors.amber : Colors.white,
+          //   ),
+          //   onPressed: _toggleLogs,
+          //   tooltip: 'Toggle Logs',
+          // ),
           IconButton(
             icon: const Icon(Icons.settings),
             onPressed: () {
@@ -356,11 +336,11 @@ class _NetworkDashboardState extends State<NetworkDashboard>
           ),
         ],
       ),
-      // Add the markdown drawer as the end drawer
-      endDrawer: MarkdownDrawer(
-        markdownContent: _markdownContent,
-        title: 'Network Agent Resources',
-      ),
+      // // Add the markdown drawer as the end drawer
+      // endDrawer: MarkdownDrawer(
+      //   markdownContent: _markdownContent,
+      //   title: 'Network Agent Resources',
+      // ),
       body: Row(
         children: [
           // Left panel - Chat (only shown if _showChat is true)
