@@ -94,9 +94,8 @@ def getRunningTests()-> str:
         network_api = client.resources.get(
             api_version="google.dev/v1", 
             kind="TrafficTest",
-            namespace="default"
         )
-        tests=network_api.get()
+        tests=network_api.get(namespace="default")
         for t in tests.items:
             logger.debug(t)
             test_dict = t.to_dict()
