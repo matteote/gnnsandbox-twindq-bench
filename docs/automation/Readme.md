@@ -6,7 +6,17 @@ The Kubernetes operator is built on the [kopf](https://kopf.readthedocs.io/en/la
 
 Resources are reconciled declaratively — create, update and delete operations are all handled automatically.
 
----
+## Operator Logs
+
+To see the logs from the operator run the following commands
+
+```bash
+kubectl get pods
+# NAME                          READY   STATUS    RESTARTS   AGE
+# free5gc-operator-<UUID>        1/1     Running   0          9m22s
+
+kubectl logs -f free5gc-operator-<UUID>
+```
 
 ## Network Component Lifecycle Overview
 
@@ -468,14 +478,4 @@ kubectl delete infra l3vpn-hub-spoke-infra
 
 # Deploy the full L3VPN hub-spoke lab topology
 kubectl apply -f environment/telco-lab/l3vpn-hub-spoke.yaml
-```
-
-## Operator Logs
-
-```bash
-kubectl get pods
-# NAME                          READY   STATUS    RESTARTS   AGE
-# networkoperator-<UUID>        1/1     Running   0          88s
-
-kubectl logs -f networkoperator-<UUID>
 ```

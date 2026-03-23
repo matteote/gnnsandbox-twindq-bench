@@ -10,7 +10,7 @@ VyOS exposes two Prometheus-format metric endpoints on each router node. Both ar
 
 ### 1.1 System Metrics — `node_exporter` (port 9100)
 
-Provided by the Linux **node_exporter** running inside the VyOS VM. These cover broad operating system health.
+Provided by the Linux [**node_exporter**](https://github.com/prometheus/node_exporter) running inside the VyOS VM. These cover broad operating system health.
 
 | Category | Metric Prefix | Description |
 |---|---|---|
@@ -77,7 +77,9 @@ Provided by the Linux **node_exporter** running inside the VyOS VM. These cover 
 
 ### 1.2 Routing Metrics — `frr_exporter` (port 9101)
 
-Provided by the **frr_exporter** running on each VyOS router. These cover the FRR (Free Range Routing) stack.
+
+Provided by the [**frr_exporter**](https://github.com/tynany/frr_exporter
+) running on each VyOS router. These cover the FRR (Free Range Routing) stack.
 
 | Category | Metric | Description |
 |---|---|---|
@@ -85,12 +87,13 @@ Provided by the **frr_exporter** running on each VyOS router. These cover the FR
 | **Collector Health** | `frr_collector_up` | Whether each FRR collector scraped successfully (collectors: bfd, bgp, bgp6, ospf, route) |
 | | `frr_scrape_duration_seconds` | Time taken per collector scrape |
 | | `frr_scrapes_total` | Total number of FRR scrapes performed |
+| **BGP** | `frr_bgp_peer_prefixes_advertised_count_total` | Total prefixes advertised to a BGP peer (by AFI, neighbour address, VRF) |
+| | `frr_bgp_peer_uptime_seconds` | BGP peer session uptime in seconds (by AFI, neighbour address, VRF) |
 | **OSPF** | `frr_ospf_neighbors` | Number of OSPF neighbours detected per interface and VRF |
 | | `frr_ospf_neighbor_adjacencies` | Number of full OSPF adjacencies formed per interface and VRF |
 | **Routing Table** | `frr_route_total` | Total routes in the routing table (by AFI: ipv4 / ipv6, VRF) |
 | | `frr_route_total_fib` | Total routes installed in the FIB (forwarding table) |
 
-> **Note:** The example topology has 5 OSPF-speaking interfaces (eth1.301, eth2.302, eth3.309, eth4.305, eth5.310), each with 1 neighbour and 1 adjacency. The routing table shows 35 IPv4 routes and 6 IPv6 routes, with 29 IPv4 and 6 IPv6 installed in the FIB.
 
 ---
 
@@ -122,8 +125,10 @@ These are derived from **node_exporter** and categorised as `kind = SYSTEM`:
 | `node_load1` | gauge | 1-minute CPU load average |
 | `node_memory_SwapFree_bytes` | gauge | Free swap space in bytes |
 | `node_memory_MemTotal_bytes` | gauge | Total physical memory in bytes |
+| `node_memory_MemAvailable_bytes` | gauge | Available memory (including reclaimable) in bytes |
 | `node_network_up` | gauge | Interface operational state (1 = up, 0 = down) — per interface |
 | `node_network_carrier` | gauge | Physical carrier state — per interface |
+| `node_network_mtu_bytes` | gauge | Interface MTU in bytes — per interface |
 | `node_network_carrier_changes_total` | counter | Cumulative carrier flaps — per interface |
 | `node_network_receive_bytes_total` | counter | Bytes received — per interface |
 | `node_network_receive_drop_total` | counter | Receive drops — per interface |
@@ -141,6 +146,8 @@ These are derived from **frr_exporter** and categorised as `kind = ROUTING`:
 | Metric Name | Type | Labels | Description |
 |---|---|---|---|
 | `frr_bfd_peer_count` | gauge | — | Total BFD peers detected on the router |
+| `frr_bgp_peer_prefixes_advertised_count_total` | gauge | `afi`, `neighbor`, `vrf` | Total prefixes advertised to a BGP peer |
+| `frr_bgp_peer_uptime_seconds` | gauge | `afi`, `neighbor`, `vrf` | BGP peer session uptime in seconds |
 | `frr_collector_up` | gauge | `collector` | Health of each FRR data collector (bfd, bgp, bgp6, ospf, route) |
 | `frr_ospf_neighbor_adjacencies` | gauge | `area`, `iface`, `vrf` | Full OSPF adjacencies formed per interface |
 | `frr_ospf_neighbors` | gauge | `area`, `iface`, `vrf` | OSPF neighbours detected per interface |
@@ -177,7 +184,7 @@ VyOS Router
                               │
                     metricscollector (Cloud Run)
                     - Polls every 20s
-                    - Selects 23 specific metrics
+                    - Selects 27 specific metrics
                     - Filters to job="vyos-lab"
                     - Aggregates (rate or mean)
                               │

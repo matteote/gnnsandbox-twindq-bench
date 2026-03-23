@@ -55,9 +55,9 @@ EARLY_STOPPING_PATIENCE = 10  # Stop if no improvement for 10 epochs
 MIN_DELTA = 0.001  # Minimum change to qualify as an improvement
 
 # Multi-task objective weights
-ALPHA = 0.4  # Weight for Config Schema Loss
-BETA = 0.4   # Weight for Protocol State Schema Loss
-GAMMA = 0.2  # Weight for Interface Metrics Loss
+ALPHA = 0.4  # Weight for Router Loss
+BETA = 0.4   # Weight for BGP Session Loss
+GAMMA = 0.2  # Weight for Interface Loss
 DIVERSITY_WEIGHT = 0.1  # Weight for contrastive diversity penalty (10%)
 
 def contrastive_diversity_loss(embeddings_dict):
@@ -210,9 +210,9 @@ def run_training_pipeline():
             # ============ TRAINING PHASE ============
             model.train()
             train_loss_tensors = []
-            train_config_tensors = []
-            train_protocol_tensors = []
-            train_metrics_tensors = []
+            train_router_tensors = []
+            train_bgp_tensors = []
+            train_interface_tensors = []
             train_diversity_tensors = []
             
             for snap_idx, snapshot in enumerate(train_snapshots):
@@ -230,30 +230,27 @@ def run_training_pipeline():
                     logger.debug(f"Reconstruction output node types: {list(recon_dict.keys())}")
                     logger.debug(f"Embedding output node types: {list(embeddings.keys())}")
                 
-                loss_config = 0
-                loss_protocol = 0
-                loss_metrics = 0
+                loss_router = 0
+                loss_bgp = 0
+                loss_interface = 0
                 
                 # Compute multi-task objective loss
                 for node_type, recon_x in recon_dict.items():
                     if node_type in snapshot.x_dict:
                         node_loss = criterion(recon_x, snapshot.x_dict[node_type])
                         
-                        # Segregate loss accumulation by node type (config, protocol, metrics branches)
-                        # Match actual node type names from GraphBuilder
-                        if "Router_Config" in node_type:
-                            loss_config += node_loss
-                        elif "Protocol_State" in node_type:
-                            loss_protocol += node_loss
-                        else:
-                            # Interface, Interface_Metrics, and Router nodes go to metrics
-                            loss_metrics += node_loss
+                        if node_type == "router":
+                            loss_router += node_loss
+                        elif node_type == "bgp_session":
+                            loss_bgp += node_loss
+                        elif node_type == "interface":
+                            loss_interface += node_loss
                 
                 # Compute contrastive diversity loss to prevent representation collapse
                 diversity_loss = contrastive_diversity_loss(embeddings)
                 
                 # Total loss combines reconstruction + diversity penalty
-                total_weighted_loss = (ALPHA * loss_config) + (BETA * loss_protocol) + (GAMMA * loss_metrics)
+                total_weighted_loss = (ALPHA * loss_router) + (BETA * loss_bgp) + (GAMMA * loss_interface)
                 total_loss = total_weighted_loss + (DIVERSITY_WEIGHT * diversity_loss)
                 
                 total_loss.backward()
@@ -261,67 +258,67 @@ def run_training_pipeline():
                 
                 # Accumulate losses as tensors (detached from computation graph)
                 train_loss_tensors.append(total_loss.detach())
-                if isinstance(loss_config, torch.Tensor) and loss_config.numel() > 0:
-                    train_config_tensors.append(loss_config.detach())
-                if isinstance(loss_protocol, torch.Tensor) and loss_protocol.numel() > 0:
-                    train_protocol_tensors.append(loss_protocol.detach())
-                if isinstance(loss_metrics, torch.Tensor) and loss_metrics.numel() > 0:
-                    train_metrics_tensors.append(loss_metrics.detach())
+                if isinstance(loss_router, torch.Tensor) and loss_router.numel() > 0:
+                    train_router_tensors.append(loss_router.detach())
+                if isinstance(loss_bgp, torch.Tensor) and loss_bgp.numel() > 0:
+                    train_bgp_tensors.append(loss_bgp.detach())
+                if isinstance(loss_interface, torch.Tensor) and loss_interface.numel() > 0:
+                    train_interface_tensors.append(loss_interface.detach())
                 train_diversity_tensors.append(diversity_loss.detach())
             
             # Calculate training losses
             train_loss = torch.stack(train_loss_tensors).sum().item()
-            train_loss_config = torch.stack(train_config_tensors).sum().item() if train_config_tensors else 0.0
-            train_loss_protocol = torch.stack(train_protocol_tensors).sum().item() if train_protocol_tensors else 0.0
-            train_loss_metrics = torch.stack(train_metrics_tensors).sum().item() if train_metrics_tensors else 0.0
+            train_loss_router = torch.stack(train_router_tensors).sum().item() if train_router_tensors else 0.0
+            train_loss_bgp = torch.stack(train_bgp_tensors).sum().item() if train_bgp_tensors else 0.0
+            train_loss_interface = torch.stack(train_interface_tensors).sum().item() if train_interface_tensors else 0.0
             train_loss_diversity = torch.stack(train_diversity_tensors).mean().item() if train_diversity_tensors else 0.0
             
             # ============ VALIDATION PHASE ============
             model.eval()
             val_loss_tensors = []
-            val_config_tensors = []
-            val_protocol_tensors = []
-            val_metrics_tensors = []
+            val_router_tensors = []
+            val_bgp_tensors = []
+            val_interface_tensors = []
             val_diversity_tensors = []
             
             with torch.no_grad():
                 for snapshot in val_snapshots:
                     recon_dict, embeddings = model(snapshot.x_dict, snapshot.edge_index_dict)
                     
-                    loss_config = 0
-                    loss_protocol = 0
-                    loss_metrics = 0
+                    loss_router = 0
+                    loss_bgp = 0
+                    loss_interface = 0
                     
                     for node_type, recon_x in recon_dict.items():
                         if node_type in snapshot.x_dict:
                             node_loss = criterion(recon_x, snapshot.x_dict[node_type])
                             
-                            if "Router_Config" in node_type:
-                                loss_config += node_loss
-                            elif "Protocol_State" in node_type:
-                                loss_protocol += node_loss
-                            else:
-                                loss_metrics += node_loss
+                            if node_type == "router":
+                                loss_router += node_loss
+                            elif node_type == "bgp_session":
+                                loss_bgp += node_loss
+                            elif node_type == "interface":
+                                loss_interface += node_loss
                     
                     # Compute diversity loss for validation
                     diversity_loss = contrastive_diversity_loss(embeddings)
                     
-                    total_weighted_loss = (ALPHA * loss_config) + (BETA * loss_protocol) + (GAMMA * loss_metrics)
+                    total_weighted_loss = (ALPHA * loss_router) + (BETA * loss_bgp) + (GAMMA * loss_interface)
                     total_loss = total_weighted_loss + (DIVERSITY_WEIGHT * diversity_loss)
                     
                     val_loss_tensors.append(total_loss.detach())
-                    if isinstance(loss_config, torch.Tensor) and loss_config.numel() > 0:
-                        val_config_tensors.append(loss_config.detach())
-                    if isinstance(loss_protocol, torch.Tensor) and loss_protocol.numel() > 0:
-                        val_protocol_tensors.append(loss_protocol.detach())
-                    if isinstance(loss_metrics, torch.Tensor) and loss_metrics.numel() > 0:
-                        val_metrics_tensors.append(loss_metrics.detach())
+                    if isinstance(loss_router, torch.Tensor) and loss_router.numel() > 0:
+                        val_router_tensors.append(loss_router.detach())
+                    if isinstance(loss_bgp, torch.Tensor) and loss_bgp.numel() > 0:
+                        val_bgp_tensors.append(loss_bgp.detach())
+                    if isinstance(loss_interface, torch.Tensor) and loss_interface.numel() > 0:
+                        val_interface_tensors.append(loss_interface.detach())
                     val_diversity_tensors.append(diversity_loss.detach())
             
             val_loss = torch.stack(val_loss_tensors).sum().item()
-            val_loss_config = torch.stack(val_config_tensors).sum().item() if val_config_tensors else 0.0
-            val_loss_protocol = torch.stack(val_protocol_tensors).sum().item() if val_protocol_tensors else 0.0
-            val_loss_metrics = torch.stack(val_metrics_tensors).sum().item() if val_metrics_tensors else 0.0
+            val_loss_router = torch.stack(val_router_tensors).sum().item() if val_router_tensors else 0.0
+            val_loss_bgp = torch.stack(val_bgp_tensors).sum().item() if val_bgp_tensors else 0.0
+            val_loss_interface = torch.stack(val_interface_tensors).sum().item() if val_interface_tensors else 0.0
             val_loss_diversity = torch.stack(val_diversity_tensors).mean().item() if val_diversity_tensors else 0.0
             
             # Step the learning rate scheduler
@@ -331,8 +328,8 @@ def run_training_pipeline():
             # ============ LOGGING ============
             if (epoch + 1) % 5 == 0:
                 logger.info(f"Epoch {epoch+1}/{EPOCHS}, Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}, LR: {current_lr:.6f}")
-                logger.info(f"  Train - Config: {train_loss_config:.4f}, Protocol: {train_loss_protocol:.4f}, Metrics: {train_loss_metrics:.4f}, Diversity: {train_loss_diversity:.4f}")
-                logger.info(f"  Val   - Config: {val_loss_config:.4f}, Protocol: {val_loss_protocol:.4f}, Metrics: {val_loss_metrics:.4f}, Diversity: {val_loss_diversity:.4f}")
+                logger.info(f"  Train - Router: {train_loss_router:.4f}, BGP: {train_loss_bgp:.4f}, Interface: {train_loss_interface:.4f}, Diversity: {train_loss_diversity:.4f}")
+                logger.info(f"  Val   - Router: {val_loss_router:.4f}, BGP: {val_loss_bgp:.4f}, Interface: {val_loss_interface:.4f}, Diversity: {val_loss_diversity:.4f}")
             else:
                 logger.debug(f"Epoch {epoch+1}/{EPOCHS}, Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}")
             

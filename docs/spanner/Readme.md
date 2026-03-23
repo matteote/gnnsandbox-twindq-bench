@@ -126,23 +126,64 @@ The following edges are registered in the graph
 
 Tables tracking events, metrics, embeddings, and performance data.
 
+#### Metrics
+
+Selected Network metrics scraped from each Vyos Router are stored in spanner periodically as shown in the schema below. 
+
+![Network Metrics Graph](/docs/drawings/spanner/metrics.drawio.svg)
+
 | Table | Description | Key Fields | Key Relationships |
 | :--- | :--- | :--- | :--- |
 | `NetworkMetrics` | Time-series metrics (throughput, error rates, etc.). | `id`, `timestamp`, `kind`, `name`, `metrics`, `interface_id`, `node_name`, `metric_name`, `metric_type`, `value`, `labels`, `interface` | Linked to `PhysicalInterface` via `interface_id`. |
-| `KgLogEntryNode` | Raw log entries stored as knowledge graph nodes with embeddings. | `id`, `timestamp`, `severity`, `source`, `message`, `content`, `embedding` | Self-contained; indexed by `KgLogEntryNodeIdx1`. |
-| `NodeEmbedding` | GNN-generated vector embeddings and anomaly scores for graph nodes. | `id`, `node_id`, `node_type`, `stgnn_embedding`, `stgnn_score`, `dgat_embedding`, `dgat_score`, `hetgnn_embedding`, `hetgnn_score`, `anomaly_explanation`, `timestamp` | Linked to `PhysicalRouter` via `RouterHasEmbedding`. Linked to `PhysicalInterface` via `InterfaceHasEmbedding`. |
 
----
+The `NetworkMetrics` table collects specific metrics from the underlying VyOS routers using Prometheus. These are grouped into two categories:
 
-## 3. Indexes & Change Streams
+**System Metrics**
+These metrics track the underlying machine's hardware and network interface utilization:
+- `node_load1` (Gauge): 1-minute load average
+- `node_memory_SwapFree_bytes` (Gauge)
+- `node_memory_MemTotal_bytes` (Gauge)
+- `node_network_up` (Gauge): Interface operational state
+- `node_network_carrier` (Gauge): Link status
+- `node_network_carrier_changes_total` (Counter)
+- `node_network_receive_bytes_total` (Counter)
+- `node_network_receive_drop_total` (Counter)
+- `node_network_receive_errs_total` (Counter)
+- `node_network_receive_packets_total` (Counter)
+- `node_network_transmit_bytes_total` (Counter)
+- `node_network_transmit_drop_total` (Counter)
+- `node_network_transmit_errs_total` (Counter)
+- `node_network_transmit_packets_total` (Counter)
 
-| Object | Type | Table | Description |
+**Routing Metrics**
+These metrics track the FRR routing daemon's operation and BGP/OSPF/BFD statuses:
+- `frr_bfd_peer_count` (Gauge)
+- `frr_collector_up` (Gauge)
+- `frr_ospf_neighbor_adjacencies` (Gauge)
+- `frr_ospf_neighbors` (Gauge)
+- `frr_route_total` (Gauge)
+- `frr_route_total_fib` (Gauge)
+- `process_open_fds` (Gauge): File descriptors opened by the routing process
+- `process_network_receive_bytes_total` (Counter)
+- `process_network_transmit_bytes_total` (Counter)
+
+#### Logs
+
+| Table | Description | Key Fields | Key Relationships |
 | :--- | :--- | :--- | :--- |
-| `KgLogEntryNodeIdx1` | Index | `KgLogEntryNode` | Index on `timestamp DESC`, storing `severity`, `source`, `message`, `content`, `embedding` for efficient log queries. |
-| `NetworkMetricsIdx1` | Index | `NetworkMetrics` | Index on `timestamp DESC`, storing `interface_id`, `name`, `kind`, `node_name`, `metric_name`, `metric_type`, `value`, `labels`, `interface`. |
+| `KgLogEntryNode` | Raw log entries stored as knowledge graph nodes with embeddings. | `id`, `timestamp`, `severity`, `source`, `message`, `content`, `embedding` | Self-contained; indexed by `KgLogEntryNodeIdx1`. |
 
+#### Embeddings
 
-## 4. Querying the Data
+Embeddings from GNNs are stored in Spanner with node and graph properties as shown in the diagram below. 
+
+![Embeddings Model](/docs/drawings/spanner/embeddings.drawio.svg)
+
+| Table | Description | Key Fields | Key Relationships |
+| :--- | :--- | :--- | :--- |
+| `NodeEmbedding` | GNN-generated vector embeddings and anomaly scores for graph nodes. | `id`, `node_id`,  `hetgnn_embedding`, `hetgnn_score`, `timestamp` | Linked to `PhysicalRouter` via `RouterHasEmbedding`. Linked to `PhysicalInterface` via `InterfaceHasEmbedding`. |
+
+## 3. Querying the Data
 
 You can query the data using standard GoogleSQL or the Graph Query Language (GQL).
 
@@ -235,7 +276,7 @@ ORDER BY e.dgat_score DESC
 ```
 
 
-## 5. Derived Edges without Foreign Keys
+## 4. Derived Edges without Foreign Keys
 
 In our schema, we removed rigid Foreign Key constraints to increase write throughput and flexibility for the SCD model. Relationships are maintained via:
 

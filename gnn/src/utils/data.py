@@ -124,27 +124,10 @@ class SpannerDataset:
             router_types = {"PE Router": 0, "P Router": 0, "CE Router": 0}
             
             for row in results:
-                role = row[3]
+                # Always map to 'router'
+                node_type = "router"
                 
-                # Default to P Router
-                node_type = "P Router"
-                
-                # Normalize and map
-                if role:
-                    role_upper = role.upper()
-                    if role_upper == "PE":
-                         node_type = "PE Router"
-                    elif role_upper == "CE":
-                         node_type = "CE Router"
-                    elif role_upper == "P":
-                         node_type = "P Router"
-                    # Legacy fallback
-                    elif "PE" in role_upper:
-                         node_type = "PE Router"
-                    elif "CE" in role_upper:
-                         node_type = "CE Router"
-                
-                router_types[node_type] += 1
+                router_types[node_type] = router_types.get(node_type, 0) + 1
                 
                 # Encode state/status — Spanner stores "Running", "Failed", "Pending"
                 state_val = 1.0 if row[4] and row[4].lower() == "running" else 0.0
@@ -154,12 +137,14 @@ class SpannerDataset:
                     "type": node_type,
                     "hostname": row[1],
                     "config": row[2] if row[2] else "",
-                    "state": state_val
+                    "state": state_val,
+                    "cpu": 0.0,
+                    "mem": 0.0,
+                    "ospf_num_routes": 0.0
                 })
                 router_count += 1
             
-            logger.info(f"Fetched {router_count} routers - PE: {router_types['PE Router']}, "
-                       f"P: {router_types['P Router']}, CE: {router_types['CE Router']}")
+            logger.info(f"Fetched {router_count} routers")
                 
             # 2. Fetch Interfaces
             logger.debug("Querying PhysicalInterface table")
@@ -178,16 +163,13 @@ class SpannerDataset:
                     
                 snapshot_data["nodes"].append({
                     "id": row[0],
-                    "type": "Interface",
+                    "type": "interface",
                     "name": row[2],
                     "device_id": row[1],
                     "state": state_val,
-                    "rx_bytes": 0.0,   # populated below from NetworkMetrics
-                    "tx_bytes": 0.0,
-                    "rx_errors": 0.0,
-                    "tx_errors": 0.0,
-                    "rx_drops": 0.0,   # not available in current DB schema
+                    "rx_drops": 0.0,
                     "tx_drops": 0.0,
+                    "mtu_norm": 0.0
                 })
                 interface_count += 1
             
@@ -211,12 +193,13 @@ class SpannerDataset:
 
                 snapshot_data["nodes"].append({
                     "id": row[0],
-                    "type": "BGP_Session",
+                    "type": "bgp_session",
                     "vrf_id": row[1],
                     "local_as": int(row[2]) if row[2] else 0,
                     "remote_as": int(row[3]) if row[3] else 0,
                     "peer_ip": row[4] or "",
                     "state": state_val,
+                    "pfx_count_norm": 0.0
                 })
                 bgp_count += 1
 
@@ -226,7 +209,7 @@ class SpannerDataset:
             logger.debug("Creating Router -> Interface 'Owns' edges")
             owns_edge_count = 0
             for node in snapshot_data["nodes"]:
-                if node["type"] == "Interface":
+                if node["type"] == "interface":
                     snapshot_data["edges"].append({
                         "source": node["device_id"],
                         "target": node["id"],
@@ -277,7 +260,7 @@ class SpannerDataset:
             peering_edge_count = 0
 
             # Build a set of valid BGP session IDs for fast lookup
-            bgp_session_ids = {n["id"] for n in snapshot_data["nodes"] if n["type"] == "BGP_Session"}
+            bgp_session_ids = {n["id"] for n in snapshot_data["nodes"] if n["type"] == "bgp_session"}
 
             for row in results:
                 src, dst = row[0], row[1]
@@ -299,20 +282,23 @@ class SpannerDataset:
             interface_nodes = [n for n in snapshot_data["nodes"] if n["type"] == "Interface"]
 
             PROMETHEUS_METRIC_MAP = {
-                "node_network_receive_bytes_total":  "rx_bytes",
-                "node_network_transmit_bytes_total": "tx_bytes",
-                "node_network_receive_errs_total":   "rx_errors",
-                "node_network_transmit_errs_total":  "tx_errors",
+                # interface
                 "node_network_receive_drop_total":   "rx_drops",
                 "node_network_transmit_drop_total":  "tx_drops",
+                "node_network_mtu_bytes":            "mtu_norm",
+                # router
+                "node_load1":                        "cpu",
+                "node_memory_MemAvailable_bytes":    "mem",
+                "frr_route_total":                   "ospf_num_routes",
+                # bgp_session
+                "frr_bgp_peer_prefixes_advertised_count_total":    "pfx_count_norm",
             }
 
             query_prom_metrics = """
-                SELECT node_name, interface, metric_name, value
+                SELECT node_name, interface, metric_name, value, labels
                 FROM NetworkMetrics
                 WHERE timestamp > @t_start AND timestamp <= @t_end
                 AND node_name IS NOT NULL
-                AND interface IS NOT NULL
                 AND metric_name IN UNNEST(@metric_names)
             """
             params_prom = {
@@ -328,38 +314,77 @@ class SpannerDataset:
 
             prom_results = sn.execute_sql(query_prom_metrics, params=params_prom, param_types=param_types_prom)
 
-            # Aggregate multiple samples in the window by averaging per interface/metric.
+            # Aggregate multiple samples in the window by averaging.
             prom_agg: Dict[str, Dict[str, list]] = {}
             for row in prom_results:
-                node_name, iface_name, metric_name, value = row
-                if not node_name or not iface_name or value is None:
+                node_name, iface_name, metric_name, value, labels_json = row
+                if not node_name or value is None:
                     continue
-                iface_id = f"router:{node_name}:interface:{iface_name}"
+                
                 metric_key = PROMETHEUS_METRIC_MAP.get(metric_name)
-                if metric_key:
-                    prom_agg.setdefault(iface_id, {}).setdefault(metric_key, []).append(float(value))
+                if not metric_key:
+                    continue
+                    
+                # Parse labels if needed
+                labels = {}
+                try:
+                    if labels_json:
+                        labels = json.loads(labels_json)
+                except: pass
+                
+                if metric_key in ["rx_drops", "tx_drops", "mtu_norm"]:
+                    if iface_name:
+                        target_id = f"router:{node_name}:interface:{iface_name}"
+                        prom_agg.setdefault(target_id, {}).setdefault(metric_key, []).append(float(value))
+                elif metric_key in ["cpu", "mem", "ospf_num_routes"]:
+                    target_id = node_name
+                    prom_agg.setdefault(target_id, {}).setdefault(metric_key, []).append(float(value))
+                elif metric_key == "pfx_count_norm":
+                    peer_ip = labels.get("peer")
+                    if peer_ip:
+                        target_id = f"bgp:{node_name}:{peer_ip}"
+                        prom_agg.setdefault(target_id, {}).setdefault(metric_key, []).append(float(value))
 
             avg_metrics: Dict[str, Dict[str, float]] = {
-                iface_id: {k: sum(vs) / len(vs) for k, vs in metrics_by_key.items() if vs}
-                for iface_id, metrics_by_key in prom_agg.items()
+                target_id: {k: sum(vs) / len(vs) for k, vs in metrics_by_key.items() if vs}
+                for target_id, metrics_by_key in prom_agg.items()
             }
-            logger.debug(f"Prometheus metrics resolved for {len(avg_metrics)} interface IDs")
+            logger.debug(f"Prometheus metrics resolved for {len(avg_metrics)} IDs")
 
-            # Apply averaged metrics to interface nodes.
+            # Apply averaged metrics to nodes.
             metrics_applied = 0
-            for node in interface_nodes:
-                node_id = node.get("id", "")
-                m = avg_metrics.get(node_id, {})
-                node["rx_bytes"]  = m.get("rx_bytes",  0.0)
-                node["tx_bytes"]  = m.get("tx_bytes",  0.0)
-                node["rx_errors"] = m.get("rx_errors", 0.0)
-                node["tx_errors"] = m.get("tx_errors", 0.0)
-                node["rx_drops"]  = m.get("rx_drops",  0.0)
-                node["tx_drops"]  = m.get("tx_drops",  0.0)
-                if m:
-                    metrics_applied += 1
+            for node in snapshot_data["nodes"]:
+                node_type = node.get("type", "")
+                
+                if node_type == "interface":
+                    node_id = node.get("id", "")
+                    m = avg_metrics.get(node_id, {})
+                    node["rx_drops"]  = m.get("rx_drops",  0.0)
+                    node["tx_drops"]  = m.get("tx_drops",  0.0)
+                    mtu = m.get("mtu_norm", 0.0)
+                    node["mtu_norm"] = mtu / 9000.0 if mtu > 0 else 0.0
+                    if m: metrics_applied += 1
+                
+                elif node_type == "router":
+                    hostname = node.get("hostname", "")
+                    m = avg_metrics.get(hostname, {})
+                    node["cpu"] = m.get("cpu", 0.0)
+                    # Normalize mem (simple division mapping to 0-1)
+                    mem = m.get("mem", 0.0)
+                    node["mem"] = min(mem / (4 * 1024 * 1024 * 1024), 1.0) # Assume 4GB base
+                    node["ospf_num_routes"] = m.get("ospf_num_routes", 0.0)
+                    if m: metrics_applied += 1
+                    
+                elif node_type == "bgp_session":
+                    peer_ip = node.get("peer_ip", "")
+                    # Match by peer_ip
+                    for target_id, m in avg_metrics.items():
+                        if target_id.startswith("bgp:") and target_id.endswith(f":{peer_ip}"):
+                            node["pfx_count_norm"] = m.get("pfx_count_norm", 0.0)
+                            metrics_applied += 1
+                            break
 
-            logger.info(f"Applied metrics to {metrics_applied}/{interface_count} interfaces")
+            logger.info(f"Applied metrics to nodes: {metrics_applied}")
 
         total_edges = len(snapshot_data["edges"])
         total_nodes = len(snapshot_data["nodes"])
@@ -428,32 +453,30 @@ if __name__ == "__main__":
                   "  ".join(f"{k}={v}" for k, v in sorted(edge_types.items())))
 
             # Print BGP session status
-            bgp_nodes = [n for n in snap["nodes"] if n["type"] == "BGP_Session"]
+            bgp_nodes = [n for n in snap["nodes"] if n["type"] == "bgp_session"]
             if bgp_nodes:
                 established = sum(1 for n in bgp_nodes if n.get("state") == 1.0)
                 idle = len(bgp_nodes) - established
                 print(f"         BGP sessions ({len(bgp_nodes)}): {established} established, {idle} idle/down")
                 for s in bgp_nodes:
                     state_str = "ESTABLISHED" if s.get("state") == 1.0 else "IDLE/DOWN   "
-                    print(f"           {state_str}  {s['id']:<60}  peer={s.get('peer_ip','?')}")
+                    print(f"           {state_str}  {s['id']:<60}  peer={s.get('peer_ip','?')} pfx={s.get('pfx_count_norm', 0.0):.2f}")
             else:
                 print("         No BGP session nodes found in this snapshot.")
 
             # Print metrics for every interface node
-            iface_nodes = [n for n in snap["nodes"] if n["type"] == "Interface"]
+            iface_nodes = [n for n in snap["nodes"] if n["type"] == "interface"]
             if iface_nodes:
                 print(f"         Interface metrics ({len(iface_nodes)} interfaces):")
-                print(f"           {'Name':<30} {'State':<6} {'rx_bytes':>12} {'tx_bytes':>12} "
-                      f"{'rx_errors':>10} {'tx_errors':>10} {'rx_drops':>10} {'tx_drops':>10}")
-                print(f"           {'-'*30} {'-'*6} {'-'*12} {'-'*12} {'-'*10} {'-'*10} {'-'*10} {'-'*10}")
+                print(f"           {'Name':<30} {'State':<6} {'rx_drops':>10} {'tx_drops':>10} {'mtu_norm':>10}")
+                print(f"           {'-'*30} {'-'*6} {'-'*10} {'-'*10} {'-'*10}")
                 for iface in iface_nodes:
                     name  = iface.get("name", iface["id"])[:30]
                     state = "up" if iface.get("state") == 1.0 else "down"
                     print(
                         f"           {name:<30} {state:<6} "
-                        f"{iface.get('rx_bytes', 0):>12.0f} {iface.get('tx_bytes', 0):>12.0f} "
-                        f"{iface.get('rx_errors', 0):>10.0f} {iface.get('tx_errors', 0):>10.0f} "
-                        f"{iface.get('rx_drops', 0):>10.0f} {iface.get('tx_drops', 0):>10.0f}"
+                        f"{iface.get('rx_drops', 0):>10.0f} {iface.get('tx_drops', 0):>10.0f} "
+                        f"{iface.get('mtu_norm', 0):>10.2f}"
                     )
             else:
                 print("         No interface nodes found in this snapshot.")

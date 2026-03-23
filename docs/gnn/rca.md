@@ -1,22 +1,41 @@
 # Failure Pinpointing
 
-A Heterogeneous Graph Neural Network (HetGNN) is trained in an unsupervised manner to learn what good looks like and to detect anomalies that can indicate the root cause of issues. 
+A HetGNN is trained on historical network topology and state to identify anomalies that could point to the root cause of an issue. The HetGNN is trained in an unsupervised manner to learn what good looks like.
 
-**HetGNN's supports multiple types of nodes and edges** such as physical devices, logical protocols, traffic metrics, and configurations are mapped to to distinct node/edge types, HetGNNs are trained on interconnected failures. 
+[The following faults can be introduced to the system](/docs/network/FAULT_INJECTION.md)
 
-For root cause analysis, HetGNNs can distinctly model the relationship between a `PhysicalRouter`'s configuration changes, an `PhysicalInterface`'s telemetry metrics, and a `BGPSession`'s state changes. When an anomaly occurs, analyzing which sub-embedding (Config, Protocol, or Metric) deviated the most isolates the root cause layer. 
+For root cause analysis, HetGNNs can distinctly model the relationship between a `PhysicalRouter`'s configuration changes, an `PhysicalInterface`'s telemetry metrics, and a `BGPSession`'s state changes. When an anomaly occurs, analyzing which deviated the most isolates the root cause layer. 
 
 ## Network Features
 
-The types of nodes and edges representing the state of the simulated network are shown in the diagram below. 
+The following types of nodes and edges capture the state of the vyos virtual network.
 
 ![Network Features](/docs/drawings/gnn/hetgnn-features.drawio.svg)
 
-| Node type | Features |
-|-----------|----------|
-| `router` | ospf state, state |
-| `interface` | tx_drops, rx_drops, mtu_norm |
-| `bgp_session` | bgp_state, pfx_count_norm |
+Features are populated by joining two data sources at snapshot time: the **topology tables** (SCD Type 2 rows from the operator) and the **`NetworkMetrics` table** (time-series data written by `logservices/metricscollector`). Each feature is averaged over the 5-minute snapshot window before being log-transformed and `StandardScaler`-normalised.
+
+#### `router` node
+
+| Feature | Source metric | Derivation | Description |
+|---------|---------------|------------|-------------|
+| `cpu` | `node_load1` | Mean value over snapshot window (`ALIGN_MEAN`) | 1-minute CPU load average reported by `node_exporter`. Not bounded — values >1 indicate the router is under load. |
+| `mem` | `node_memory_MemAvailable_bytes` | `min(bytes / 4 GiB, 1.0)` | Available memory normalised to [0, 1] against a 4 GiB baseline. Higher values mean more memory is free; lower values indicate memory pressure. |
+| `ospf_num_routes` | `frr_route_total` (afi=`ipv4`) | Raw count from `frr_exporter` | Total IPv4 routes currently in the FRR routing table. A sudden drop signals a routing convergence event or protocol failure. |
+
+#### `interface` node
+
+| Feature | Source metric | Derivation | Description |
+|---------|---------------|------------|-------------|
+| `rx_drops` | `node_network_receive_drop_total` | Per-second drop rate (`ALIGN_RATE`) | Rate of inbound packets dropped at the interface. Non-zero values indicate congestion, buffer exhaustion, or MTU mismatches. |
+| `tx_drops` | `node_network_transmit_drop_total` | Per-second drop rate (`ALIGN_RATE`) | Rate of outbound packets dropped at the interface. Typically caused by egress queue overflow. |
+| `mtu_norm` | `node_network_mtu_bytes` | `bytes / 9000` | Interface MTU normalised against a 9000-byte jumbo-frame maximum. A value of ~0.167 represents a standard 1500-byte MTU; a change across a link boundary is a common fault trigger. |
+
+#### `bgp_session` node
+
+| Feature | Source | Derivation | Description |
+|---------|--------|------------|-------------|
+| `bgp_state` | `BGPSession.status` (Spanner topology table) | `1.0` = Established, `0.0` = all other states | Session establishment state maintained by the network operator. A transition to 0.0 indicates the peering has dropped. |
+| `pfx_count_norm` | `frr_bgp_peer_prefixes_advertised_count_total` | Raw prefix count (log-transformed at scaler-fit time) | Number of prefixes the local router is advertising to the peer. An unexpected drop or spike is a strong fault indicator for route-leak or withdrawal events. |
 
 ## GNN Model Architecture
 

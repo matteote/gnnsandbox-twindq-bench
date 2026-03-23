@@ -774,20 +774,6 @@ Kill()
     gcloud pubsub topics delete $TOPIC_NAME --quiet
     gcloud functions delete $CAPTURE_LOG_FUNCTION --region=$GOOGLE_REGION  --quiet
 
-    # Launch the kubectl command in the background
-    kubectl delete -f environment/networks.yaml &
-    job_id=$!
-
-    # For the timeout duration check that the command is still running
-    # if the timeout popped (return code 124) then clean up the finalizers
-    # to unblock the kubectl command
-    timeout 2m sh -c "while kill -0 $job_id 2>/dev/null; do sleep 1; done"
-    if [ $? -eq 124 ]; then
-      kubectl patch computefirewalls dataplane --patch '{"metadata":{"finalizers":[]}}'  --type=merge
-      kubectl patch computesubnetworks dataplane --patch '{"metadata":{"finalizers":[]}}'  --type=merge
-      kubectl patch computenetworks dataplane --patch '{"metadata":{"finalizers":[]}}'  --type=merge
-    fi
-
     # Delete Vertex AI GNN resources
     echo "Cleaning up Vertex AI GNN resources..."
     
