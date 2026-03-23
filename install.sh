@@ -1066,7 +1066,6 @@ DeployGNN()
 {
     export GOOGLE_SERVICE_ACCOUNT=`gcloud iam service-accounts list --format="value(email)" --filter="networkagent@${GOOGLE_PROJECT}."`
     TRAIN_VERTEX_IMAGE="$GOOGLE_REGION-docker.pkg.dev/$GOOGLE_PROJECT/$GOOGLE_REPO/traingnn-vertex:latest"
-    INFER_IMAGE="$GOOGLE_REGION-docker.pkg.dev/$GOOGLE_PROJECT/$GOOGLE_REPO/infergnn-cloudrun:latest"
 
     # ── 1. Build all GNN Docker images via Cloud Build ─────────────────────────
     if [[ $YES_FLAG != "y" ]] && [[ $NO_FLAG != "y" ]] && \
@@ -1143,50 +1142,17 @@ DeployGNN()
         --service-account "$GOOGLE_SERVICE_ACCOUNT"
     echo "  Pipeline submitted — monitor at: https://console.cloud.google.com/vertex-ai/pipelines?project=$GOOGLE_PROJECT"
 
-    # ── 5. Deploy GNN inference Cloud Run Job ──────────────────────────────────
-    echo "Deploying GNN inference Cloud Run Job (gnn-infer)..."
-    gcloud run jobs deploy gnn-infer \
-        --image "$INFER_IMAGE" \
-        --region "$GOOGLE_REGION" \
-        --service-account "$GOOGLE_SERVICE_ACCOUNT" \
-        --set-env-vars "GCS_BUCKET_NAME=$GOOGLE_GNN_BUCKET" \
-        --set-env-vars "SPANNER_INSTANCE=$GOOGLE_SPANNER_INSTANCE" \
-        --set-env-vars "SPANNER_DATABASE=$GOOGLE_SPANNER_DATABASE" \
-        --set-env-vars "GOOGLE_PROJECT=$GOOGLE_PROJECT" \
-        --set-env-vars "GOOGLE_REGION=$GOOGLE_REGION" \
-        --max-retries 2 \
-        --task-timeout 300 \
-        --memory 2Gi \
-        --cpu 2
-
-    # ── 6. Create Cloud Scheduler job to trigger inference every 60 seconds ───
-    # Cloud Scheduler minimum granularity is 1 minute (cron "* * * * *")
-    INFER_JOB_URI="https://run.googleapis.com/v2/projects/$GOOGLE_PROJECT/locations/$GOOGLE_REGION/jobs/gnn-infer:run"
-    echo "Creating/updating Cloud Scheduler job gnn-inference-scheduler..."
-    gcloud scheduler jobs describe gnn-inference-scheduler --location=$GOOGLE_REGION > /dev/null 2>&1
-    if [[ $? -ne 0 ]]; then
-        gcloud scheduler jobs create http gnn-inference-scheduler \
-            --location "$GOOGLE_REGION" \
-            --schedule "* * * * *" \
-            --uri "$INFER_JOB_URI" \
-            --http-method POST \
-            --oauth-service-account-email "$GOOGLE_SERVICE_ACCOUNT" \
-            --message-body '{}' \
-            --attempt-deadline 320s \
-            --description "Trigger GNN inference Cloud Run Job every 60 seconds"
-    else
-        echo "  Scheduler job already exists — updating schedule..."
-        gcloud scheduler jobs update http gnn-inference-scheduler \
-            --location "$GOOGLE_REGION" \
-            --schedule "* * * * *" \
-            --uri "$INFER_JOB_URI"
-    fi
-    echo "  Cloud Scheduler job gnn-inference-scheduler configured."
+    # ── 5. Cloud Scheduler is managed by the KFP pipeline ─────────────────────
+    # The pipeline's update_inference_scheduler step (step 7) automatically
+    # creates or updates the gnn-inference-scheduler Cloud Scheduler job to
+    # call the Vertex AI Endpoint's /predict route every minute.
+    # No manual scheduler setup is required here.
     echo ""
     echo "GNN deployment complete!"
     echo "  Pipeline:   https://console.cloud.google.com/vertex-ai/pipelines?project=$GOOGLE_PROJECT"
-    echo "  Infer job:  https://console.cloud.google.com/run/jobs?project=$GOOGLE_PROJECT"
+    echo "  Endpoint:   https://console.cloud.google.com/vertex-ai/endpoints?project=$GOOGLE_PROJECT"
     echo "  Scheduler:  https://console.cloud.google.com/cloudscheduler?project=$GOOGLE_PROJECT"
+    echo "  (Cloud Scheduler job will be created/updated by the pipeline after training completes)"
 }
 
 ############################################################

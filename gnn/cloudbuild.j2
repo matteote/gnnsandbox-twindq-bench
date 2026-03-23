@@ -30,16 +30,6 @@ steps:
       -f gnn/Dockerfile.serve.vertex .
   automapSubstitutions: true
 
-- name: 'gcr.io/cloud-builders/docker'
-  id: build-infergnn-cloudrun
-  waitFor: ['-']
-  script: |
-    docker build \
-      -t {{GOOGLE_REGION}}-docker.pkg.dev/{{GOOGLE_PROJECT}}/{{GOOGLE_REPO}}/infergnn-cloudrun:latest \
-      -f gnn/Dockerfile.infer.cloudrun .
-  automapSubstitutions: true
-
 images:
 - '{{GOOGLE_REGION}}-docker.pkg.dev/{{GOOGLE_PROJECT}}/{{GOOGLE_REPO}}/traingnn-vertex:latest'
 - '{{GOOGLE_REGION}}-docker.pkg.dev/{{GOOGLE_PROJECT}}/{{GOOGLE_REPO}}/servegnn-vertex:latest'
-- '{{GOOGLE_REGION}}-docker.pkg.dev/{{GOOGLE_PROJECT}}/{{GOOGLE_REPO}}/infergnn-cloudrun:latest'

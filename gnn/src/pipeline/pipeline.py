@@ -26,6 +26,7 @@ from components.train import train_model
 from components.evaluate import evaluate_model
 from components.register import register_model
 from components.deploy import deploy_endpoint
+from components.update_scheduler import update_inference_scheduler
 
 
 @pipeline(
@@ -94,6 +95,7 @@ def gnn_training_pipeline(
         snapshots_gcs_path=ingest_task.outputs["snapshots_gcs_path"],
         scalers_gcs_path=scalers_task.outputs["scalers_gcs_path"],
         train_image_uri=train_image_uri,
+        gcs_bucket=gcs_bucket,
         service_account=service_account,
     )
 
@@ -113,9 +115,17 @@ def gnn_training_pipeline(
         hetgnn_eval_task.outputs["Output"] < max_hetgnn_val_loss,
         name="hetgnn-quality-gate",
     ):
-        deploy_endpoint(
+        deploy_task = deploy_endpoint(
             project=project,
             region=region,
             hetgnn_model_resource_name=register_task.outputs["hetgnn_model_resource_name"],
             endpoint_resource_name=endpoint_resource_name,
+        )
+
+        # Step 7 — Update Cloud Scheduler to call the newly deployed endpoint
+        update_inference_scheduler(
+            project=project,
+            region=region,
+            service_account=service_account,
+            deployed_endpoint=deploy_task.outputs["deployed_endpoint"],
         )

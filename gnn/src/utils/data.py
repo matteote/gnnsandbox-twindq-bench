@@ -15,7 +15,7 @@ class SpannerDataset:
     def __init__(self, instance_id: str, database_id: str, num_snapshots: int = 50, interval_minutes: int = 5, project_id: Optional[str] = None):
         logger.info(f"Initializing SpannerDataset: instance_id={instance_id}, database_id={database_id}, "
                    f"num_snapshots={num_snapshots}, interval_minutes={interval_minutes}, project_id={project_id}")
-        
+
         creds_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "/agent/networkagent.json")
         if creds_path and os.path.exists(creds_path):
             logger.debug(f"Loading credentials from file: {creds_path}")
@@ -23,7 +23,11 @@ class SpannerDataset:
                 creds_path, scopes=["https://www.googleapis.com/auth/cloud-platform"]
             )
             effective_project = project_id or detected_project
-            self.client = spanner.Client(project=effective_project, credentials=credentials)
+            self.client = spanner.Client(
+                project=effective_project,
+                credentials=credentials,
+                disable_builtin_metrics=True,
+            )
         else:
             # Running on Vertex AI / Cloud Run with ADC (no key file mounted).
             # Explicitly resolve credentials + project via google.auth.default() so we
@@ -37,7 +41,11 @@ class SpannerDataset:
             )
             effective_project = project_id or detected_project
             logger.debug(f"ADC resolved project: {detected_project!r}, effective project: {effective_project!r}")
-            self.client = spanner.Client(project=effective_project, credentials=credentials)
+            self.client = spanner.Client(
+                project=effective_project,
+                credentials=credentials,
+                disable_builtin_metrics=True,
+            )
         self.instance = self.client.instance(instance_id)
         self.database = self.instance.database(database_id)
         self.num_snapshots = num_snapshots
@@ -140,7 +148,8 @@ class SpannerDataset:
                     "state": state_val,
                     "cpu": 0.0,
                     "mem": 0.0,
-                    "ospf_num_routes": 0.0
+                    "ospf_num_routes": 0.0,
+                    "pfx_count_norm": 0.0,
                 })
                 router_count += 1
             
@@ -175,37 +184,7 @@ class SpannerDataset:
             
             logger.info(f"Fetched {interface_count} interfaces ({interface_up_count} up, {interface_count - interface_up_count} down)")
 
-            # 3. Fetch BGP Sessions
-            logger.debug("Querying BGPSession table")
-            query_bgp = f"""
-                SELECT id, vrf_id, local_as, remote_as, peer_ip, status
-                FROM BGPSession WHERE {valid_filter}
-            """
-            results = sn.execute_sql(query_bgp, params=params, param_types=param_types)
-            bgp_count = 0
-            bgp_established_count = 0
-
-            for row in results:
-                status = row[5]
-                state_val = 1.0 if status and status.lower() == "established" else 0.0
-                if state_val == 1.0:
-                    bgp_established_count += 1
-
-                snapshot_data["nodes"].append({
-                    "id": row[0],
-                    "type": "bgp_session",
-                    "vrf_id": row[1],
-                    "local_as": int(row[2]) if row[2] else 0,
-                    "remote_as": int(row[3]) if row[3] else 0,
-                    "peer_ip": row[4] or "",
-                    "state": state_val,
-                    "pfx_count_norm": 0.0
-                })
-                bgp_count += 1
-
-            logger.info(f"Fetched {bgp_count} BGP sessions ({bgp_established_count} established, {bgp_count - bgp_established_count} idle/down)")
-
-            # 4. Router -> Interface Edges (Owns)
+            # 3. Router -> Interface Edges (Owns)
             logger.debug("Creating Router -> Interface 'Owns' edges")
             owns_edge_count = 0
             for node in snapshot_data["nodes"]:
@@ -219,7 +198,7 @@ class SpannerDataset:
 
             logger.debug(f"Created {owns_edge_count} 'Owns' edges")
 
-            # 5. Interface <-> Interface Edges (Connected)
+            # 4. Interface <-> Interface Edges (Connected)
             # Find interfaces sharing a link
             logger.debug("Querying Interface_Link table for 'Connected' edges")
             query_links = f"""
@@ -249,37 +228,12 @@ class SpannerDataset:
             
             logger.debug(f"Created {connected_edge_count} 'Connected' edges")
 
-            # 6. BGP_Session PeersWith Edges (from BGP_Peering table)
-            logger.debug("Querying BGP_Peering table for 'PeersWith' edges")
-            query_peering = f"""
-                SELECT session_id_a, session_id_b
-                FROM BGP_Peering
-                WHERE {valid_filter}
-            """
-            results = sn.execute_sql(query_peering, params=params, param_types=param_types)
-            peering_edge_count = 0
-
-            # Build a set of valid BGP session IDs for fast lookup
-            bgp_session_ids = {n["id"] for n in snapshot_data["nodes"] if n["type"] == "bgp_session"}
-
-            for row in results:
-                src, dst = row[0], row[1]
-                # Only add if both sessions exist in the current snapshot
-                if src in bgp_session_ids and dst in bgp_session_ids:
-                    snapshot_data["edges"].append({"source": src, "target": dst, "relation": "PeersWith"})
-                    snapshot_data["edges"].append({"source": dst, "target": src, "relation": "PeersWith"})
-                    peering_edge_count += 2
-
-            logger.info(f"Created {peering_edge_count} 'PeersWith' edges from {peering_edge_count // 2} BGP peering pairs")
-
-            # 7. Apply Prometheus metrics (metricscollector)
+            # 5. Apply Prometheus metrics (metricscollector)
             # Rows written by the metricscollector have node_name (router hostname),
             # interface (interface name), metric_name, and value columns.
             # PhysicalInterface ID = "router:{node_name}:interface:{interface}".
             t_start = timestamp - datetime.timedelta(minutes=self.interval_minutes)
             logger.debug(f"Querying Prometheus NetworkMetrics for time range: {t_start.isoformat()} to {timestamp.isoformat()}")
-
-            interface_nodes = [n for n in snapshot_data["nodes"] if n["type"] == "Interface"]
 
             PROMETHEUS_METRIC_MAP = {
                 # interface
@@ -290,7 +244,7 @@ class SpannerDataset:
                 "node_load1":                        "cpu",
                 "node_memory_MemAvailable_bytes":    "mem",
                 "frr_route_total":                   "ospf_num_routes",
-                # bgp_session
+                # router — BGP prefix count summed across all peers on the router
                 "frr_bgp_peer_prefixes_advertised_count_total":    "pfx_count_norm",
             }
 
@@ -336,14 +290,11 @@ class SpannerDataset:
                     if iface_name:
                         target_id = f"router:{node_name}:interface:{iface_name}"
                         prom_agg.setdefault(target_id, {}).setdefault(metric_key, []).append(float(value))
-                elif metric_key in ["cpu", "mem", "ospf_num_routes"]:
+                elif metric_key in ["cpu", "mem", "ospf_num_routes", "pfx_count_norm"]:
+                    # pfx_count_norm is emitted once per BGP peer; accumulate all peers'
+                    # values under the router hostname and sum them in avg_metrics below.
                     target_id = node_name
                     prom_agg.setdefault(target_id, {}).setdefault(metric_key, []).append(float(value))
-                elif metric_key == "pfx_count_norm":
-                    peer_ip = labels.get("peer")
-                    if peer_ip:
-                        target_id = f"bgp:{node_name}:{peer_ip}"
-                        prom_agg.setdefault(target_id, {}).setdefault(metric_key, []).append(float(value))
 
             avg_metrics: Dict[str, Dict[str, float]] = {
                 target_id: {k: sum(vs) / len(vs) for k, vs in metrics_by_key.items() if vs}
@@ -371,18 +322,13 @@ class SpannerDataset:
                     node["cpu"] = m.get("cpu", 0.0)
                     # Normalize mem (simple division mapping to 0-1)
                     mem = m.get("mem", 0.0)
-                    node["mem"] = min(mem / (4 * 1024 * 1024 * 1024), 1.0) # Assume 4GB base
+                    node["mem"] = min(mem / (4 * 1024 * 1024 * 1024), 1.0)  # Assume 4 GiB base
                     node["ospf_num_routes"] = m.get("ospf_num_routes", 0.0)
+                    # pfx_count_norm: sum of per-peer prefix counts collected in the
+                    # window, averaged over scrape intervals (StandardScaler normalises
+                    # the absolute scale at training time).
+                    node["pfx_count_norm"] = m.get("pfx_count_norm", 0.0)
                     if m: metrics_applied += 1
-                    
-                elif node_type == "bgp_session":
-                    peer_ip = node.get("peer_ip", "")
-                    # Match by peer_ip
-                    for target_id, m in avg_metrics.items():
-                        if target_id.startswith("bgp:") and target_id.endswith(f":{peer_ip}"):
-                            node["pfx_count_norm"] = m.get("pfx_count_norm", 0.0)
-                            metrics_applied += 1
-                            break
 
             logger.info(f"Applied metrics to nodes: {metrics_applied}")
 
@@ -446,23 +392,25 @@ if __name__ == "__main__":
 
             print(f"[{i+1:02d}/{NUM_SNAPSHOTS}]  {ts.isoformat()}")
             print("         Full Snapshot Model:")
-            print(json.dumps(snap, indent=2))
+            # print(json.dumps(snap, indent=2))
             print(f"         Nodes  ({sum(node_types.values())}): " +
                   "  ".join(f"{k}={v}" for k, v in sorted(node_types.items())))
             print(f"         Edges  ({sum(edge_types.values())}): " +
                   "  ".join(f"{k}={v}" for k, v in sorted(edge_types.items())))
 
-            # Print BGP session status
-            bgp_nodes = [n for n in snap["nodes"] if n["type"] == "bgp_session"]
-            if bgp_nodes:
-                established = sum(1 for n in bgp_nodes if n.get("state") == 1.0)
-                idle = len(bgp_nodes) - established
-                print(f"         BGP sessions ({len(bgp_nodes)}): {established} established, {idle} idle/down")
-                for s in bgp_nodes:
-                    state_str = "ESTABLISHED" if s.get("state") == 1.0 else "IDLE/DOWN   "
-                    print(f"           {state_str}  {s['id']:<60}  peer={s.get('peer_ip','?')} pfx={s.get('pfx_count_norm', 0.0):.2f}")
-            else:
-                print("         No BGP session nodes found in this snapshot.")
+            # Print router metrics
+            router_nodes = [n for n in snap["nodes"] if n["type"] == "router"]
+            if router_nodes:
+                print(f"         Router metrics ({len(router_nodes)} routers):")
+                print(f"           {'Hostname':<20} {'State':<6} {'cpu':>8} {'mem':>8} {'routes':>8} {'pfx_count_norm':>14}")
+                print(f"           {'-'*20} {'-'*6} {'-'*8} {'-'*8} {'-'*8} {'-'*14}")
+                for r in router_nodes:
+                    state = "up" if r.get("state") == 1.0 else "down"
+                    print(
+                        f"           {r.get('hostname', r['id'])[:20]:<20} {state:<6} "
+                        f"{r.get('cpu', 0):>8.3f} {r.get('mem', 0):>8.3f} "
+                        f"{r.get('ospf_num_routes', 0):>8.0f} {r.get('pfx_count_norm', 0):>14.1f}"
+                    )
 
             # Print metrics for every interface node
             iface_nodes = [n for n in snap["nodes"] if n["type"] == "interface"]

@@ -29,7 +29,7 @@ class GraphBuilder:
         self.scalers = {}
         
         self.global_id_map = {
-            "router": {}, "interface": {}, "bgp_session": {}
+            "router": {}, "interface": {}
         }
         
         logger.debug(f"Global ID map initialized with node types: {list(self.global_id_map.keys())}")
@@ -41,10 +41,11 @@ class GraphBuilder:
     def fit_scalers(self, snapshot_objects):
         logger.info(f"Fitting scalers on {len(snapshot_objects)} snapshot objects")
         
+        # pfx_count_norm is now a router feature (BGP prefix count aggregated across
+        # all peers on the router), not a separate bgp_session node feature.
         all_metrics = {
-            "router": {"ospf_num_routes": [], "cpu": [], "mem": []},
+            "router": {"ospf_num_routes": [], "cpu": [], "mem": [], "pfx_count_norm": []},
             "interface": {"tx_drops": [], "rx_drops": [], "mtu_norm": []},
-            "bgp_session": {"pfx_count_norm": []}
         }
         
         for data in snapshot_objects:
@@ -52,24 +53,15 @@ class GraphBuilder:
                 ntype = node["type"]
                 
                 if ntype == "router":
-                    ospf = np.log1p(float(node.get("ospf_num_routes") or 0.0))
-                    cpu = float(node.get("cpu") or 0.0)
-                    mem = float(node.get("mem") or 0.0)
-                    all_metrics["router"]["ospf_num_routes"].append(ospf)
-                    all_metrics["router"]["cpu"].append(cpu)
-                    all_metrics["router"]["mem"].append(mem)
+                    all_metrics["router"]["ospf_num_routes"].append(np.log1p(float(node.get("ospf_num_routes") or 0.0)))
+                    all_metrics["router"]["cpu"].append(float(node.get("cpu") or 0.0))
+                    all_metrics["router"]["mem"].append(float(node.get("mem") or 0.0))
+                    all_metrics["router"]["pfx_count_norm"].append(np.log1p(float(node.get("pfx_count_norm") or 0.0)))
                     
                 elif ntype == "interface":
-                    tx_drops = np.log1p(float(node.get("tx_drops") or 0.0))
-                    rx_drops = np.log1p(float(node.get("rx_drops") or 0.0))
-                    mtu = float(node.get("mtu_norm") or 0.0)
-                    all_metrics["interface"]["tx_drops"].append(tx_drops)
-                    all_metrics["interface"]["rx_drops"].append(rx_drops)
-                    all_metrics["interface"]["mtu_norm"].append(mtu)
-                    
-                elif ntype == "bgp_session":
-                    pfx = np.log1p(float(node.get("pfx_count_norm") or 0.0))
-                    all_metrics["bgp_session"]["pfx_count_norm"].append(pfx)
+                    all_metrics["interface"]["tx_drops"].append(np.log1p(float(node.get("tx_drops") or 0.0)))
+                    all_metrics["interface"]["rx_drops"].append(np.log1p(float(node.get("rx_drops") or 0.0)))
+                    all_metrics["interface"]["mtu_norm"].append(float(node.get("mtu_norm") or 0.0))
 
         for map_type, metrics in all_metrics.items():
             if map_type not in self.scalers:
@@ -117,9 +109,8 @@ class GraphBuilder:
             count = len(id_map)
             
             dim = 0
-            if ntype == "router": dim = 4  # state, ospf_num_routes, cpu, mem
+            if ntype == "router": dim = 5  # state, ospf_num_routes, cpu, mem, pfx_count_norm
             elif ntype == "interface": dim = 4  # state, tx_drops, rx_drops, mtu_norm
-            elif ntype == "bgp_session": dim = 2  # state, pfx_count_norm
 
             if count > 0:
                 features_dict[ntype] = np.zeros((count, dim), dtype=np.float32)
@@ -145,31 +136,26 @@ class GraphBuilder:
             
             if ntype == "router":
                 ospf = np.log1p(float(node.get("ospf_num_routes") or 0.0))
-                cpu = float(node.get("cpu") or 0.0)
-                mem = float(node.get("mem") or 0.0)
+                cpu  = float(node.get("cpu") or 0.0)
+                mem  = float(node.get("mem") or 0.0)
+                pfx  = np.log1p(float(node.get("pfx_count_norm") or 0.0))
                 features_dict[ntype][idx] = np.array([
                     state,
                     get_scaled("router", "ospf_num_routes", ospf),
                     get_scaled("router", "cpu", cpu),
-                    get_scaled("router", "mem", mem)
+                    get_scaled("router", "mem", mem),
+                    get_scaled("router", "pfx_count_norm", pfx),
                 ])
                 
             elif ntype == "interface":
                 tx_drops = np.log1p(float(node.get("tx_drops") or 0.0))
                 rx_drops = np.log1p(float(node.get("rx_drops") or 0.0))
-                mtu = float(node.get("mtu_norm") or 0.0)
-                features_dict[ntype][idx] = np.array([
-                    state, 
-                    get_scaled("interface", "tx_drops", tx_drops),
-                    get_scaled("interface", "rx_drops", rx_drops),
-                    get_scaled("interface", "mtu_norm", mtu)
-                ])
-
-            elif ntype == "bgp_session":
-                pfx = np.log1p(float(node.get("pfx_count_norm") or 0.0))
+                mtu      = float(node.get("mtu_norm") or 0.0)
                 features_dict[ntype][idx] = np.array([
                     state,
-                    get_scaled("bgp_session", "pfx_count_norm", pfx)
+                    get_scaled("interface", "tx_drops", tx_drops),
+                    get_scaled("interface", "rx_drops", rx_drops),
+                    get_scaled("interface", "mtu_norm", mtu),
                 ])
 
         for ntype, feat_array in features_dict.items():

@@ -49,7 +49,7 @@ def train_model(
     logging.basicConfig(level=logging.INFO)
     logger = logging.getLogger(f"train_{model_name}")
 
-    aiplatform.init(project=project, location=region)
+    aiplatform.init(project=project, location=region, staging_bucket=f"gs://{gcs_bucket}")
 
     output_path = f"gs://{gcs_bucket}/models/{model_name}/{run_id}"
 
@@ -93,6 +93,7 @@ def train_model(
         service_account=service_account if service_account else None,
         sync=True,  # Wait for job completion before returning
         restart_job_on_worker_restart=False,
+        timeout=7200,  # Fail after 2 h instead of hanging forever (e.g. on quota PENDING)
     )
 
     if job.state.name != "JOB_STATE_SUCCEEDED":

@@ -1,620 +1,328 @@
+# Copyright 2024-2025 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+
+"""
+GNN Serving — Vertex AI Endpoint
+
+HTTP prediction server deployed to Vertex AI after each successful training
+pipeline run.  Triggered periodically by Cloud Scheduler AND available for
+on-demand queries from network agents / the dashboard.
+
+Each POST /predict request:
+  1. Loads model weights + scalers from GCS (cached in /tmp across requests;
+     reloads automatically when a new training run updates latest_run.json)
+  2. Fetches the latest network snapshot from Spanner
+  3. Runs HetGNN inference → per-node embeddings + MSE reconstruction scores
+  4. Writes results to the Spanner NodeEmbedding table
+  5. Returns a JSON summary of anomalies detected
+
+GET /health returns {"status": "healthy"}.
+"""
+
+import json
 import logging
 import os
 import sys
-import json
-import asyncio
-import torch
-import torch.nn as nn
-import numpy as np
+import tempfile
+import uuid
+from pathlib import Path
+
 from aiohttp import web
 import aiohttp_cors
-from google.cloud import storage
-from google.cloud import spanner
-from utils.gnn_utils import SPANNER_INSTANCE, SPANNER_DATABASE, GCS_BUCKET_NAME, INTERVAL_MINUTES, GraphBuilder, HIDDEN_CHANNELS, OUT_CHANNELS, NUM_HEADS, NUM_LAYERS
-from utils.data import SpannerDataset
 
-# Enhanced logging configuration
 logging.basicConfig(
-    level=logging.DEBUG,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(sys.stdout)
-    ]
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
-logger = logging.getLogger(__name__)
-BASE_DIR = os.path.dirname(os.path.realpath(__file__))
+logger = logging.getLogger("gnn.serve")
 
-from model.stgnn import STGNN
-from model.dgat import DGAT
-from model.hetgnn import HetGNN
+# ── Environment ───────────────────────────────────────────────────────────────
+GCS_BUCKET_NAME      = os.getenv("GCS_BUCKET_NAME",     "network-model-artifacts")
+SPANNER_INSTANCE     = os.getenv("SPANNER_INSTANCE",     "networktopology-instance")
+SPANNER_DATABASE     = os.getenv("SPANNER_DATABASE",     "networktopology-db")
+GOOGLE_CLOUD_PROJECT = os.getenv("GOOGLE_CLOUD_PROJECT", None)
+ANOMALY_THRESHOLD    = float(os.getenv("ANOMALY_THRESHOLD", "0.5"))
+CACHE_DIR            = Path(tempfile.gettempdir()) / "gnn_model_cache"
 
-# Configuration
-MODELS = {
-    "stgnn": {"class": STGNN, "file": "stgnn_model.pth", "scaler": "stgnn_scalers.pkl", "stats": "stgnn_model_stats.pth", "instance": None},
-    "dgat":  {"class": DGAT,  "file": "dgat_model.pth",  "scaler": "dgat_scalers.pkl",  "stats": "dgat_model_stats.pth",  "instance": None},
-    "hetgnn":{"class": HetGNN,"file": "hetgnn_model.pth","scaler": "hetgnn_scalers.pkl","stats": "hetgnn_model_stats.pth","instance": None}
-}
-# Use per-node-type adaptive thresholds instead of global threshold
-ANOMALY_THRESHOLD_MULTIPLIER = 2.5  # Multiplier for std deviation-based threshold
+# ── In-process model cache (warm across concurrent requests) ──────────────────
+_cache: dict = {}
 
-# Shared dependencies
-gb = None
 
-# NOTE: Background inference loop removed — inference now runs as a
-# stateless Cloud Run Job triggered by Cloud Scheduler every 60 seconds.
-# See gnn/src/infer.py and Dockerfile.infer.cloudrun.
+# ── GCS helpers ───────────────────────────────────────────────────────────────
 
-def download_blob(bucket_name, source_blob_name, destination_file_name):
-    """Downloads a blob from the bucket."""
-    try:
-        storage_client = storage.Client()
-        bucket = storage_client.bucket(bucket_name)
-        blob = bucket.blob(source_blob_name)
-        if blob.exists():
-            blob.download_to_filename(destination_file_name)
-            logger.info(f"Blob {source_blob_name} downloaded to {destination_file_name}.")
-            return True
-        else:
-            logger.warning(f"Blob {source_blob_name} does not exist in bucket {bucket_name}.")
-            return False
-    except Exception as e:
-        logger.error(f"Failed to download {source_blob_name} from GCS: {e}")
-        return False
+def _gcs_client():
+    from google.cloud import storage
+    return storage.Client()
 
-def compute_mahalanobis_distance(embedding, cluster_stats):
-    """
-    Computes Mahalanobis distance from cluster center.
-    If covariance matrix not available, uses normalized Euclidean distance.
-    
-    Args:
-        embedding: torch tensor of shape [F]
-        cluster_stats: dict with 'mean', 'std', and optionally 'cov'
-    
-    Returns: scalar distance (higher = more anomalous)
-    """
-    mean = cluster_stats['mean']
-    std = cluster_stats['std']
-    
-    # Check if covariance matrix is available (cluster stats)
-    if 'cov' in cluster_stats:
-        cov = cluster_stats['cov']
-        # Handle numerical issues
-        cov_reg = cov + torch.eye(cov.size(0)) * 1e-6
-        
-        try:
-            cov_inv = torch.linalg.inv(cov_reg)
-            diff = embedding - mean
-            # Mahalanobis: sqrt((x-μ)ᵀ Σ⁻¹ (x-μ))
-            distance = torch.sqrt(torch.abs(diff @ cov_inv @ diff.T))
-            return distance.item()
-        except:
-            # Fallback to normalized euclidean if inversion fails
-            diff = embedding - mean
-            return torch.norm(diff / (std + 1e-8)).item()
-    else:
-        # Per-node stats only have mean/std, use normalized Euclidean
-        diff = embedding - mean
-        return torch.norm(diff / (std + 1e-8)).item()
 
-def compute_anomaly_scores(embeddings_dict, stats_dict, model_name):
-    """
-    Computes anomaly scores for all nodes using Mahalanobis distance.
-    Uses per-node baselines when available, falls back to cluster stats.
-    
-    Returns: {node_type: {node_idx: score}}, {node_type: threshold}
-    """
-    scores = {}
-    thresholds = {}
-    node_stats = stats_dict.get('node_stats', {})
-    
-    for node_type, emb_tensor in embeddings_dict.items():
-        if node_type not in stats_dict['cluster_stats']:
-            logger.warning(f"No cluster stats for {node_type}, skipping")
-            continue
-        
-        cluster_stats = stats_dict['cluster_stats'][node_type]
-        scores[node_type] = {}
-        
-        # Use per-node statistics to compute scores and adaptive thresholds
-        per_node_scores = []
-        has_node_stats = node_type in node_stats
-        
-        for node_idx in range(emb_tensor.size(0)):
-            embedding = emb_tensor[node_idx]
-            
-            # Try to use node-specific baseline first
-            if has_node_stats and node_idx in node_stats[node_type]:
-                # Compare to this node's own historical pattern
-                personal_stats = node_stats[node_type][node_idx]
-                distance = compute_mahalanobis_distance(embedding, personal_stats)
-                per_node_scores.append(distance)
-            else:
-                # Fallback to cluster stats for new/rare nodes
-                distance = compute_mahalanobis_distance(embedding, cluster_stats)
-            
-            scores[node_type][node_idx] = distance
-        
-        # Compute adaptive threshold based on observed scores during this inference
-        # Use 95th percentile of healthy node baselines + margin
-        if per_node_scores and len(per_node_scores) > 2:
-            # If we have per-node scores, use their 95th percentile
-            per_node_scores_sorted = sorted(per_node_scores)
-            percentile_95_idx = int(len(per_node_scores_sorted) * 0.95)
-            threshold_95 = per_node_scores_sorted[percentile_95_idx]
-            # Add 20% margin for detection (reduced from 50% to be more sensitive)
-            adaptive_threshold = threshold_95 * 1.2
-            
-            # Debug logging for Router_Config to see individual scores
-            if node_type == "Router_Config":
-                logger.info(f"DEBUG Router_Config scores: {[f'{s:.1f}' for s in per_node_scores_sorted]}")
-                logger.info(f"DEBUG 95th percentile: {threshold_95:.2f}, threshold: {adaptive_threshold:.2f}")
-        else:
-            # Fallback to cluster-based threshold
-            feature_std = cluster_stats['std']
-            avg_feature_std = feature_std.mean().item()
-            adaptive_threshold = max(3.0, avg_feature_std * ANOMALY_THRESHOLD_MULTIPLIER)
-        
-        thresholds[node_type] = adaptive_threshold
-    
-    return scores, thresholds
+def _load_manifest() -> dict:
+    """Read latest_run.json to find the current best model paths."""
+    client = _gcs_client()
+    bucket = client.bucket(GCS_BUCKET_NAME)
+    blob = bucket.blob("models/latest/latest_run.json")
+    if not blob.exists():
+        raise FileNotFoundError(
+            f"gs://{GCS_BUCKET_NAME}/models/latest/latest_run.json not found. "
+            "Run the GNN training pipeline first."
+        )
+    return json.loads(blob.download_as_text())
 
-def compute_feature_attribution(model, x_dict, edge_index_dict, node_type, node_idx, cluster_stats):
-    """
-    Uses gradient-based attribution to identify which input features
-    contribute most to the anomaly.
-    
-    Returns: numpy array of importance scores (same shape as input features)
-    """
+
+def _download_artefacts(manifest: dict) -> Path:
+    """Download model.pth and scalers.pkl for the current run into /tmp."""
+    run_id = manifest["run_id"]
+    local_dir = CACHE_DIR / "hetgnn" / run_id
+    local_dir.mkdir(parents=True, exist_ok=True)
+
+    client = _gcs_client()
+    bucket = client.bucket(GCS_BUCKET_NAME)
+    model_info = manifest.get("models", {}).get("hetgnn", {})
+    gcs_path = model_info.get(
+        "gcs_path",
+        f"gs://{GCS_BUCKET_NAME}/models/hetgnn/{run_id}",
+    )
+    prefix = gcs_path.replace(f"gs://{GCS_BUCKET_NAME}/", "")
+
+    for blob in bucket.list_blobs(prefix=prefix):
+        filename = Path(blob.name).name
+        if filename.endswith(".pth") or filename.endswith(".pkl"):
+            local_path = local_dir / filename
+            if not local_path.exists():
+                logger.info(f"Downloading {blob.name} → {local_path}")
+                blob.download_to_filename(str(local_path))
+
+    return local_dir
+
+
+# ── Model loader (lazy, cached, auto-refreshes on new run_id) ─────────────────
+
+def _ensure_model_loaded(manifest: dict):
+    """Load or refresh the HetGNN model + GraphBuilder into _cache."""
+    import torch
+    from model.hetgnn import HetGNN
+    from utils.gnn_utils import GraphBuilder, INTERVAL_MINUTES
+    from utils.data import SpannerDataset
+
+    run_id = manifest["run_id"]
+    if _cache.get("run_id") == run_id and _cache.get("model") is not None:
+        return  # already loaded for this run
+
+    logger.info(f"Loading model for run_id={run_id}...")
+    local_dir = _download_artefacts(manifest)
+
+    # Load scalers
+    scalers_pth = local_dir / "scalers.pkl"
+    if not scalers_pth.exists():
+        raise FileNotFoundError(f"scalers.pkl not found at {scalers_pth}")
+    graph_builder = GraphBuilder(scaler_path=str(scalers_pth))
+    if not graph_builder.load_scalers():
+        raise RuntimeError(f"Failed to load scalers from {scalers_pth}")
+
+    # Fetch one snapshot to derive graph metadata
+    dataset = SpannerDataset(
+        instance_id=SPANNER_INSTANCE,
+        database_id=SPANNER_DATABASE,
+        num_snapshots=1,
+        interval_minutes=INTERVAL_MINUTES,
+        project_id=GOOGLE_CLOUD_PROJECT,
+    )
+    timestamps = dataset._get_timestamps()
+    snapshot = dataset.fetch_snapshot(timestamps[-1])
+    hetero_data, input_dims = graph_builder.process_snapshot(snapshot)
+    metadata = hetero_data.metadata()
+
+    # Load model weights
+    model_pth = local_dir / "model.pth"
+    if not model_pth.exists():
+        raise FileNotFoundError(f"model.pth not found at {model_pth}")
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    checkpoint = torch.load(str(model_pth), map_location=device, weights_only=False)
+
+    model = HetGNN(
+        metadata=metadata,
+        hidden_channels=checkpoint.get("hidden_channels", 64),
+        num_layers=checkpoint.get("num_layers", 2),
+    )
+    model.set_input_dims(input_dims)
+    model.load_state_dict(checkpoint["model_state_dict"])
     model.eval()
-    
-    # Clone inputs and enable gradients
-    x_dict_grad = {}
-    for nt, x in x_dict.items():
-        if nt == node_type:
-            x_dict_grad[nt] = x.clone().requires_grad_(True)
-        else:
-            x_dict_grad[nt] = x.clone()
-    
-    # Forward pass
-    recon_dict, embeddings = model(x_dict_grad, edge_index_dict)
-    
-    # Compute distance to cluster for target node
-    target_embedding = embeddings[node_type][node_idx]
-    distance = compute_mahalanobis_distance(target_embedding, cluster_stats)
-    distance_tensor = torch.tensor(distance, requires_grad=False)
-    
-    # Create a scalar that requires grad for backward
-    loss = (target_embedding - cluster_stats['mean']).pow(2).sum()
-    
-    # Backward pass
-    loss.backward()
-    
-    # Extract gradients for target node
-    if x_dict_grad[node_type].grad is not None:
-        grad = x_dict_grad[node_type].grad[node_idx]
-        input_features = x_dict[node_type][node_idx]
-        
-        # Importance = |gradient| × |input| (sensitivity × magnitude)
-        importance = (grad.abs() * input_features.abs()).detach().cpu().numpy()
-    else:
-        # No gradients available
-        importance = np.zeros(x_dict[node_type].size(1))
-    
-    return importance
+    model.to(device)
 
-def map_to_spanner_node_type(internal_type):
-    """
-    Maps internal GNN node types to Spanner schema node types.
-    
-    Args:
-        internal_type: GNN model node type (e.g., "PE Router", "Interface")
-    
-    Returns: Spanner schema node type ("PhysicalRouter" or "PhysicalInterface")
-    """
-    router_types = ["PE Router", "P Router", "CE Router", "Router_Config", "Protocol_State"]
-    interface_types = ["Interface", "Interface_Metrics"]
-    
-    if internal_type in router_types:
-        return "PhysicalRouter"
-    elif internal_type in interface_types:
-        return "PhysicalInterface"
-    else:
-        # Default fallback
-        return internal_type
+    _cache.update({
+        "run_id":        run_id,
+        "model":         model,
+        "graph_builder": graph_builder,
+        "dataset":       dataset,
+        "device":        device,
+    })
+    logger.info(f"HetGNN model loaded (run_id={run_id}, device={device})")
 
-def explain_anomaly(importance, node_type, gb):
-    """
-    Translates feature importance scores into human-readable explanation.
-    """
-    top_k = 3
-    top_indices = np.argsort(importance)[-top_k:][::-1]
-    
-    if node_type == "Router_Config":
-        return f"Config anomaly: hash buckets {top_indices.tolist()}"
-    
-    elif node_type == "Interface":
-        feature_names = ["state", "rx_bytes", "tx_bytes", "rx_drops", 
-                        "tx_drops", "rx_errors", "tx_errors"]
-        explanations = []
-        for idx in top_indices:
-            if idx < len(feature_names):
-                explanations.append(feature_names[idx])
-        return f"Interface anomaly: {', '.join(explanations)}"
-    
-    elif node_type == "Interface_Metrics":
-        feature_names = ["rx_bytes", "tx_bytes", "rx_drops", "tx_drops", 
-                        "rx_errors", "tx_errors",
-                        "rx_bytes_velocity", "tx_bytes_velocity", 
-                        "rx_drops_velocity", "tx_drops_velocity",
-                        "rx_errors_velocity", "tx_errors_velocity"]
-        explanations = []
-        for idx in top_indices:
-            if idx < len(feature_names):
-                explanations.append(feature_names[idx])
-        return f"Metrics anomaly: {', '.join(explanations)}"
-    
-    elif node_type == "Protocol_State":
-        feature_names = ["ospf_neighbors", "bgp_peers", "mpls_routes"]
-        explanations = []
-        for idx in top_indices:
-            if idx < len(feature_names):
-                explanations.append(feature_names[idx])
-        return f"Protocol anomaly: {', '.join(explanations)}"
-    
-    else:
-        return f"Anomaly detected in {node_type}"
 
-def load_models():
-    global gb, MODELS
-    logger.info("Loading GraphBuilder and Models...")
-    
-    # Download shared scaler file
-    scaler_file = os.path.join(BASE_DIR, "shared_scalers.pkl")
-    
-    if GCS_BUCKET_NAME:
-        logger.info("Downloading shared scaler file from GCS...")
-        if download_blob(GCS_BUCKET_NAME, f"models/dgat/dgat_scalers.pkl", scaler_file):
-            logger.info("Using DGAT scalers as shared scalers")
-        elif download_blob(GCS_BUCKET_NAME, f"models/hetgnn/hetgnn_scalers.pkl", scaler_file):
-            logger.info("Using HetGNN scalers as shared scalers")
-        elif download_blob(GCS_BUCKET_NAME, f"models/stgnn/stgnn_scalers.pkl", scaler_file):
-            logger.info("Using STGNN scalers as shared scalers")
-    
-    gb = GraphBuilder(scaler_file)
-    gb.init_config_encoder()
-    
-    if os.path.exists(scaler_file):
-        logger.info(f"Loading scalers from {scaler_file}")
-        gb.load_scalers()
-    
-    # Node and edge types
-    node_types = ["PE Router", "P Router", "CE Router", "Router_Config", "Protocol_State", "Interface", "Interface_Metrics"]
-    edge_types = [
-        ("PE Router", "Owns", "Interface"),
-        ("P Router", "Owns", "Interface"),
-        ("CE Router", "Owns", "Interface"),
-        ("Interface", "Connected", "Interface"),
-        ("PE Router", "Has_Config", "Router_Config"),
-        ("PE Router", "Has_Protocol", "Protocol_State"),
-        ("P Router", "Has_Config", "Router_Config"),
-        ("P Router", "Has_Protocol", "Protocol_State"),
-        ("CE Router", "Has_Config", "Router_Config"),
-        ("CE Router", "Has_Protocol", "Protocol_State"),
-        ("Interface", "Has_Metrics", "Interface_Metrics")
-    ]
-    metadata = (node_types, edge_types)
-    
-    input_dims = {
-        "PE Router": 1, "P Router": 1, "CE Router": 1,
-        "Router_Config": 132, "Protocol_State": 3,  # 132 = 128 hash + 4 explicit RT features
-        "Interface": 7, "Interface_Metrics": 12
+# ── Spanner writer ────────────────────────────────────────────────────────────
+
+def _write_results_to_spanner(database, graph_builder, snapshot: dict, results: dict):
+    """Write one NodeEmbedding row per node (embeddings + anomaly scores)."""
+    from google.cloud import spanner as gspanner
+
+    reverse_id_maps = {
+        ntype: {idx: nid for nid, idx in id_map.items()}
+        for ntype, id_map in graph_builder.global_id_map.items()
     }
-    
-    for name, config in MODELS.items():
-        if GCS_BUCKET_NAME:
-            logger.info(f"Downloading {name} artifacts from GCS...")
-            download_blob(GCS_BUCKET_NAME, f"models/{name}/{config['scaler']}", os.path.join(BASE_DIR, config['scaler']))
-            download_blob(GCS_BUCKET_NAME, f"models/{name}/{config['file']}", os.path.join(BASE_DIR, config['file']))
-            download_blob(GCS_BUCKET_NAME, f"models/{name}/{config['stats']}", os.path.join(BASE_DIR, config['stats']))
+    node_names = {
+        node["id"]: node.get("hostname", node.get("name", node["id"]))
+        for node in snapshot.get("nodes", [])
+    }
 
-        # Initialize Model
-        if name == "stgnn":
-            instance = config["class"](metadata, HIDDEN_CHANNELS, OUT_CHANNELS, NUM_LAYERS, 'gru', 12)
-        elif name == "dgat":
-            instance = config["class"](metadata, HIDDEN_CHANNELS, OUT_CHANNELS, NUM_HEADS, NUM_LAYERS)
-        elif name == "hetgnn":
-            instance = config["class"](metadata, HIDDEN_CHANNELS, OUT_CHANNELS, NUM_LAYERS)
-        else:
-            instance = config["class"](metadata, HIDDEN_CHANNELS, OUT_CHANNELS, NUM_HEADS, NUM_LAYERS)
-            
-        instance.set_input_dims(input_dims)
-        path = os.path.join(BASE_DIR, config['file'])
-        
-        if os.path.exists(path):
-            try:
-                instance.load_state_dict(torch.load(path))
-                instance.eval()
-                MODELS[name]["instance"] = instance
-                logger.info(f"{name.upper()} model loaded successfully.")
-            except Exception as e:
-                logger.error(f"Failed to load {name.upper()}: {e}")
-        
-        # Load cluster statistics
-        stats_path = os.path.join(BASE_DIR, config['stats'])
-        if os.path.exists(stats_path):
-            try:
-                MODELS[name]["cluster_stats"] = torch.load(stats_path)
-                logger.info(f"{name.upper()} cluster statistics loaded successfully.")
-                # Log cluster info
-                for nt, stats in MODELS[name]["cluster_stats"]['cluster_stats'].items():
-                    logger.info(f"  {nt}: {stats['sample_count']} samples, embedding_dim={stats['mean'].shape[0]}")
-            except Exception as e:
-                logger.error(f"Failed to load {name.upper()} stats: {e}")
-
-async def run_inference():
-    global MODELS, gb
-    logger.info("="*60)
-    logger.info("EXECUTING MULTI-MODEL INFERENCE RUN")
-    logger.info("="*60)
-        
-    if not gb:
-        logger.info("GraphBuilder not initialized, loading models...")
-        load_models()
-
-    try:
-        # Fetch latest Spanner topology
-        logger.info(f"Fetching latest snapshot from Spanner")
-        dataset = SpannerDataset(SPANNER_INSTANCE, SPANNER_DATABASE, num_snapshots=1, interval_minutes=INTERVAL_MINUTES)
-        timestamps = dataset._get_timestamps()
-        latest_ts = timestamps[-1]
-        logger.info(f"Latest timestamp: {latest_ts}")
-        
-        data = dataset.fetch_snapshot(latest_ts)
-        if not data["nodes"]:
-            logger.warning("No data found in Spanner snapshot")
-            return {'error': 'No data found in Spanner snapshot'}
-
-        logger.debug(f"Snapshot contains {len(data['nodes'])} nodes, {len(data.get('edges', []))} edges")
-        
-        hdata, input_dims = gb.process_snapshot(data)
-        logger.info("Snapshot processed into HeteroData")
-        
-        # Run HetGNN inference (primary model for config/protocol/metrics separation)
-        logger.info("Running HetGNN inference...")
-        hetgnn_model = MODELS["hetgnn"]["instance"]
-        hetgnn_stats = MODELS["hetgnn"].get("cluster_stats")
-        
-        if not hetgnn_stats:
-            logger.error("HetGNN cluster statistics not loaded!")
-            return {'error': 'Cluster statistics not available'}
-        
-        with torch.no_grad():
-            recon_dict, embeddings = hetgnn_model(hdata.x_dict, hdata.edge_index_dict)
-        
-        logger.debug(f"HetGNN embeddings: {list(embeddings.keys())}")
-        
-        # DEBUG: Log RT features for all Router_Config nodes (from INPUT features, not output embeddings)
-        if "Router_Config" in hdata.x_dict:
-            logger.info("=" * 60)
-            logger.info("DEBUG: Router_Config RT Features (dims 128-131 of INPUT)")
-            logger.info("=" * 60)
-            rev_id_map_config = {v: k for k, v in gb.global_id_map["Router_Config"].items()}
-            input_features = hdata.x_dict["Router_Config"]
-            for node_idx in range(input_features.size(0)):
-                node_id = rev_id_map_config.get(node_idx, f"unknown_{node_idx}")
-                # Get RT features from input (last 4 dimensions of 132-dim input)
-                if input_features.size(1) >= 132:
-                    rt_import_as = input_features[node_idx, 128].item()
-                    rt_import_val = input_features[node_idx, 129].item()
-                    rt_export_as = input_features[node_idx, 130].item()
-                    rt_export_val = input_features[node_idx, 131].item()
-                    logger.info(f"  {node_id}:")
-                    logger.info(f"    RT_import_AS={rt_import_as:.4f}, RT_import_val={rt_import_val:.4f}")
-                    logger.info(f"    RT_export_AS={rt_export_as:.4f}, RT_export_val={rt_export_val:.4f}")
-                else:
-                    logger.warning(f"  {node_id}: Input dimension is {input_features.size(1)}, expected 132")
-            logger.info("=" * 60)
-        
-        # Compute anomaly scores with adaptive thresholds
-        hetgnn_scores, hetgnn_thresholds = compute_anomaly_scores(embeddings, hetgnn_stats, "hetgnn")
-        
-        logger.info(f"Computed anomaly scores for {len(hetgnn_scores)} node types")
-        logger.info(f"Adaptive thresholds per node type:")
-        for nt, thresh in hetgnn_thresholds.items():
-            logger.info(f"  {nt}: {thresh:.2f}")
-        
-        # === MULTI-LEVEL ANOMALY DETECTION ===
-        consolidated_nodes = {}
-        anomaly_count = 0
-        
-        for node_type, score_dict in hetgnn_scores.items():
-            for node_idx, score in score_dict.items():
-                # Map internal index back to node ID
-                if node_type not in gb.global_id_map:
-                    continue
-                    
-                rev_id_map = {v: k for k, v in gb.global_id_map[node_type].items()}
-                if node_idx not in rev_id_map:
-                    continue
-                
-                node_id = rev_id_map[node_idx]
-                
-                # Initialize node entry
-                consolidated_nodes[node_id] = {
-                    "id": node_id,
-                    "type": node_type,
-                    "hetgnn_score": float(score),
-                    "hetgnn_embedding": embeddings[node_type][node_idx].tolist(),
-                    "anomaly_explanation": None
-                }
-                
-                # Check if anomalous using adaptive threshold for this node type
-                node_threshold = hetgnn_thresholds.get(node_type, 5.0)
-                if score > node_threshold:
-                    anomaly_count += 1
-                    logger.info(f"⚠️  Anomaly detected: {node_id} ({node_type}) score={score:.2f} (threshold={node_threshold:.2f})")
-                    
-                    # Compute feature attribution
-                    try:
-                        cluster_stats = hetgnn_stats['cluster_stats'][node_type]
-                        importance = compute_feature_attribution(
-                            hetgnn_model,
-                            hdata.x_dict,
-                            hdata.edge_index_dict,
-                            node_type,
-                            node_idx,
-                            cluster_stats
-                        )
-                        
-                        explanation = explain_anomaly(importance, node_type, gb)
-                        consolidated_nodes[node_id]["anomaly_explanation"] = explanation
-                        logger.info(f"   Explanation: {explanation}")
-                    except Exception as e:
-                        logger.error(f"Failed to compute attribution for {node_id}: {e}")
-                        consolidated_nodes[node_id]["anomaly_explanation"] = f"Anomaly detected (score={score:.2f})"
-        
-        # === PROPAGATE SUB-NODE ANOMALIES TO PARENT NODES ===
-        logger.info("Propagating sub-node anomalies to parent nodes...")
-        
-        for node_id, node_data in list(consolidated_nodes.items()):
-            # Router_Config -> Router
-            if node_data["type"] == "Router_Config" and node_data["anomaly_explanation"]:
-                parent_id = node_id.replace("_config", "")
-                parent_type = None
-                for rt in ["PE Router", "P Router", "CE Router"]:
-                    if parent_id in gb.global_id_map.get(rt, {}):
-                        parent_type = rt
-                        break
-                
-                if parent_type:
-                    if parent_id not in consolidated_nodes:
-                        # Create parent node entry
-                        consolidated_nodes[parent_id] = {
-                            "id": parent_id,
-                            "type": parent_type,
-                            "hetgnn_score": 0.0,
-                            "hetgnn_embedding": [],
-                            "anomaly_explanation": None
-                        }
-                    
-                    # Propagate anomaly
-                    consolidated_nodes[parent_id]["anomaly_explanation"] = (
-                        f"Config sub-node anomaly: {node_data['anomaly_explanation']}"
-                    )
-                    logger.info(f"   Propagated to parent: {parent_id} ({parent_type})")
-            
-            # Interface_Metrics -> Interface
-            elif node_data["type"] == "Interface_Metrics" and node_data["anomaly_explanation"]:
-                parent_id = node_id.replace("_metrics", "")
-                if parent_id in gb.global_id_map.get("Interface", {}):
-                    if parent_id not in consolidated_nodes:
-                        consolidated_nodes[parent_id] = {
-                            "id": parent_id,
-                            "type": "Interface",
-                            "hetgnn_score": 0.0,
-                            "hetgnn_embedding": [],
-                            "anomaly_explanation": None
-                        }
-                    
-                    # Add metrics anomaly note (don't overwrite existing explanation)
-                    if not consolidated_nodes[parent_id]["anomaly_explanation"]:
-                        consolidated_nodes[parent_id]["anomaly_explanation"] = (
-                            f"Metrics sub-node anomaly: {node_data['anomaly_explanation']}"
-                        )
-                        logger.info(f"   Propagated to parent: {parent_id} (Interface)")
-        
-        logger.info(f"Total anomalies detected: {anomaly_count}")
-        
-        # Write to Spanner
-        mutations = []
-        import uuid
-        spanner_timestamp = spanner.COMMIT_TIMESTAMP
-        
-        for node_id, node_data in consolidated_nodes.items():
-            embedding_id = str(uuid.uuid4())
-            # Map internal GNN type to Spanner schema type
-            spanner_node_type = map_to_spanner_node_type(node_data["type"])
-            
-            # Convert anomaly_explanation to JSON string if present
-            anomaly_exp = node_data.get("anomaly_explanation")
-            if anomaly_exp is not None:
-                # Wrap in JSON object for Spanner JSON column
-                anomaly_exp_json = json.dumps({"explanation": anomaly_exp})
-            else:
-                anomaly_exp_json = None
-            
-            mutations.append((
-                embedding_id,
+    rows = []
+    for ntype, emb_list in results["embeddings"].items():
+        scores  = results["anomaly_scores"].get(ntype, [])
+        rev_map = reverse_id_maps.get(ntype, {})
+        for idx, embedding in enumerate(emb_list):
+            node_id = rev_map.get(idx)
+            if node_id is None:
+                continue
+            score = float(scores[idx]) if idx < len(scores) else 0.0
+            rows.append((
+                str(uuid.uuid4()),
                 node_id,
-                spanner_node_type,  # Use mapped type for Spanner
-                [],  # stgnn_embedding (not using for now)
-                0.0,  # stgnn_score
-                [],  # dgat_embedding
-                0.0,  # dgat_score
-                node_data.get("hetgnn_embedding", []),
-                node_data.get("hetgnn_score", 0.0),
-                anomaly_exp_json,  # JSON-encoded explanation
-                spanner_timestamp
+                ntype,
+                embedding,
+                score,
+                json.dumps({"name": node_names.get(node_id, node_id)}),
+                gspanner.COMMIT_TIMESTAMP,
             ))
-        
-        if mutations:
-            logger.info(f"Writing {len(mutations)} embeddings to Spanner...")
-            spanner_client = spanner.Client()
-            instance = spanner_client.instance(SPANNER_INSTANCE)
-            database = instance.database(SPANNER_DATABASE)
-            
-            try:
-                with database.batch() as batch:
-                    batch.insert(
-                        table="NodeEmbedding",
-                        columns=("id", "node_id", "node_type", 
-                                 "stgnn_embedding", "stgnn_score", 
-                                 "dgat_embedding", "dgat_score", 
-                                 "hetgnn_embedding", "hetgnn_score", 
-                                 "anomaly_explanation", "timestamp"),
-                        values=mutations
-                    )
-                logger.info("✅ Successfully wrote embeddings to Spanner")
-            except Exception as e:
-                logger.error(f"Failed to write to Spanner: {e}")
-        
-        return {"nodes": list(consolidated_nodes.values()), "anomaly_count": anomaly_count}
-            
-    except Exception as e:
-        logger.error(f"Inference run failed: {e}", exc_info=True)
-        return {'error': str(e)}
 
-async def predict_handler(request):
-    logger.info("Received prediction request")
-    results = await run_inference()
-    if 'error' in results:
-        return web.json_response({"predictions": [], "error": results['error']}, status=500)
-    return web.json_response({"predictions": results.get("nodes", []), "anomaly_count": results.get("anomaly_count", 0)})
+    def _write(transaction):
+        transaction.insert_or_update(
+            table="NodeEmbedding",
+            columns=[
+                "id", "node_id", "node_type",
+                "hetgnn_embedding", "hetgnn_score",
+                "anomaly_explanation", "timestamp",
+            ],
+            values=rows,
+        )
 
-async def health_handler(request):
-    return web.json_response({"status": "healthy"}, status=200)
+    database.run_in_transaction(_write)
+    logger.info(f"Wrote {len(rows)} NodeEmbedding rows to Spanner")
+
+
+# ── Core inference ────────────────────────────────────────────────────────────
+
+async def _run_inference() -> dict:
+    """Run one HetGNN inference cycle and return a result summary dict."""
+    import torch
+    from utils.gnn_utils import INTERVAL_MINUTES
+    from utils.data import SpannerDataset
+
+    manifest = _load_manifest()
+    _ensure_model_loaded(manifest)
+
+    model         = _cache["model"]
+    graph_builder = _cache["graph_builder"]
+    device        = _cache["device"]
+
+    # Fetch the latest snapshot
+    dataset = SpannerDataset(
+        instance_id=SPANNER_INSTANCE,
+        database_id=SPANNER_DATABASE,
+        num_snapshots=1,
+        interval_minutes=INTERVAL_MINUTES,
+        project_id=GOOGLE_CLOUD_PROJECT,
+    )
+    timestamps = dataset._get_timestamps()
+    latest_ts  = timestamps[-1]
+    snapshot   = dataset.fetch_snapshot(latest_ts)
+    logger.info(f"Fetched snapshot at {latest_ts.isoformat()}")
+
+    hetero_data, _ = graph_builder.process_snapshot(snapshot)
+    hetero_data = hetero_data.to(device)
+
+    with torch.no_grad():
+        recon_dict, out_embeddings = model(
+            hetero_data.x_dict, hetero_data.edge_index_dict
+        )
+
+    # MSE reconstruction error → anomaly score
+    anomaly_scores: dict = {}
+    total_anomalies = 0
+    for ntype, recon in recon_dict.items():
+        orig = hetero_data[ntype].x
+        mse  = ((recon - orig) ** 2).mean(dim=1)
+        anomaly_scores[ntype] = mse.cpu().tolist()
+        count = int((mse > ANOMALY_THRESHOLD).sum().item())
+        total_anomalies += count
+        logger.info(
+            f"  {ntype}: {len(mse)} nodes, {count} anomalies "
+            f"(MSE > {ANOMALY_THRESHOLD})"
+        )
+
+    embeddings = {
+        ntype: emb.cpu().tolist()
+        for ntype, emb in out_embeddings.items()
+    }
+
+    results = {
+        "snapshot_timestamp": latest_ts.isoformat(),
+        "embeddings":         embeddings,
+        "anomaly_scores":     anomaly_scores,
+        "anomaly_count":      total_anomalies,
+    }
+
+    _write_results_to_spanner(dataset.database, graph_builder, snapshot, results)
+
+    logger.info(f"Inference complete — {total_anomalies} anomalies detected.")
+    return results
+
+
+# ── HTTP handlers ─────────────────────────────────────────────────────────────
+
+async def predict_handler(request: web.Request) -> web.Response:
+    logger.info("POST /predict")
+    try:
+        results = await _run_inference()
+        return web.json_response({
+            "predictions": [{
+                "snapshot_timestamp": results["snapshot_timestamp"],
+                "anomaly_count":      results["anomaly_count"],
+                "anomaly_scores":     results["anomaly_scores"],
+            }]
+        })
+    except Exception as exc:
+        logger.exception(f"Inference failed: {exc}")
+        return web.json_response({"error": str(exc)}, status=500)
+
+
+async def health_handler(request: web.Request) -> web.Response:
+    return web.json_response({"status": "healthy"})
+
+
+# ── App setup ─────────────────────────────────────────────────────────────────
 
 app = web.Application()
 cors = aiohttp_cors.setup(app, defaults={
     "*": aiohttp_cors.ResourceOptions(
         allow_credentials=True,
         expose_headers="*",
-        allow_headers="*"
+        allow_headers="*",
     )
 })
 
-if __name__ == "__main__":
-    load_models()
-    
-    predict_route_path = os.environ.get('AIP_PREDICT_ROUTE', '/predict')
-    health_route_path = os.environ.get('AIP_HEALTH_ROUTE', '/health')
-    
-    predict_route = app.router.add_post(predict_route_path, predict_handler)
-    health_route = app.router.add_get(health_route_path, health_handler)
-    
-    cors.add(predict_route)
-    cors.add(health_route)
+predict_route_path = os.environ.get("AIP_PREDICT_ROUTE", "/predict")
+health_route_path  = os.environ.get("AIP_HEALTH_ROUTE",  "/health")
 
-    logger.info("Serving GNN on Vertex AI...")
-    port = int(os.environ.get('AIP_HTTP_PORT', 8080))
+predict_route = app.router.add_post(predict_route_path, predict_handler)
+health_route  = app.router.add_get(health_route_path,  health_handler)
+cors.add(predict_route)
+cors.add(health_route)
+
+if __name__ == "__main__":
+    port = int(os.environ.get("AIP_HTTP_PORT", 8080))
+    logger.info(f"Starting GNN serving endpoint on :{port}")
     web.run_app(app, port=port)

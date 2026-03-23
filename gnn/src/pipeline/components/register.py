@@ -46,24 +46,41 @@ def register_model(
     aiplatform.init(project=project, location=region)
 
     logger.info(f"Registering hetgnn model from {hetgnn_model_gcs_path.uri}...")
+    logger.info("Calling aiplatform.Model.upload() — this blocks on a Vertex AI LRO and "
+                "typically takes 5-15 minutes. The component is NOT hung.")
 
-    model = aiplatform.Model.upload(
-        display_name="gnn-hetgnn",
-        artifact_uri=hetgnn_model_gcs_path.uri,
-        serving_container_image_uri=serve_image_uri,
-        serving_container_predict_route="/predict",
-        serving_container_health_route="/health",
-        serving_container_ports=[{"containerPort": 8080}],
-        labels={
-            "model_type": "hetgnn",
-            "run_id": run_id[:63],  # label value max 63 chars
-        },
-        description=(
-            f"GNN HetGNN model — run {run_id[:8]} — "
-            f"val_loss={hetgnn_val_loss:.4f}"
-        ),
-    )
+    import concurrent.futures
+    _UPLOAD_TIMEOUT_SECS = 900  # 15 minutes — fail loudly rather than hang forever
 
+    def _upload():
+        return aiplatform.Model.upload(
+            display_name="gnn-hetgnn",
+            artifact_uri=hetgnn_model_gcs_path.uri,
+            serving_container_image_uri=serve_image_uri,
+            serving_container_predict_route="/predict",
+            serving_container_health_route="/health",
+            serving_container_ports=[8080],
+            labels={
+                "model_type": "hetgnn",
+                "run_id": run_id[:63],  # label value max 63 chars
+            },
+            description=(
+                f"GNN HetGNN model — run {run_id[:8]} — "
+                f"val_loss={hetgnn_val_loss:.4f}"
+            ),
+        )
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(_upload)
+        try:
+            model = future.result(timeout=_UPLOAD_TIMEOUT_SECS)
+        except concurrent.futures.TimeoutError:
+            raise TimeoutError(
+                f"aiplatform.Model.upload() did not complete within "
+                f"{_UPLOAD_TIMEOUT_SECS}s — check the Vertex AI console for the LRO status."
+            )
+
+    logger.info("Model.upload() complete.")
     resource_name = model.resource_name
     hetgnn_model_resource_name.uri = resource_name
     logger.info(f"Registered hetgnn: {resource_name}")
