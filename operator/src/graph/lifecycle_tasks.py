@@ -454,7 +454,7 @@ async def sync_vyos_infrastructure(body, spec, name, uid, logger):
                     existing_status = row[1]
                     
                     # Compare content (Dict comparison)
-                    if existing_props == link_props and existing_status == link_status:
+                    if existing_props == link_props and existing_status == link_status.lower():
                         need_insert = False
                     else:
                         # Close existing row
@@ -471,7 +471,7 @@ async def sync_vyos_infrastructure(body, spec, name, uid, logger):
                             'id': link_id,
                             'name': link_name,
                             'bandwidth': bandwidth,
-                            'status': link_status,
+                            'status': link_status.lower(),
                             'properties': json.dumps(link_props)
                         },
                         param_types={
@@ -630,7 +630,7 @@ async def sync_physical_router(body, spec, name, uid, logger):
             # update: param_types.JSON returns native object (dict)
             
             # We compare the dictionary representations
-            if existing_config == sanitized_body and existing_status == router_status:
+            if existing_config == sanitized_body and existing_status == router_status.lower():
                 need_insert = False
             else:
                 # Close existing row
@@ -653,7 +653,7 @@ async def sync_physical_router(body, spec, name, uid, logger):
                     'location_lat': float(location.get('latitude') or location.get('lat') or metadata_labels.get('latitude') or metadata_labels.get('lat') or 0.0),
                     'location_lon': float(location.get('longitude') or location.get('lon') or metadata_labels.get('longitude') or metadata_labels.get('lon') or 0.0),
                     'role': spec.get('role', 'Router'),
-                    'status': router_status,
+                    'status': router_status.lower(),
                     'config': config_json
                 },
                 param_types={
@@ -765,7 +765,7 @@ async def sync_physical_router(body, spec, name, uid, logger):
                         'media_type': media_type,
                         'ip_address': ip_address,
                         'mac_address': iface_data.get('mac', ''),
-                        'status': iface_status
+                        'status': iface_status.lower()
                     },
                     param_types={
                         'id': spanner.param_types.STRING,
@@ -1086,7 +1086,7 @@ async def sync_l3vpn_service(body, spec, name, uid, logger):
             if row:
                 existing_config = row[0]
                 existing_status = row[1]
-                if existing_config == vpn_config and existing_status == l3vpn_status:
+                if existing_config == vpn_config and existing_status == l3vpn_status.lower():
                     need_insert = False
                 else:
                     # Close existing
@@ -1105,7 +1105,7 @@ async def sync_l3vpn_service(body, spec, name, uid, logger):
                         'name': vpn_name, 
                         'service_type': service_type, 
                         'topology': topology, 
-                        'status': l3vpn_status, 
+                        'status': l3vpn_status.lower(), 
                         'config': vpn_config
                     },
                     param_types={
@@ -1154,7 +1154,7 @@ async def sync_l3vpn_service(body, spec, name, uid, logger):
                 if row:
                     existing_config = row[0]
                     existing_status = row[1]
-                    if existing_config == vrf_config and existing_status == vrf_status:
+                    if existing_config == vrf_config and existing_status == vrf_status.lower():
                         need_insert = False
                     else:
                         # Close existing
@@ -1173,7 +1173,7 @@ async def sync_l3vpn_service(body, spec, name, uid, logger):
                             'vpn_id': vpn_id,
                             'name': f"VRF-{svc['name']}",
                             'rd': rd,
-                            'status': vrf_status,
+                            'status': vrf_status.lower(),
                             'config': vrf_config
                         },
                         param_types={
@@ -1219,7 +1219,7 @@ async def sync_l3vpn_service(body, spec, name, uid, logger):
                     if row:
                         existing_config = row[0]
                         existing_status = row[1]
-                        if existing_config == bgp_config and existing_status == bgp_status:
+                        if existing_config == bgp_config and existing_status == bgp_status.lower():
                             need_insert = False
                         else:
                             # Close existing
@@ -1238,7 +1238,7 @@ async def sync_l3vpn_service(body, spec, name, uid, logger):
                                 'local_as': router_local_as,
                                 'remote_as': remote_as,
                                 'peer_ip': peer_ip,
-                                'status': bgp_status,
+                                'status': bgp_status.lower(),
                                 'config': bgp_config
                             },
                             param_types={
@@ -1486,7 +1486,7 @@ async def sync_device(body, spec, name, uid, logger):
                     'ip_address': ip_address,
                     'gateway': gateway,
                     'vlan': vlan,
-                    'status': device_status,
+                    'status': device_status.lower(),
                     'config': config_json
                 },
                 param_types={
@@ -1842,7 +1842,7 @@ async def _sync_veth_link(link_id, host_veth_name, container_iface_id, bandwidth
                     'id': link_id,
                     'name': f"veth: {host_veth_name} ↔ {container_iface_id}",
                     'bandwidth': bandwidth if bandwidth != 'none' else 'N/A',
-                    'status': state,
+                    'status': state.lower(),
                     'properties': json.dumps(properties)
                 },
                 param_types={
