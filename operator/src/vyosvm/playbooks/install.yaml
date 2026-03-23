@@ -15,7 +15,7 @@
 - name: Build Device Docker Image
   hosts: all
   become: true
-  gather_facts: no
+  gather_facts: yes
 
   tasks:
     - name: install base packages
