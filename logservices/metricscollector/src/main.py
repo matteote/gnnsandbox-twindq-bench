@@ -49,6 +49,8 @@ POLL_INTERVAL = int(os.environ.get("POLL_INTERVAL", 20))
 RETENTION_HOURS = int(os.environ.get("RETENTION_HOURS", 3))
 # Metrics clean up frequency
 CLEANUP_INTERVAL_SECONDS = int(os.environ.get("CLEANUP_INTERVAL_SECONDS", 1200))
+# Spanner DB connection check interval
+DB_CHECK_SECONDS=int(os.environ.get("DB_CHECK_SECONDS", 60))
 
 SELECTED_METRICS = [
   # SYSTEM metrics
@@ -171,7 +173,38 @@ def fetch_all_vyos_metrics(client, project_name, start_time):
     # Chain all the individual iterators into one stream
     return itertools.chain.from_iterable(generators)
 
-def retention_worker(db, lock):
+def check_spanner_connection(db_container, lock):
+    """Checks if the Spanner database exists and reconnects if necessary."""
+    try:
+        # Check outside lock first
+        if not db_container['db'].exists():
+            with lock:
+                # Double check inside the lock to avoid multiple reconnections
+                if not db_container['db'].exists():
+                    logger.warning("Spanner database not found. Attempting to reconnect...")
+                    db_container['db'] = spanner_connect()
+                    logger.warning("Reconnected to Spanner.")
+        else:
+            logger.info("Spanner DB connection alive!")
+    except Exception as e:
+        with lock:
+            logger.error(f"Error checking Spanner connection: {e}. Attempting to reconnect...")
+            try:
+                db_container['db'] = spanner_connect()
+                logger.warning("Reconnected to Spanner after error.")
+            except Exception as re:
+                logger.error(f"Failed to reconnect to Spanner: {re}")
+
+def spanner_connection_worker(db_container, lock):
+    """
+    Background worker that regularly checks the Spanner connection.
+    """
+    logger.info(f"Spanner connection worker started. Checking every {DB_CHECK_SECONDS} seconds.")
+    while True:
+        check_spanner_connection(db_container, lock)
+        time.sleep(DB_CHECK_SECONDS)
+
+def retention_worker(db_container, lock):
     """
     Background worker that removes old metrics from Spanner.
     """
@@ -189,7 +222,7 @@ def retention_worker(db, lock):
             
             with lock:
                 logger.debug("Retention thread: Acquired lock")
-                row_count = db.execute_partitioned_dml(
+                row_count = db_container['db'].execute_partitioned_dml(
                     dml,
                     params={'cutoff_time': cutoff_time},
                     param_types={'cutoff_time': spanner.param_types.TIMESTAMP}
@@ -200,10 +233,15 @@ def retention_worker(db, lock):
         except Exception as e:
             logger.error(f"Error in retention worker: {e}")
 
-def run_worker():
-    mon_client = monitoring_v3.MetricServiceClient()
+def spanner_connect():
     span_client = spanner.Client(project=PROJECT_ID, disable_builtin_metrics=True)
     db = span_client.instance(INSTANCE_ID).database(DATABASE_ID)
+    return db
+
+def run_worker():
+    mon_client = monitoring_v3.MetricServiceClient()
+    db = spanner_connect()
+    db_container = {'db': db}
     project_name = f"projects/{PROJECT_ID}"
     
     # Concurrency lock
@@ -212,10 +250,18 @@ def run_worker():
     # Start retention thread
     retention_thread = threading.Thread(
         target=retention_worker, 
-        args=(db, lock), 
+        args=(db_container, lock), 
         daemon=True
     )
     retention_thread.start()
+    
+    # Start Spanner connection worker thread
+    connection_thread = threading.Thread(
+        target=spanner_connection_worker, 
+        args=(db_container, lock), 
+        daemon=True
+    )
+    connection_thread.start()
     
     logger.info(f"Worker Pool started. Polling all VyOS metrics every {POLL_INTERVAL}s...")
     last_poll_time = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(seconds=POLL_INTERVAL)
@@ -274,7 +320,7 @@ def run_worker():
         try:
             with lock:
                 logger.debug("Main thread: Acquired lock")
-                with db.batch() as batch:
+                with db_container['db'].batch() as batch:
                     logger.info(f"Inserting {len(data_to_insert)} metric points at {current_poll_time}")
                     batch.insert(
                         table="NetworkMetrics",

@@ -18,6 +18,9 @@ from utils.compute import *
 import json
 # Imports the Google Cloud Spanner Client Library.
 from google.cloud import spanner
+import threading
+import time
+import os
 
 SQL_TEMPLATES = {
   # --- Knowledge Graph tables ---
@@ -110,6 +113,9 @@ SQL_TEMPLATES = {
   'upsert_incident': "INSERT OR UPDATE Incident (id, recordedTimestamp, agentTaskId, issue, strategy, root_cause, resolution, resolvedTimestamp) VALUES (@id, @recordedTimestamp, @agentTaskId, @issue, @strategy, @root_cause, @resolution, @resolvedTimestamp)",
 }
 
+# Spanner DB connection check interval
+DB_CHECK_SECONDS=int(os.environ.get("DB_CHECK_SECONDS", 60))
+
 # Connect to Spanner database
 def spanner_connect():
   spanner_client = spanner.Client()
@@ -117,7 +123,51 @@ def spanner_connect():
   database = instance.database('networktopology-db')
   return database
 
-database = spanner_connect()
+# Global lock for thread-safe database updates
+lock = threading.Lock()
+
+def check_spanner_connection(db_container, lock):
+    """Checks if the Spanner database exists and reconnects if necessary."""
+    try:
+        # Check outside lock first
+        if not db_container['db'].exists():
+            with lock:
+                # Double check inside the lock to avoid multiple reconnections
+                if not db_container['db'].exists():
+                    logger.warning("Spanner database not found. Attempting to reconnect...")
+                    db_container['db'] = spanner_connect()
+                    logger.warning("Reconnected to Spanner.")
+        else:
+            logger.info("Spanner DB connection alive!")
+    except Exception as e:
+        with lock:
+            logger.error(f"Error checking Spanner connection: {e}. Attempting to reconnect...")
+            try:
+                db_container['db'] = spanner_connect()
+                logger.warning("Reconnected to Spanner after error.")
+            except Exception as re:
+                logger.error(f"Failed to reconnect to Spanner: {re}")
+
+def spanner_connection_worker(db_container, lock):
+    """
+    Background worker that regularly checks the Spanner connection.
+    """
+    logger.info(f"Spanner connection worker started. Checking every {DB_CHECK_SECONDS} seconds.")
+    while True:
+        check_spanner_connection(db_container, lock)
+        time.sleep(DB_CHECK_SECONDS)
+
+# Initialize database connection and start connection monitor thread
+database_initial = spanner_connect()
+db_container = {'db': database_initial}
+
+connection_thread = threading.Thread(
+    target=spanner_connection_worker, 
+    args=(db_container, lock), 
+    daemon=True
+)
+connection_thread.start()
+
 logger = logging.getLogger(__name__)
 
 # ------------------------------------------
@@ -234,7 +284,7 @@ async def exist_kg_resource_description_node(id):
   logger.debug("SQL: {}".format(sql))
 
   try:
-    with database.snapshot() as snapshot:
+    with db_container['db'].snapshot() as snapshot:
       results = snapshot.execute_sql(sql)
     success = (results.one_or_none() is not None)
   except Exception as e:
@@ -269,7 +319,7 @@ async def create_kg_resource_description_node(id, body_string):
   row_ct = 0
   success = True
   try:
-    row_ct = database.run_in_transaction(sql_create_kg_resource_description_node)
+    row_ct = db_container['db'].run_in_transaction(sql_create_kg_resource_description_node)
   except Exception as e:
     success = False
     logger.error(f"SQL error: {e}")
@@ -303,7 +353,7 @@ async def update_kg_resource_description_node(id, body_string):
   row_ct = None
   success = True
   try:
-    row_ct = database.run_in_transaction(sql_update_kg_resource_description_node)
+    row_ct = db_container['db'].run_in_transaction(sql_update_kg_resource_description_node)
   except Exception as e:
     success = False
     logger.error(f"SQL error: {e}")
@@ -331,7 +381,7 @@ async def delete_kg_resource_description_node(id):
   row_ct = None
   success = True
   try:
-    row_ct = database.run_in_transaction(sql_delete_kg_resource_description_node)
+    row_ct = db_container['db'].run_in_transaction(sql_delete_kg_resource_description_node)
   except Exception as e:
     success = False
     logger.error(f"SQL error: {e}")
@@ -348,7 +398,7 @@ async def delete_kg_resource_description_node(id):
 async def _get_router_id_by_name(name):
   sql = SQL_TEMPLATES['get_router_id_by_name']
   try:
-    with database.snapshot() as snapshot:
+    with db_container['db'].snapshot() as snapshot:
       results = snapshot.execute_sql(sql, params={'name': name}, param_types={'name': spanner.param_types.STRING})
       # Get first result in case of duplicates (could happen if routers were recreated)
       for row in results:
@@ -415,7 +465,7 @@ async def sync_vyos_infrastructure(body, spec, name, uid, logger):
                     }
                 )
         try:
-            database.run_in_transaction(sql_upsert_subnet)
+            db_container['db'].run_in_transaction(sql_upsert_subnet)
         except Exception as e:
             logger.error(f"Failed to upsert subnet {subnet_id}: {e}")
         
@@ -484,7 +534,7 @@ async def sync_vyos_infrastructure(body, spec, name, uid, logger):
                     )
             
             try:
-                database.run_in_transaction(sql_upsert_link)
+                db_container['db'].run_in_transaction(sql_upsert_link)
                 logger.debug(f"Created PhysicalLink {link_id} connecting {len(connected_routers)} routers")
             except Exception as e:
                 logger.error(f"Failed to create PhysicalLink {link_id}: {e}")
@@ -528,7 +578,7 @@ async def sync_vyos_infrastructure(body, spec, name, uid, logger):
                         )
                 
                 try:
-                    database.run_in_transaction(sql_upsert_iface_link)
+                    db_container['db'].run_in_transaction(sql_upsert_iface_link)
                     logger.debug(f"Linked interface {interface_id} to {link_id}")
                 except Exception as e:
                     logger.error(f"Failed to link interface {interface_id} to {link_id}: {e}")
@@ -568,7 +618,7 @@ async def delete_vyos_infrastructure(uid, spec, logger):
         )
     
     try:
-        database.run_in_transaction(sql_delete)
+        db_container['db'].run_in_transaction(sql_delete)
         logger.debug(f"Successfully deleted VyOSInfrastructure topology for {uid}")
     except Exception as e:
         logger.error(f"Failed to delete VyOSInfrastructure {uid}: {e}")
@@ -671,7 +721,7 @@ async def sync_physical_router(body, spec, name, uid, logger):
             )
     
     try:
-        database.run_in_transaction(sql_upsert_router)
+        db_container['db'].run_in_transaction(sql_upsert_router)
     except Exception as e:
         logger.error(f"Failed to upsert router {name}: {e}")
         return
@@ -779,7 +829,7 @@ async def sync_physical_router(body, spec, name, uid, logger):
                     }
                 )
         try:
-            database.run_in_transaction(sql_upsert_iface)
+            db_container['db'].run_in_transaction(sql_upsert_iface)
         except Exception as e:
             logger.error(f"Failed to upsert interface {iface_id}: {e}")
         
@@ -832,7 +882,7 @@ async def sync_physical_router(body, spec, name, uid, logger):
                             }
                         )
                 try:
-                    database.run_in_transaction(sql_upsert_subnet)
+                    db_container['db'].run_in_transaction(sql_upsert_subnet)
                 except Exception as e:
                     logger.error(f"Failed to create subnet {subnet_id}: {e}")
                     continue  # Skip association if subnet creation fails
@@ -860,7 +910,7 @@ async def sync_physical_router(body, spec, name, uid, logger):
                             }
                         )
                 try:
-                    database.run_in_transaction(sql_upsert_subnet_assoc)
+                    db_container['db'].run_in_transaction(sql_upsert_subnet_assoc)
                 except Exception as e:
                     logger.error(f"Failed to create subnet association for {iface_id}: {e}")
 
@@ -903,7 +953,7 @@ async def delete_physical_router(uid, name=None):
         )
 
     try:
-        database.run_in_transaction(sql_delete_router)
+        db_container['db'].run_in_transaction(sql_delete_router)
         logger.debug(f"Successfully closed PhysicalRouter {name} and its interfaces")
     except Exception as e:
         logger.error(f"Failed to close PhysicalRouter {name}: {e}")
@@ -928,7 +978,7 @@ async def _create_bgp_peering(bgp_id, peer_ip, vpn_name, logger):
     my_ips = []
     sql_get_ips = "SELECT ip_address FROM PhysicalInterface WHERE router_id = @router_id AND valid_end_ts IS NULL"
     try:
-        with database.snapshot() as snapshot:
+        with db_container['db'].snapshot() as snapshot:
             results = snapshot.execute_sql(sql_get_ips, params={'router_id': router_id}, param_types={'router_id': spanner.param_types.STRING})
             my_ips = [row[0] for row in results if row[0]]
             # Also handle CIDR strip if needed, but DB usually has IP
@@ -950,7 +1000,7 @@ async def _create_bgp_peering(bgp_id, peer_ip, vpn_name, logger):
     
     peer_session_id = None
     try:
-        with database.snapshot() as snapshot:
+        with db_container['db'].snapshot() as snapshot:
             results = snapshot.execute_sql(
                 sql_find_peer, 
                 params={'pattern': pattern, 'my_ips': my_ips}, 
@@ -979,7 +1029,7 @@ async def _create_bgp_peering(bgp_id, peer_ip, vpn_name, logger):
                     # Code: ip_address = ip_address.split('/')[0] (Step 643 upsert).
                     # So exact match or check.
                     
-                    with database.snapshot() as sub_snap:
+                    with db_container['db'].snapshot() as sub_snap:
                         res = sub_snap.execute_sql(
                             sql_check_ip, 
                             params={'rid': cand_router_id, 'ip_pattern': f"{peer_ip}%"}, # Fuzzy match for CIDR if inconsistent
@@ -1027,7 +1077,7 @@ async def _create_bgp_peering(bgp_id, peer_ip, vpn_name, logger):
                 )
 
         try:
-            database.run_in_transaction(sql_link_bgp)
+            db_container['db'].run_in_transaction(sql_link_bgp)
             logger.debug(f"Linked BGP Session {bgp_id} <-> {peer_session_id}")
         except Exception as e:
             logger.error(f"Failed to link BGP sessions: {e}")
@@ -1063,7 +1113,7 @@ async def sync_l3vpn_service(body, spec, name, uid, logger):
                 param_types={'id': spanner.param_types.STRING, 'name': spanner.param_types.STRING, 'type': spanner.param_types.STRING, 'properties': spanner.param_types.JSON}
              )
         try:
-             database.run_in_transaction(sql_upsert_cust)
+             db_container['db'].run_in_transaction(sql_upsert_cust)
         except:
              pass
 
@@ -1119,7 +1169,7 @@ async def sync_l3vpn_service(body, spec, name, uid, logger):
                     }
                 )
         try:
-            database.run_in_transaction(sql_upsert_l3vpn)
+            db_container['db'].run_in_transaction(sql_upsert_l3vpn)
             logger.debug(f"Upserted L3VPNService {vpn_id}")
         except Exception as e:
             logger.error(f"Failed to upsert L3VPNService {vpn_id}: {e}")
@@ -1187,7 +1237,7 @@ async def sync_l3vpn_service(body, spec, name, uid, logger):
                         }
                     )
             try:
-                database.run_in_transaction(sql_upsert_vrf)
+                db_container['db'].run_in_transaction(sql_upsert_vrf)
                 logger.debug(f"Upserted VRF {vrf_id}")
             except Exception as e:
                 logger.error(f"Failed to upsert VRF {vrf_id}: {e}")
@@ -1252,7 +1302,7 @@ async def sync_l3vpn_service(body, spec, name, uid, logger):
                             }
                         )
                 try:
-                    database.run_in_transaction(sql_upsert_bgp)
+                    db_container['db'].run_in_transaction(sql_upsert_bgp)
                 except Exception as e:
                     logger.error(f"Failed to upsert BGP {bgp_id}: {e}")
                     continue
@@ -1319,7 +1369,7 @@ async def delete_l3vpn_service(uid):
         # Here `OwnedBy` is a View on L3VPNService, so closing L3VPNService is enough.
     
     try:
-        database.run_in_transaction(sql_delete)
+        db_container['db'].run_in_transaction(sql_delete)
         logger.debug(f"Successfully closed L3VPN services and related entities for CRD {uid}")
     except Exception as e:
         logger.error(f"Failed to delete L3VPN service {uid}: {e}")
@@ -1342,7 +1392,7 @@ async def _create_bgp_peering(bgp_session_id, peer_ip, vrf_name, logger):
     """
     
     try:
-        with database.snapshot() as snapshot:
+        with db_container['db'].snapshot() as snapshot:
             results = snapshot.execute_sql(
                 query,
                 params={
@@ -1372,7 +1422,7 @@ async def _create_bgp_peering(bgp_session_id, peer_ip, vrf_name, logger):
                         param_types={'id_a': spanner.param_types.STRING, 'id_b': spanner.param_types.STRING}
                     )
                 
-                database.run_in_transaction(sql_insert_peering)
+                db_container['db'].run_in_transaction(sql_insert_peering)
                 logger.debug(f"Created BGP peering: {bgp_session_id} <-> {peer_bgp_id}")
                 
     except Exception as e:
@@ -1421,7 +1471,7 @@ async def sync_device(body, spec, name, uid, logger):
         """
         
         try:
-            with database.snapshot() as snapshot:
+            with db_container['db'].snapshot() as snapshot:
                 results = snapshot.execute_sql(
                     sql_find_router,
                     params={'gateway_ip': gateway},
@@ -1503,7 +1553,7 @@ async def sync_device(body, spec, name, uid, logger):
             )
     
     try:
-        database.run_in_transaction(sql_upsert_device)
+        db_container['db'].run_in_transaction(sql_upsert_device)
         logger.info(f"Successfully synced Device {name} to Spanner")
     except Exception as e:
         logger.error(f"Failed to sync Device {name} to Spanner: {e}")
@@ -1522,7 +1572,7 @@ async def delete_device(uid, name=None):
         )
     
     try:
-        database.run_in_transaction(sql_delete_device)
+        db_container['db'].run_in_transaction(sql_delete_device)
         logger.info(f"Successfully closed Device {device_id} in Spanner")
     except Exception as e:
         logger.error(f"Failed to delete Device {device_id} from Spanner: {e}")
@@ -1629,7 +1679,7 @@ async def sync_host_network_bridge(body, spec, name, namespace, bridge_status, l
             )
     
     try:
-        database.run_in_transaction(sql_upsert_subnet)
+        db_container['db'].run_in_transaction(sql_upsert_subnet)
         logger.debug(f"Successfully synced LogicalSubnet {subnet_id} with bridge state")
     except Exception as e:
         logger.error(f"Failed to sync LogicalSubnet {subnet_id}: {e}")
@@ -1660,7 +1710,7 @@ async def _resolve_container_interface_id(router_prefix: str, interface_name: st
     """
     fallback = f"router:{router_prefix}:interface:{interface_name}"
     try:
-        with database.snapshot() as snapshot:
+        with db_container['db'].snapshot() as snapshot:
             results = snapshot.execute_sql(
                 """SELECT id FROM PhysicalInterface
                    WHERE name = @iface_name
@@ -1791,7 +1841,7 @@ async def _sync_container_bridge_association(container_interface_id, subnet_id, 
             )
 
     try:
-        database.run_in_transaction(sql_upsert_assoc)
+        db_container['db'].run_in_transaction(sql_upsert_assoc)
         logger.debug(f"Associated container interface {container_interface_id} with bridge {subnet_id}")
     except Exception as e:
         logger.error(f"Failed to associate {container_interface_id} with bridge {subnet_id}: {e}")
@@ -1874,7 +1924,7 @@ async def _sync_veth_link(link_id, host_veth_name, container_iface_id, bandwidth
             sql_create_link_assoc(transaction)
     
     try:
-        database.run_in_transaction(sql_upsert_link)
+        db_container['db'].run_in_transaction(sql_upsert_link)
         logger.debug(f"Synced veth link {link_id}")
     except Exception as e:
         logger.error(f"Failed to sync veth link {link_id}: {e}")
@@ -1926,7 +1976,7 @@ async def sync_network_metrics(entity_id, entity_type, metrics, logger):
         return
 
     try:
-        with database.batch() as batch:
+        with db_container['db'].batch() as batch:
             batch.insert(
                 table="NetworkMetrics",
                 columns=("timestamp", "node_name", "metric_name", "metric_type",

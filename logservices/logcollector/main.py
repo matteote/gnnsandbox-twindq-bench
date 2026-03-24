@@ -297,7 +297,16 @@ def capture_log(cloud_event: CloudEvent) -> None:
   # comes back empty. Do not insert this log entry in Spanner
   # as it will result in error when searching by similarity
   if embedding:
-    try:
-      database.run_in_transaction(insert_log_entry)
-    except Exception as e:
-      logger.error(f"Log insert error: {e}")
+    max_retries = 3
+    global database
+    for attempt in range(max_retries):
+      try:
+        database.run_in_transaction(insert_log_entry)
+        break
+      except Exception as e:
+        logger.error(f"Log insert error (attempt {attempt+1}/{max_retries}): {e}")
+        if attempt < max_retries - 1:
+          logger.info("Attempting to reconnect to Spanner...")
+          database = spanner_connect()
+        else:
+          logger.error("Final attempt failed. Log entry lost.")
