@@ -1002,7 +1002,7 @@ DeployLogCapture()
     fi
 
     # Create the logging sink if it doesn't exist yet
-    gcloud logging sinks describe $SINK_NAME > /dev/null 2>&1
+
     # The log sink filter captures:
     # 1) all logs from the network operator except kopf logs
     # and also
@@ -1017,7 +1017,8 @@ DeployLogCapture()
             logName="projects/${GOOGLE_PROJECT}/logs/vyos_syslog")
 EOF
     )
-    if [[ $? -ne 0 ]]; then
+
+    if ! gcloud logging sinks describe $SINK_NAME >/dev/null 2>&1; then
         echo "Creating Logging sink '${SINK_NAME}'..."
         gcloud logging sinks create $SINK_NAME pubsub.googleapis.com/projects/${GOOGLE_PROJECT}/topics/${TOPIC_NAME} \
             --description="Network operator logs sink" \
