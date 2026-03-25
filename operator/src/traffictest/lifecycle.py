@@ -9,8 +9,12 @@ from traffictest.lifecycle_tasks import (
     get_traffic_test_status,
 )
 from utils.compute import get_ip
+from traffictest.port_allocator import PortAllocator
 
 logger = logging.getLogger(__name__)
+
+# Global PortAllocator instance for the operator
+port_allocator = PortAllocator()
 
 #########################################################################
 # TrafficTest Lifecycle Management
@@ -38,9 +42,35 @@ async def create_traffic_test_handler(body, spec, name, namespace, uid, logger, 
             await update_status(name, namespace, "Failed", error_msg)
             raise kopf.PermanentError(error_msg)
         
-        # Check if all source devices are ready and assign unique ports
-        # iperf3 can only handle ONE client per server instance, so each source needs its own port
-        base_port = spec.get('port', 5201)
+        # Port assignment using global PortAllocator
+        num_sources = len(source_devices)
+        port_mode = spec.get('port_mode', 'auto')
+        
+        if port_mode == 'manual':
+            requested_port = spec.get('port')
+            if not requested_port:
+                error_msg = "Port must be specified when port_mode is 'manual'"
+                logger.error(f"TrafficTest {name}: {error_msg}")
+                await update_status(name, namespace, "Failed", error_msg)
+                raise kopf.PermanentError(error_msg)
+            
+            base_port = port_allocator.alloc(num_sources, requested_port)
+            if base_port:
+                logger.info(f"Using manual port {base_port} from spec")
+            else:
+                error_msg = f"Manual port {requested_port} is already in use"
+                logger.error(f"TrafficTest {name}: {error_msg}")
+                await update_status(name, namespace, "Failed", error_msg)
+                raise kopf.PermanentError(error_msg)
+        else:
+            # Automatic allocation
+            base_port = port_allocator.alloc(num_sources)
+
+        if base_port is None:
+            raise kopf.PermanentError("No free port blocks available for TrafficTest")
+        
+        logger.info(f"Allocated base port {base_port} for {num_sources} sources")
+
         source_info = {}
         all_ready = True
         not_ready_devices = []
@@ -83,6 +113,7 @@ async def create_traffic_test_handler(body, spec, name, namespace, uid, logger, 
         spec_with_name['test_name'] = name
         spec_with_name['source_info'] = source_info  # {device_name: {ready: bool, ip: str}}
         spec_with_name['destination_ip'] = dest_ip
+        spec_with_name['port'] = base_port # Override with allocated port
 
         # Create the TrafficTest using Ansible
         result = await create_traffic_test(ip_address, spec_with_name)
@@ -110,7 +141,8 @@ async def create_traffic_test_handler(body, spec, name, namespace, uid, logger, 
                         'avg_latency_ms': 0,
                         'avg_packet_loss_pct': 0,
                         'total_connections': 0
-                    }
+                    },
+                    'base_port': base_port
                 }
             )
             logger.info(f"Successfully started TrafficTest {name} with {len(source_devices)} source device(s)")
@@ -120,6 +152,8 @@ async def create_traffic_test_handler(body, spec, name, namespace, uid, logger, 
             
         else:
             await update_status(name, namespace, "Failed", f"Failed to start traffic test: {result['error']}")
+            # Free port on failure
+            PortAllocator().free(base_port)
             raise kopf.PermanentError(f"TrafficTest creation failed: {result['error']}")
 
     except kopf.TemporaryError:
@@ -131,6 +165,9 @@ async def create_traffic_test_handler(body, spec, name, namespace, uid, logger, 
     except Exception as e:
         logger.error(f"Failed to create TrafficTest {name}: {e}")
         await update_status(name, namespace, "Failed", str(e))
+        # Free port on unexpected error if it was allocated
+        if 'base_port' in locals():
+            PortAllocator().free(base_port)
         raise kopf.PermanentError(str(e))
 
 @kopf.on.delete('google.dev', 'v1', 'traffictest')
@@ -145,15 +182,26 @@ async def delete_traffic_test_handler(body, spec, name, namespace, logger, **kwa
             logger.warning("No IP address found on Network VM, skipping traffic test deletion")
             return
         
-        # Add test name to spec for tracking
+        # Add test name and allocated port to spec for tracking
         spec_with_name = dict(spec)
         spec_with_name['test_name'] = name
+        
+        status = body.get('status', {})
+        base_port = status.get('base_port')
+        if base_port:
+            spec_with_name['port'] = base_port
         
         # Delete the traffic test using Ansible
         result = await delete_traffic_test(ip_address, spec_with_name)
         
         if result['success']:
             logger.info(f"Successfully deleted TrafficTest {name}")
+            # Free the port block
+            status = body.get('status', {})
+            base_port = status.get('base_port')
+            if base_port:
+                port_allocator.free(base_port)
+                logger.info(f"Freed port block starting at {base_port}")
         else:
             logger.warning(f"Failed to delete TrafficTest {name}: {result['error']}")
             # Don't raise error on delete failure - resource should still be removed from Kubernetes
@@ -172,6 +220,9 @@ async def monitor_traffic_test(name: str, namespace: str, spec: dict, ip_address
     
     duration = spec.get('duration', 60)
     metrics_interval = spec.get('metrics_interval', 5)
+    
+    # Get allocated port from status if available
+    status = kwargs.get('status', {}) # Wait, monitor_traffic_test doesn't have status in args yet
     
     # Monitor for the duration of the test
     start_time = datetime.now(timezone.utc)

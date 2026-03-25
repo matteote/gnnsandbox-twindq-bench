@@ -6,10 +6,10 @@ metadata:
   namespace: default
 spec:
   source_devices:
-    - dev-a  # First source device
-  destination_device: dev-b
+    - dev1  # First source device
+  destination_device: devhub
   protocol: TCP
-  port: 5201 # base port, each source gets its own port
+  port_mode: auto # Self allocated by the traffic test operator
   duration: 14400  # 240 minutes
   bandwidth: 5Mbps  # Each source sends 5Mbps
   pattern_type: constant

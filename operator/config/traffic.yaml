@@ -147,12 +147,21 @@ spec:
                     - Choose TCP for bandwidth and reliability testing
                     - Choose UDP for latency, jitter, and real-time application testing
                     - Consider the actual applications that will use the network path
+                port_mode:
+                  type: string
+                  enum: [auto, manual]
+                  default: auto
+                  description: |
+                    Port allocation mode:
+                    - auto: The operator automatically allocates a free port block.
+                    - manual: The user specifies the base port in the 'port' field.
                 port:
                   type: integer
                   minimum: 1
                   maximum: 65535
                   description: |
                     TCP or UDP port number for the traffic test destination.
+                    Required if port_mode is set to 'manual'.
                     
                     Port Selection Considerations:
                     - Must be available and not blocked by firewalls or security policies
