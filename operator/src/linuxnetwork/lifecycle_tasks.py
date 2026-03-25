@@ -138,8 +138,8 @@ async def _run_ansible_playbook(ip_address:str, playbook: str, extravars: Dict[s
                 inventory={'all': hosts},
                 playbook=playbook,
                 extravars=extravars,
-                quiet=False,
-                verbosity=1
+                quiet=True,
+                verbosity=0
             )
             # Wait for the thread to complete
             thread.join()
@@ -182,52 +182,52 @@ async def _run_ansible_playbook(ip_address:str, playbook: str, extravars: Dict[s
                             # Extract default_interface if present
                             if 'default_interface' in ansible_facts:
                                 result_data['default_interface'] = ansible_facts['default_interface']
-                                logger.info(f"Captured default_interface: {ansible_facts['default_interface']}")
+                                logger.debug(f"Captured default_interface: {ansible_facts['default_interface']}")
                             
                             # Extract default_gateway if present
                             if 'default_gateway' in ansible_facts:
                                 result_data['default_gateway'] = ansible_facts['default_gateway']
-                                logger.info(f"Captured default_gateway: {ansible_facts['default_gateway']}")
+                                logger.debug(f"Captured default_gateway: {ansible_facts['default_gateway']}")
 
                             # Extract interface_ip if present
                             if 'interface_ip' in ansible_facts:
                                 result_data['interface_ip'] = ansible_facts['interface_ip']
-                                logger.info(f"Captured interface_ip: {ansible_facts['interface_ip']}")
+                                logger.debug(f"Captured interface_ip: {ansible_facts['interface_ip']}")
                             
                             # Extract exists fact (for status check)
                             if 'exists' in ansible_facts:
                                 result_data['exists'] = ansible_facts['exists']
-                                logger.info(f"Captured exists: {ansible_facts['exists']}")
+                                logger.debug(f"Captured exists: {ansible_facts['exists']}")
                             
                             # Extract network_info (for status check)
                             if 'network_info' in ansible_facts:
                                 result_data['network_info'] = ansible_facts['network_info']
-                                logger.info(f"Captured network_info: {ansible_facts['network_info']}")
+                                logger.debug(f"Captured network_info: {ansible_facts['network_info']}")
                             
                             # Extract detailed bridge status (for detailed_status_network.yaml)
                             if 'bridge_exists' in ansible_facts:
                                 result_data['bridge_exists'] = ansible_facts['bridge_exists']
-                                logger.info(f"Captured bridge_exists: {ansible_facts['bridge_exists']}")
+                                logger.debug(f"Captured bridge_exists: {ansible_facts['bridge_exists']}")
                             
                             if 'bridge_state' in ansible_facts:
                                 result_data['bridge_state'] = ansible_facts['bridge_state']
-                                logger.info(f"Captured bridge_state: {ansible_facts['bridge_state']}")
+                                logger.debug(f"Captured bridge_state: {ansible_facts['bridge_state']}")
                             
                             if 'bridge_mtu' in ansible_facts:
                                 result_data['bridge_mtu'] = ansible_facts['bridge_mtu']
-                                logger.info(f"Captured bridge_mtu: {ansible_facts['bridge_mtu']}")
+                                logger.debug(f"Captured bridge_mtu: {ansible_facts['bridge_mtu']}")
                             
                             if 'bridge_mac' in ansible_facts:
                                 result_data['bridge_mac'] = ansible_facts['bridge_mac']
-                                logger.info(f"Captured bridge_mac: {ansible_facts['bridge_mac']}")
+                                logger.debug(f"Captured bridge_mac: {ansible_facts['bridge_mac']}")
                             
                             if 'bridge_ip' in ansible_facts:
                                 result_data['bridge_ip'] = ansible_facts['bridge_ip']
-                                logger.info(f"Captured bridge_ip: {ansible_facts['bridge_ip']}")
+                                logger.debug(f"Captured bridge_ip: {ansible_facts['bridge_ip']}")
                             
                             if 'bridge_metrics' in ansible_facts:
                                 result_data['bridge_metrics'] = ansible_facts['bridge_metrics']
-                                logger.info(f"Captured bridge_metrics: {ansible_facts['bridge_metrics']}")
+                                logger.debug(f"Captured bridge_metrics: {ansible_facts['bridge_metrics']}")
                             
                             if 'veth_pairs' in ansible_facts:
                                 veth_pairs_raw = ansible_facts['veth_pairs']
@@ -236,7 +236,7 @@ async def _run_ansible_playbook(ip_address:str, playbook: str, extravars: Dict[s
                                 else:
                                     logger.warning(f"veth_pairs Ansible fact is not a list (got {type(veth_pairs_raw).__name__}), ignoring")
                                     result_data['veth_pairs'] = []
-                                logger.info(f"Captured veth_pairs: {result_data['veth_pairs']}")
+                                logger.debug(f"Captured veth_pairs: {result_data['veth_pairs']}")
 
                 logger.info(f"Final extracted data: {result_data}")
                 return {

@@ -241,19 +241,22 @@ async def delete_vyosrouter(body, spec, name, namespace, logger, **kwargs):
         logger.error(f"Error during VyOSRouter deletion {name}: {e}")
         # Don't raise error on delete failure
 
-@kopf.timer('google.dev', 'v1', 'vyosrouter', interval=120.0)
+@kopf.timer('google.dev', 'v1', 'vyosrouter', interval=300.0)
 async def monitor_vyosrouter(body, spec, name, namespace, logger, **kwargs):
     """Monitor VyOSRouter status periodically and report only on state changes"""
 
     # Do not monitor until after first successful install
     status_dict = body.get('status', {})
+    logger.info(f"===== Entering VyOSRouter Monitor for  {name}")
+    h = status_dict.copy(); h.pop('applied_config', None)
+    logger.info(f"Previous status dict: {h}")
     if not status_dict or status_dict.get('phase') in ["Pending", "Creating", "Configuring", "Updating", None]:
-        logger.debug(f"Skipping monitor for {name}, router not fully configured yet")
+        logger.info(f"Skipping monitor for {name}, router not fully configured yet")
         return
 
     ip_address = await get_ip("automation", "networkvm")
     if ip_address is None:
-        logger.warning(f"No ip address found on Network VM yet, skipping monitoring check for {name}")
+        logger.info(f"No ip address found on Network VM yet, skipping monitoring check for {name}")
         return
 
     try:
@@ -273,7 +276,8 @@ async def monitor_vyosrouter(body, spec, name, namespace, logger, **kwargs):
         if not running:
             # Container is down - only update if state changed
             if previous_running:
-                logger.warning(f"VyOSRouter {name} state changed: Running -> Failed")
+                logger.info(f"VyOSRouter {name} running state changed: {running} -> {previous_running}")
+                logger.info(f"VyOSRouter {name} phase changed: Running -> {previous_phase}")
                 await update_status(name, namespace, "Failed", "VyOS router container is not running",
                                    body=body, spec=spec, uid=kwargs.get('uid'), logger_obj=logger)
             return
@@ -314,11 +318,19 @@ async def monitor_vyosrouter(body, spec, name, namespace, logger, **kwargs):
             state_changed = True
             logger.info(f"VyOSRouter {name} interface state changed")
         
+        # Check if protocols status changed
+        previous_protocols = status_dict.get('protocols_status', {})
+        if _protocols_changed(previous_protocols, protocols):
+            state_changed = True
+            logger.info(f"VyOSRouter {name} protocol state changed")
+        
         # Only update status if something changed
         if state_changed:
             await update_status(name, namespace, "Running", "VyOS router container is running",
                                body=body, spec=spec, uid=kwargs.get('uid'), logger_obj=logger,
-                               interfaces=status_interfaces if status_interfaces else None)
+                               interfaces=status_interfaces if status_interfaces else None,
+                               protocols_status=protocols if protocols else None,
+                               applied_config=result.get('applied_config'))
         else:
             logger.debug(f"VyOSRouter {name} state unchanged, skipping status update")
             
@@ -365,6 +377,10 @@ def _is_transient_error(error_msg: str) -> bool:
 
 def _interfaces_changed(previous: list, current: list) -> bool:
     """Compare interface lists to detect changes"""
+    logger.info("Comparing interfaces")
+    logger.info(f"Previous interfaces: len={len(previous)} / {previous}")
+    logger.info(f"Current interfaces: len={len(current)} / {current}")
+
     if len(previous) != len(current):
         return True
     
@@ -383,6 +399,14 @@ def _interfaces_changed(previous: list, current: list) -> bool:
     
     return prev_set != curr_set
 
+def _protocols_changed(previous: dict, current: dict) -> bool:
+    """Compare protocol status dictionaries to detect changes"""
+    # Simple JSON comparison for protocol status
+    # We strip any empty values to avoid noise
+    p1 = {k: v for k, v in previous.items() if v}
+    p2 = {k: v for k, v in current.items() if v}
+    return p1 != p2
+
 #########################################################################
 # Status Management
 #########################################################################
@@ -390,7 +414,8 @@ async def update_status(name: str, namespace: str, phase: str, message: str,
                        body: Optional[Dict] = None, spec: Optional[Dict] = None, 
                        uid: Optional[str] = None, logger_obj: Optional[Any] = None,
                        container_id: Optional[str] = None, ip_address: Optional[str] = None,
-                       interfaces: Optional[list] = None, applied_config: Optional[str] = None):
+                       interfaces: Optional[list] = None, protocols_status: Optional[Dict] = None,
+                       applied_config: Optional[str] = None):
     """Update the status of a VyOSRouter resource in both Kubernetes and Spanner"""
     client = kubernetes.dynamic.DynamicClient(kubernetes.client.ApiClient())
     api = client.resources.get(api_version='google.dev/v1', kind='VyOSRouter')
@@ -415,6 +440,8 @@ async def update_status(name: str, namespace: str, phase: str, message: str,
     if interfaces:
         status['interfaces'] = interfaces
     
+    if protocols_status:
+        status['protocols_status'] = protocols_status
 
     if applied_config:
         status['applied_config'] = applied_config
@@ -441,7 +468,13 @@ async def update_status(name: str, namespace: str, phase: str, message: str,
         try:
             # Create a modified copy of body with updated status for Spanner sync
             body_dict = dict(body)
-            body_dict['status'] = status
+            if 'status' not in body_dict or body_dict['status'] is None:
+                body_dict['status'] = {}
+            else:
+                # Make a shallow copy of status to avoid modifying the original body
+                body_dict['status'] = dict(body_dict['status'])
+            
+            body_dict['status'].update(status)
             # Sync to Spanner
             await sync_physical_router(body_dict, spec, name, uid, logger_obj)
         except Exception as e:

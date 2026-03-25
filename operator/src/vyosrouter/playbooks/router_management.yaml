@@ -316,16 +316,46 @@
           ignore_errors: true
           changed_when: false
 
-        - name: Parse and return interface statuses
+        - name: Get OSPF status
+          shell: |
+            docker exec {{ router_name }} vbash -c "show ip ospf neighbor json" 2>/dev/null || echo "{}"
+          register: ospf_out
+          when: running | default(false)
+          ignore_errors: true
+          changed_when: false
+
+        - name: Get BGP status
+          shell: |
+            docker exec {{ router_name }} vbash -c "show ip bgp summary json" 2>/dev/null || echo "{}"
+          register: bgp_out
+          when: running | default(false)
+          ignore_errors: true
+          changed_when: false
+
+        - name: Get MPLS LDP status
+          shell: |
+            docker exec {{ router_name }} vbash -c "show mpls ldp neighbor json" 2>/dev/null || echo "{}"
+          register: mpls_out
+          when: running | default(false)
+          ignore_errors: true
+          changed_when: false
+
+        - name: Set protocol status facts
           set_fact:
-            interface_status: "{{ ip_link_out.stdout | from_json }}"
-          when: running | default(false) and ip_link_out is defined and ip_link_out.rc == 0
+            interface_status: "{{ ip_link_out.stdout | from_json if ip_link_out.stdout is defined else [] }}"
+            ospf_status: "{{ ospf_out.stdout | from_json if ospf_out.stdout is defined else {} }}"
+            bgp_status: "{{ bgp_out.stdout | from_json if bgp_out.stdout is defined else {} }}"
+            mpls_status: "{{ mpls_out.stdout | from_json if mpls_out.stdout is defined else {} }}"
+          when: running | default(false)
 
         - name: Return status information
           debug:
             msg:
               running: "{{ running }}"
               interface_status: "{{ interface_status | default([]) }}"
+              ospf_status: "{{ ospf_status | default({}) }}"
+              bgp_status: "{{ bgp_status | default({}) }}"
+              mpls_status: "{{ mpls_status | default({}) }}"
           register: status_output
 
       when: operation == 'status'

@@ -104,6 +104,8 @@ spec:
                 gateway:
                   type: string
                   description: "Default gateway associated with this network (for management networks)"
+      subresources:
+        status: {}
       additionalPrinterColumns:
         - name: Phase
           type: string

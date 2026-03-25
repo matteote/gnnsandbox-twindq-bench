@@ -135,7 +135,7 @@ async def delete_vyos_router(ip_address:str, router_name: str, interfaces: list 
 
 async def get_vyos_router_status(ip_address:str, router_name: str) -> Dict[str, Any]:
     """Get VyOS router status using Ansible"""
-    logger.debug(f"Getting VyOS router status: {router_name}")
+    logger.info(f"Getting VyOS router status: {router_name}")
     
     extravars = {
         'router_name': router_name,
@@ -143,7 +143,7 @@ async def get_vyos_router_status(ip_address:str, router_name: str) -> Dict[str, 
     }
     
     result = await _run_ansible_playbook(ip_address, 'router_management.yaml', extravars)
-    
+    logger.info(f"Result:\n{result}")
     return result
 
 #########################################################################
@@ -182,8 +182,8 @@ async def _run_ansible_playbook(ip_address:str, playbook: str, extravars: Dict[s
                 inventory={'all': hosts},
                 playbook=playbook,
                 extravars=extravars,
-                quiet=False,
-                verbosity=1
+                quiet=True,
+                verbosity=0
             )
             # Wait for the thread to complete
             thread.join()
@@ -241,6 +241,12 @@ async def _run_ansible_playbook(ip_address:str, playbook: str, extravars: Dict[s
                                 result_data['interface_status'] = raw if isinstance(raw, list) else []
                                 if not isinstance(raw, list):
                                     logger.warning(f"interface_status Ansible fact is not a list (got {type(raw).__name__}), ignoring")
+                            if 'ospf_status' in ansible_facts:
+                                result_data['ospf_status'] = ansible_facts['ospf_status']
+                            if 'bgp_status' in ansible_facts:
+                                result_data['bgp_status'] = ansible_facts['bgp_status']
+                            if 'mpls_status' in ansible_facts:
+                                result_data['mpls_status'] = ansible_facts['mpls_status']
                 
                 logger.info(f"Extracted VyOS status data: running={result_data.get('running')}, "
                            f"interfaces={len(result_data.get('interface_status', []))}")

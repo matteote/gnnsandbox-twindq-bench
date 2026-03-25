@@ -100,7 +100,7 @@ async def delete_linuxnetwork(body, spec, status, name, namespace, logger, **kwa
         logger.error(f"Error during DockerNetwork deletion {name}: {e}")
         # Don't raise error on delete failure
 
-@kopf.timer('google.dev', 'v1', 'linuxnetwork', interval=120.0)
+@kopf.timer('google.dev', 'v1', 'linuxnetwork', interval=300.0)
 async def monitor_linuxnetwork(body, spec, name, namespace, uid, logger, **kwargs):
     """Monitor LinuxNetwork status with detailed state tracking"""
 
