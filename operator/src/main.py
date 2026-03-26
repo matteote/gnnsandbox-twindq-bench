@@ -146,6 +146,15 @@ async def configure(settings: kopf.OperatorSettings, **_):
     else:
         # Use legacy immediate import mode
         legacy_import_modules()
+
+    # Manually trigger the anti-entropy sync for TrafficTests
+    # because kopf.on.startup can be missed in phased startup
+    if os.getenv("VPN") is not None:
+        try:
+            import traffictest.lifecycle as TrafficTest
+            await TrafficTest.initial_setup(logger)
+        except Exception as e:
+            logger.error(f"Failed to run TrafficTest initial setup: {e}")
     
 # Login with k8s client
 @kopf.on.login()
