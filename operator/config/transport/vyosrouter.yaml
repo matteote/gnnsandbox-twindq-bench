@@ -546,8 +546,6 @@ spec:
                         labels:
                           type: integer
                           description: "Number of MPLS labels"
-      subresources:
-        status: {}
       additionalPrinterColumns:
         - name: Phase
           type: string
