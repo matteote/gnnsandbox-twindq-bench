@@ -21,8 +21,7 @@ port_allocator = PortAllocator()
 # Operator Startup Synchronization
 #########################################################################
 
-@kopf.on.startup()
-async def startup_handler(logger, **kwargs):
+async def initial_setup(logger):
     """Scan existing TrafficTest resources and re-populate PortAllocator. This is
     an anti-entropy machanism when the network operator is redeployed and we need to
     realign the port allocator with the currently running traffic tests"""
