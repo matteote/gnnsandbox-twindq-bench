@@ -3,6 +3,7 @@ import logging
 import kubernetes
 import asyncio
 from datetime import datetime, timezone
+from typing import Optional, Dict, Any
 from traffictest.lifecycle_tasks import (
     create_traffic_test,
     delete_traffic_test,
@@ -15,6 +16,45 @@ logger = logging.getLogger(__name__)
 
 # Global PortAllocator instance for the operator
 port_allocator = PortAllocator()
+
+#########################################################################
+# Operator Startup Synchronization
+#########################################################################
+
+@kopf.on.startup()
+async def startup_handler(logger, **kwargs):
+    """Scan existing TrafficTest resources and re-populate PortAllocator. This is
+    an anti-entropy machanism when the network operator is redeployed and we need to
+    realign the port allocator with the currently running traffic tests"""
+    
+    logger.info("Operator starting up, re-populating PortAllocator from existing TrafficTests")
+    
+    client = kubernetes.dynamic.DynamicClient(kubernetes.client.ApiClient())
+    api = client.resources.get(api_version='google.dev/v1', kind='TrafficTest')
+    
+    try:
+        # List all TrafficTest resources
+        resources = api.get()
+        
+        count = 0
+        for tt in resources.items:
+            tt_dict = tt.to_dict()
+            name = tt_dict['metadata']['name']
+            status = tt_dict.get('status', {})
+            
+            # Check for allocated_ports (list) or allocated_port/base_port (fallback)
+            ports = status.get('allocated_ports') or status.get('allocated_port') or status.get('base_port')
+            
+            if ports:
+                # Reserve in allocator
+                port_allocator.mark_busy(ports)
+                logger.info(f"Re-allocated ports {ports} for TrafficTest {name}")
+                count += 1
+        
+        logger.info(f"PortAllocator synchronization complete. Re-marked {count} TrafficTests.")
+        
+    except Exception as e:
+        logger.error(f"Failed to synchronize PortAllocator: {e}")
 
 #########################################################################
 # TrafficTest Lifecycle Management
@@ -47,29 +87,26 @@ async def create_traffic_test_handler(body, spec, name, namespace, uid, logger, 
         port_mode = spec.get('port_mode', 'auto')
         
         if port_mode == 'manual':
+            # Skip validation already done
             requested_port = spec.get('port')
-            if not requested_port:
-                error_msg = "Port must be specified when port_mode is 'manual'"
-                logger.error(f"TrafficTest {name}: {error_msg}")
-                await update_status(name, namespace, "Failed", error_msg)
-                raise kopf.PermanentError(error_msg)
-            
-            base_port = port_allocator.alloc(num_sources, requested_port)
-            if base_port:
-                logger.info(f"Using manual port {base_port} from spec")
-            else:
+            allocated_ports = port_allocator.alloc(num_sources, requested_port)
+            if not allocated_ports:
                 error_msg = f"Manual port {requested_port} is already in use"
                 logger.error(f"TrafficTest {name}: {error_msg}")
                 await update_status(name, namespace, "Failed", error_msg)
                 raise kopf.PermanentError(error_msg)
+            else:
+                logger.info(f"Using manual port {allocated_ports[0]} from spec")
         else:
             # Automatic allocation
-            base_port = port_allocator.alloc(num_sources)
+            allocated_ports = port_allocator.alloc(num_sources)
 
-        if base_port is None:
+        if allocated_ports is None:
             raise kopf.PermanentError("No free port blocks available for TrafficTest")
         
-        logger.info(f"Allocated base port {base_port} for {num_sources} sources")
+        # Consistent integer for single-port status/ansible
+        base_port = allocated_ports[0]
+        logger.info(f"Allocated ports {allocated_ports} for {num_sources} sources (base port: {base_port})")
 
         source_info = {}
         all_ready = True
@@ -77,8 +114,8 @@ async def create_traffic_test_handler(body, spec, name, namespace, uid, logger, 
         
         for index, source_device in enumerate(source_devices):
             ready, device_ip = await check_device_ready(source_device, namespace)
-            # Assign unique port per source (e.g., 5201, 5202, 5203, ...)
-            assigned_port = base_port + index
+            # Assign unique port per source from the allocated list
+            assigned_port = allocated_ports[index]
             source_info[source_device] = {
                 'ready': ready,
                 'ip': device_ip,
@@ -127,7 +164,6 @@ async def create_traffic_test_handler(body, spec, name, namespace, uid, logger, 
                     'message': 'Traffic generator started',
                     'metrics': {}
                 }
-            
             # Update status to running
             await update_status(
                 name, namespace, "Running", 
@@ -142,18 +178,20 @@ async def create_traffic_test_handler(body, spec, name, namespace, uid, logger, 
                         'avg_packet_loss_pct': 0,
                         'total_connections': 0
                     },
-                    'base_port': base_port
+                    'allocated_ports': allocated_ports
                 }
             )
             logger.info(f"Successfully started TrafficTest {name} with {len(source_devices)} source device(s)")
             
             # Start background task to monitor the test
-            # asyncio.create_task(monitor_traffic_test(name, namespace, spec_with_name, ip_address))
+            asyncio.create_task(monitor_traffic_test(
+                name, namespace, spec_with_name, ip_address
+            ))
             
         else:
             await update_status(name, namespace, "Failed", f"Failed to start traffic test: {result['error']}")
-            # Free port on failure
-            PortAllocator().free(base_port)
+            # Free ports on failure
+            port_allocator.free(allocated_ports)
             raise kopf.PermanentError(f"TrafficTest creation failed: {result['error']}")
 
     except kopf.TemporaryError:
@@ -166,8 +204,8 @@ async def create_traffic_test_handler(body, spec, name, namespace, uid, logger, 
         logger.error(f"Failed to create TrafficTest {name}: {e}")
         await update_status(name, namespace, "Failed", str(e))
         # Free port on unexpected error if it was allocated
-        if 'base_port' in locals():
-            PortAllocator().free(base_port)
+        if 'allocated_ports' in locals() and allocated_ports:
+            port_allocator.free(allocated_ports)
         raise kopf.PermanentError(str(e))
 
 @kopf.on.delete('google.dev', 'v1', 'traffictest')
@@ -187,21 +225,25 @@ async def delete_traffic_test_handler(body, spec, name, namespace, logger, **kwa
         spec_with_name['test_name'] = name
         
         status = body.get('status', {})
-        base_port = status.get('base_port')
-        if base_port:
+        ports = status.get('allocated_ports') or status.get('allocated_port')
+        
+        if ports:
+            # Handle both list and singleton int
+            base_port = ports[0] if isinstance(ports, list) else ports
             spec_with_name['port'] = base_port
         
         # Delete the traffic test using Ansible
         result = await delete_traffic_test(ip_address, spec_with_name)
         
+        # Free the ports in the internal allocator regardless of Ansible success
+        # since the CR will be removed from Kubernetes and we don't raise an error.
+        allocated_ports = status.get('allocated_ports') or status.get('allocated_port')
+        if allocated_ports:
+            port_allocator.free(allocated_ports)
+            logger.info(f"Freed ports {allocated_ports}")
+
         if result['success']:
             logger.info(f"Successfully deleted TrafficTest {name}")
-            # Free the port block
-            status = body.get('status', {})
-            base_port = status.get('base_port')
-            if base_port:
-                port_allocator.free(base_port)
-                logger.info(f"Freed port block starting at {base_port}")
         else:
             logger.warning(f"Failed to delete TrafficTest {name}: {result['error']}")
             # Don't raise error on delete failure - resource should still be removed from Kubernetes
@@ -261,10 +303,15 @@ async def monitor_traffic_test(name: str, namespace: str, spec: dict, ip_address
                 if status_result['success']:
                     current_metrics = status_result.get('current_metrics', {})
                     
+                    # Find the allocated port from spec
+                    allocated_port = spec.get('port')
+                    
                     await update_status(
                         name, namespace, "Running",
                         f"Traffic test running ({elapsed:.0f}s/{duration}s)",
-                        additional_data={'current_metrics': current_metrics}
+                        additional_data={
+                            'current_metrics': current_metrics
+                        }
                     )
                 else:
                     logger.warning(f"Failed to get status for TrafficTest {name}: {status_result.get('error')}")
@@ -311,7 +358,7 @@ async def check_device_ready(device_name: str, namespace: str) -> bool:
         
         if phase != 'Ready':
             logger.warning(f"Device '{device_name}' is in phase '{phase}', not Ready")
-            return False
+            return False, None
         else:
             logger.info(f"Device '{device_name}' is Ready")
             return True, device_dict.get('spec', {}).get('ip_address', None)
@@ -331,7 +378,8 @@ async def check_device_ready(device_name: str, namespace: str) -> bool:
 # Status Management
 #########################################################################
 
-async def update_status(name: str, namespace: str, phase: str, message: str, additional_data: dict = None):
+async def update_status(name: str, namespace: str, phase: str, message: str,
+                        additional_data: dict = None, allocated_ports: Optional[list] = None):
     """Update the status of a TrafficTest resource"""
     client = kubernetes.dynamic.DynamicClient(kubernetes.client.ApiClient())
     api = client.resources.get(api_version='google.dev/v1', kind='TrafficTest')
@@ -357,6 +405,10 @@ async def update_status(name: str, namespace: str, phase: str, message: str, add
         # Add additional data if provided
         if additional_data:
             status.update(additional_data)
+        
+        # Add explicitly passed allocated_ports to status
+        if allocated_ports:
+            status['allocated_ports'] = allocated_ports
             
         resource_dict['status'].update(status)
 

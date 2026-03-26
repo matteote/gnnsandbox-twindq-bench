@@ -33,7 +33,8 @@ spec:
     - dev2  # Second source device
   destination_device: devhub
   protocol: TCP
-  port: 5201 # base port, each source gets its own port
+  port_mode: auto # Self allocated by the traffic test operator
+  #port: 5201 # base port, each source gets its own port
   duration: 14400  # 240 minutes
   bandwidth: 5Mbps  # Each source sends 5Mbps
   pattern_type: constant

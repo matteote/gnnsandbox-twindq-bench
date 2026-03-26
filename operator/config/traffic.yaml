@@ -801,6 +801,13 @@ spec:
                     - Single source: Traditional point-to-point test
                     - Multiple sources: Load testing or aggregate capacity measurement
                     - Useful for capacity planning and resource allocation
+                allocated_ports:
+                  type: array
+                  items:
+                    type: integer
+                  description: |
+                    The list of port numbers allocated for this traffic test.
+                    This field is populated by the operator during the 'Allocating' phase.
                 source_status:
                   type: object
                   additionalProperties:
@@ -1196,3 +1203,7 @@ spec:
         - name: Duration
           type: integer
           jsonPath: .spec.duration
+        - name: Ports
+          type: string
+          jsonPath: .status.allocated_ports
+          description: Allocated ports
