@@ -177,7 +177,7 @@ spec:
           jsonPath: .status.phase
         - name: Network
           type: string
-          jsonPath: .status.network_name
+          jsonPath: .spec.network_name
         - name: IP Address
           type: string
-          jsonPath: .status.ip_address
+          jsonPath: .spec.ip_address
