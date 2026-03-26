@@ -12,10 +12,10 @@ metadata:
     scenario: baseline
     pattern: constant
 spec:
-  source_device: test1
-  destination_device: test2
+  source_device: dev1
+  destination_device: dev2
   protocol: TCP
-  port: 5201
+  port_mode: auto
   duration: 300  # 5 minutes
   bandwidth: 50Mbps
   pattern_type: constant
@@ -34,10 +34,10 @@ metadata:
     scenario: daily-cycle
     pattern: periodic
 spec:
-  source_device: test1
-  destination_device: test2
+  source_device: dev1
+  destination_device: dev2
   protocol: TCP
-  port: 5201
+  port_mode: auto
   duration: 3600  # 1 hour (representing 24 hours compressed)
   pattern_type: periodic
   pattern_config:
@@ -62,10 +62,10 @@ metadata:
     scenario: business-hours
     pattern: burst
 spec:
-  source_device: test1
-  destination_device: test2
+  source_device: dev1
+  destination_device: dev2
   protocol: TCP
-  port: 5201
+  port_mode: auto
   duration: 1800  # 30 minutes
   pattern_type: burst
   pattern_config:
@@ -90,10 +90,10 @@ metadata:
     scenario: user-simulation
     pattern: poisson
 spec:
-  source_device: test1
-  destination_device: test2
+  source_device: dev1
+  destination_device: dev2
   protocol: TCP
-  port: 5201
+  port_mode: auto
   duration: 900  # 15 minutes
   bandwidth: 10Mbps  # per-user bandwidth
   pattern_type: poisson
@@ -116,10 +116,10 @@ metadata:
     scenario: congestion-test
     pattern: periodic
 spec:
-  source_device: test1
-  destination_device: test2
+  source_device: dev1
+  destination_device: dev2
   protocol: TCP
-  port: 5201
+  port_mode: auto
   duration: 600  # 10 minutes
   pattern_type: periodic
   pattern_config:
@@ -143,10 +143,10 @@ metadata:
     pattern: constant
     protocol: udp
 spec:
-  source_device: test1
-  destination_device: test2
+  source_device: dev1
+  destination_device: dev2
   protocol: UDP
-  port: 5201
+  port_mode: auto
   duration: 300  # 5 minutes
   bandwidth: 30Mbps
   pattern_type: constant
@@ -165,10 +165,10 @@ metadata:
     scenario: load-ramp
     pattern: periodic
 spec:
-  source_device: test1
-  destination_device: test2
+  source_device: dev1
+  destination_device: dev2
   protocol: TCP
-  port: 5201
+  port_mode: auto
   duration: 900  # 15 minutes
   pattern_type: periodic
   pattern_config:
@@ -193,10 +193,10 @@ metadata:
     pattern: periodic
     duration: long
 spec:
-  source_device: test1
-  destination_device: test2
+  source_device: dev1
+  destination_device: dev2
   protocol: TCP
-  port: 5201
+  port_mode: auto
   duration: 7200  # 2 hours
   pattern_type: periodic
   pattern_config:
