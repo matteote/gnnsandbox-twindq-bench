@@ -13,7 +13,7 @@ metadata:
     pattern: constant
 spec:
   source_devices: dev1
-  destination_device: dev2
+  destination_device: devhub
   protocol: TCP
   port_mode: auto
   duration: 300  # 5 minutes
@@ -35,7 +35,7 @@ metadata:
     pattern: periodic
 spec:
   source_devices: dev1
-  destination_device: dev2
+  destination_device: devhub
   protocol: TCP
   port_mode: auto
   duration: 3600  # 1 hour (representing 24 hours compressed)
@@ -64,7 +64,7 @@ metadata:
 spec:
   source_devices: 
     - dev1
-  destination_device: dev2
+  destination_device: devhub
   protocol: TCP
   port_mode: auto
   duration: 1800  # 30 minutes
@@ -93,7 +93,7 @@ metadata:
 spec:
   source_devices: 
     - dev1
-  destination_device: dev2
+  destination_device: devhub
   protocol: TCP
   port_mode: auto
   duration: 900  # 15 minutes
@@ -120,7 +120,7 @@ metadata:
 spec:
   source_devices:
     - dev1
-  destination_device: dev2
+  destination_device: devhub
   protocol: TCP
   port_mode: auto
   duration: 600  # 10 minutes
@@ -148,7 +148,7 @@ metadata:
 spec:
   source_devices:
     - dev1
-  destination_device: dev2
+  destination_device: devhub
   protocol: UDP
   port_mode: auto
   duration: 300  # 5 minutes
@@ -171,7 +171,7 @@ metadata:
 spec:
   source_devices:
     - dev1
-  destination_device: dev2
+  destination_device: devhub
   protocol: TCP
   port_mode: auto
   duration: 900  # 15 minutes
@@ -200,7 +200,7 @@ metadata:
 spec:
   source_devices:
     - dev1
-  destination_device: dev2
+  destination_device: devhub
   protocol: TCP
   port_mode: auto
   duration: 7200  # 2 hours
