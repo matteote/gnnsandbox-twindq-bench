@@ -189,13 +189,66 @@ class TrafficGenerator:
             client_id=0
         )
         return [result] if result else []
+
+#   duration: 1800  # 30 minutes
+#   pattern_type: burst
+#   pattern_config:
+#     burst_duration: 60    # 3 minute bursts (representing busy periods)
+#     burst_interval: 120    # every 10 minutes
+#     burst_rate: 100Mbps    # high traffic during business hours
+#     idle_rate: 5Mbps   
+    async def _run_burst_pattern(self):
+        duration = self.pattern_config.get('duration', 1200)
+        burst_duration = self.pattern_config.get('burst_duration', 60)
+        burst_interval = self.pattern_config.get('burst_interval', 300)
+        burst_rate = self._parse_bandwidth(self.pattern_config.get('burst_rate', '100Mbps'))
+        idle_rate = self._parse_bandwidth(self.pattern_config.get('idle_rate', '1Mbps'))
+
+        results = []
+        total_segments = duration // burst_interval
+
+        for segment in range(total_segments):
+            # First the burst rate
+            bandwidth = burst_rate
+            logger.info(f"Burst rate segment {segment + 1}/{total_segments}: "
+            f"bandwidth={self._format_bandwidth(bandwidth)}bps / duration={burst_duration} s")
+
+            result = await self._run_iperf3_client(
+                bandwidth, 
+                burst_duration, 
+                parallel_streams=self.concurrent_users,
+                client_id=2*segment
+            )
+            if result:
+                results.append(result)
+            
+            # Second the idle rate
+            bandwidth = idle_rate
+            idle_duration = max((burst_interval - burst_duration), 0)
+            if idle_duration == 0:
+                logger.warning(f"Idle rate segment {segment + 1}/{total_segments} skipped. Duration is 0. "
+            f"bandwidth={self._format_bandwidth(bandwidth)}bps")
+                continue
+
+            logger.info(f"Idle rate segment {segment + 1}/{total_segments}: "
+            f"bandwidth={self._format_bandwidth(bandwidth)}bps / duration={idle_duration} s")
+
+            result = await self._run_iperf3_client(
+                bandwidth, 
+                idle_duration, 
+                parallel_streams=self.concurrent_users,
+                client_id=2*segment+1
+            )
+            if result:
+                results.append(result)
+    
+        return results        
     
     async def _run_dynamic_pattern(self):
         """Run dynamic patterns (periodic, burst) with bandwidth changes"""
         results = []
         segment_duration = 10  # Update bandwidth every 10 seconds
         total_segments = self.duration // segment_duration
-        
         for segment in range(total_segments):
             elapsed_time = segment * segment_duration
             current_bandwidth = self._calculate_pattern_bandwidth(elapsed_time)
@@ -306,7 +359,9 @@ class TrafficGenerator:
         try:
             if self.pattern_type == 'constant':
                 results = await self._run_constant_pattern()
-            elif self.pattern_type in ['periodic', 'burst']:
+            elif self.pattern_type == 'burst':
+                results = await self._run_burst_pattern()
+            elif self.pattern_type == 'periodic':
                 results = await self._run_dynamic_pattern()
             elif self.pattern_type == 'poisson':
                 results = await self._run_poisson_pattern()
