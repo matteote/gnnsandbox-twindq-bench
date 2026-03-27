@@ -4,12 +4,31 @@
   become: true
   gather_facts: yes
   vars:
-    # Paths
-    traffic_scripts_dir: "/tmp/traffic_test_{{ test_name | default('unknown') }}"
-    config_file: "{{ traffic_scripts_dir }}/config.json"
-    results_file: "{{ traffic_scripts_dir }}/results.json"
-    pid_file: "{{ traffic_scripts_dir }}/traffic_test.pid"
-    log_file: "{{ traffic_scripts_dir }}/traffic_test.log"
+    # === Paths on host VM (host)
+    # global files
+    traffic_generator_file: "/tmp/traffic_generator.py"
+    metrics_collector_file: "/tmp/metrics_collector.py"
+    run_traffic_test_file: "/tmp/run_traffic_test.sh"
+    # per test files
+    traffic_script_dir: "/tmp/traffic_test_{{ test_name | default('unknown') }}"
+    config_file: "{{ traffic_script_dir }}/config.json"
+    results_file: "{{ traffic_script_dir }}/results.json"
+    pid_file: "{{ traffic_script_dir }}/traffic_test.pid"
+    log_file: "{{ traffic_script_dir }}/traffic_test.log"
+
+    # === Paths in containers (guest)
+    # global files
+    guest_traffic_generator_file: "/tmp/traffic_generator.py"
+    guest_metrics_collector_file: "/tmp/metrics_collector.py"
+    # per test files
+    guest_traffic_script_dir: "/tmp/traffic_test_{{ test_name }}_{{ port }}"
+    guest_run_traffic_test_file: "{{ guest_traffic_script_dir }}/run_traffic_test.sh"
+    guest_config_file: "{{ guest_traffic_script_dir }}/config.json"
+    guest_traffic_log_file: "{{ guest_traffic_script_dir }}/traffic_output.log"
+    guest_traffic_pid_file: "{{ guest_traffic_script_dir }}/traffic_generator.pid"
+    guest_traffic_exit_code: "{{ guest_traffic_script_dir }}/traffic_exit_code"
+    iperf_server_log_file: "{{ guest_traffic_script_dir }}/iperf3_server.log"
+
 
   tasks:
     - name: Debug operation
@@ -22,22 +41,22 @@
     
     - name: Create traffic test
       block:
-        - name: Create traffic test directory in the target container
+        - name: Create traffic test directory in the host VM
           file:
-            path: "{{ traffic_scripts_dir }}"
+            path: "{{ traffic_script_dir }}"
             state: directory
             mode: '0755'
 
         - name: Copy traffic generator script to target
           template:
             src: "traffic_generator.py"
-            dest: "{{ traffic_scripts_dir }}/traffic_generator.py"
+            dest: "{{ traffic_generator_file }}"
             mode: '0755'
 
         - name: Template metrics collector script to target
           template:
             src: "metrics_collector.py"
-            dest: "{{ traffic_scripts_dir }}/metrics_collector.py"
+            dest: "{{ metrics_collector_file }}"
             mode: '0755'
 
         - name: Create traffic test configuration
@@ -74,7 +93,7 @@
           failed_when: false
 
         - name: Start iperf3 server on destination device (only if not running)
-          shell: "docker exec {{ destination_device }} iperf3 -s -p {{ port }} -D --logfile /tmp/iperf3_server_{{ port }}.log"
+          shell: "docker exec {{ destination_device }} iperf3 -s -p {{ port }} -D --logfile {{ iperf_server_log_file }}"
           when: server_check.stdout == "not_running"
           register: iperf3_server_start
           failed_when: false
@@ -121,39 +140,39 @@
           debug:
             msg: "iperf3 server check result: {{ iperf3_server_check.stdout }}, return code: {{ iperf3_server_check.rc }}"
 
-        - name: Ensure /tmp exists in source container
-          shell: "docker exec {{ source_device }} mkdir -p /tmp"
+        - name: Ensure destination dir exists in source container
+          shell: "docker exec {{ source_device }} mkdir -p {{ guest_traffic_script_dir }}"
           failed_when: false
 
-        - name: Ensure /tmp exists in destination container
-          shell: "docker exec {{ destination_device }} mkdir -p /tmp"
+        - name: Ensure destination dir exists in destination container
+          shell: "docker exec {{ destination_device }} mkdir -p {{ guest_traffic_script_dir }}"
           failed_when: false
 
         - name: Verify traffic generator script exists
           stat:
-            path: "{{ traffic_scripts_dir }}/traffic_generator.py"
+            path: "{{ traffic_generator_file }}"
           register: traffic_gen_stat
 
         - name: Copy traffic generator script to source container
-          shell: "docker cp {{ traffic_scripts_dir }}/traffic_generator.py {{ source_device }}:/tmp/traffic_generator.py"
+          shell: "docker cp {{ traffic_generator_file }} {{ source_device }}:{{ guest_traffic_generator_file }}"
           when: traffic_gen_stat.stat.exists
 
         - name: Verify metrics collector script exists
           stat:
-            path: "{{ traffic_scripts_dir }}/metrics_collector.py"
+            path: "{{ metrics_collector_file }}"
           register: metrics_collector_stat
 
         - name: Copy metrics collector script to source container
-          shell: "docker cp {{ traffic_scripts_dir }}/metrics_collector.py {{ source_device }}:/tmp/metrics_collector.py"
+          shell: "docker cp {{ metrics_collector_file }} {{ source_device }}:{{ guest_metrics_collector_file }}"
           when: metrics_collector_stat.stat.exists
 
         - name: Verify configuration file exists
           stat:
-            path: "{{ traffic_scripts_dir }}/config.json"
+            path: "{{ config_file }}"
           register: config_file_stat
 
         - name: Copy configuration file to source container
-          shell: "docker cp {{ traffic_scripts_dir }}/config.json {{ source_device }}:/tmp/config.json"
+          shell: "docker cp {{ config_file }} {{ source_device }}:{{ guest_config_file }}"
           when: config_file_stat.stat.exists
 
         - name: Create traffic generator wrapper script
@@ -170,29 +189,29 @@
               }
               trap cleanup EXIT SIGTERM SIGINT
               
-              cd /tmp
+              cd {{ guest_traffic_script_dir }}
               # Run python in background
-              python3 /tmp/traffic_generator.py --config /tmp/config.json > /tmp/traffic_output.log 2>&1 &
+              python3 {{ guest_traffic_generator_file }} --config {{ guest_config_file }} > {{ guest_traffic_log_file }} 2>&1 &
               PYTHON_PID=$!
-              echo $PYTHON_PID > /tmp/traffic_generator.pid
+              echo $PYTHON_PID > {{ guest_traffic_pid_file }}
               
               # Wait for the python process and reap it when done
               wait $PYTHON_PID
-              echo $? > /tmp/traffic_exit_code
-            dest: "{{ traffic_scripts_dir }}/run_traffic_test.sh"
+              echo $? > {{ guest_traffic_exit_code }}
+            dest: "{{ run_traffic_test_file }}"
             mode: '0755'
 
         - name: Verify wrapper script exists
           stat:
-            path: "{{ traffic_scripts_dir }}/run_traffic_test.sh"
+            path: "{{ run_traffic_test_file }}"
           register: wrapper_script_stat
 
         - name: Copy wrapper script to source container
-          shell: "docker cp {{ traffic_scripts_dir }}/run_traffic_test.sh {{ source_device }}:/tmp/run_traffic_test.sh"
+          shell: "docker cp {{ run_traffic_test_file }} {{ source_device }}:{{ guest_run_traffic_test_file }}"
           when: wrapper_script_stat.stat.exists
 
         - name: Start traffic generator in background
-          shell: "docker exec -d {{ source_device }} /bin/sh /tmp/run_traffic_test.sh"
+          shell: "docker exec -d {{ source_device }} /bin/sh {{ guest_run_traffic_test_file }}"
           failed_when: false
 
         - name: Wait for process to start
@@ -200,7 +219,7 @@
             seconds: 2
 
         - name: Get traffic generator process ID for tracking
-          shell: "docker exec {{ source_device }} cat /tmp/traffic_generator.pid 2>/dev/null || echo ''"
+          shell: "docker exec {{ source_device }} cat {{ guest_traffic_pid_file }} 2>/dev/null || echo ''"
           register: traffic_process
           failed_when: false
 
@@ -238,11 +257,11 @@
         #         fi
         #         sleep 10
         #       done
-        #     dest: "{{ traffic_scripts_dir }}/monitor_results.sh"
+        #     dest: "{{ traffic_script_dir }}/monitor_results.sh"
         #     mode: '0755'
 
         # - name: Start results monitoring in background
-        #   shell: "nohup {{ traffic_scripts_dir }}/monitor_results.sh > {{ log_file }} 2>&1 &"
+        #   shell: "nohup {{ traffic_script_dir }}/monitor_results.sh > {{ log_file }} 2>&1 &"
         #   async: "{{ duration + 60 }}"
         #   poll: 0
 
@@ -265,7 +284,7 @@
           shell: |
             docker exec {{ source_device }} sh -c '
               # Find and kill the wrapper script and all its children
-              WRAPPER_PID=$(pgrep -f "run_traffic_test.sh" | head -1)
+              WRAPPER_PID=$(pgrep -f "{{ guest_run_traffic_test_file | basename }}" | head -1)
               if [ -n "$WRAPPER_PID" ]; then
                 # Kill the entire process tree
                 pkill -P $WRAPPER_PID 2>/dev/null || true
@@ -280,7 +299,7 @@
           shell: |
             docker exec {{ source_device }} sh -c '
               # Kill python process
-              pkill -9 -f "traffic_generator.py" 2>/dev/null || true
+              pkill -9 -f "{{ guest_traffic_generator_file | basename }}" 2>/dev/null || true
               # Kill any orphaned iperf3 clients
               pkill -9 -f "iperf3.*-c" 2>/dev/null || true
             '
@@ -356,14 +375,14 @@
           register: final_results
           failed_when: false
 
-        - name: Clean up files from source container
+        - name: Clean up traffic test files from source container
           shell: |
-            docker exec {{ source_device }} rm -f /tmp/traffic_generator.py /tmp/metrics_collector.py /tmp/config.json /tmp/run_traffic_test.sh /tmp/traffic_generator.pid /tmp/traffic_output.log /tmp/traffic_exit_code /tmp/iperf3_client_0.log || true
+            docker exec {{ source_device }} rm -rf {{ guest_traffic_generator_file }} {{ guest_metrics_collector_file }} {{ guest_traffic_script_dir }} {{ guest_traffic_script_dir }} || true
           failed_when: false
 
         - name: Clean up traffic test directory
           file:
-            path: "{{ traffic_scripts_dir }}"
+            path: "{{ traffic_script_dir }}"
             state: absent
           failed_when: false
 
@@ -383,12 +402,12 @@
     - name: Get traffic test status
       block:
         - name: Check if traffic generator is still running in container
-          shell: "docker exec {{ source_device }} pgrep -f 'traffic_generator.py' || echo 'not_running'"
+          shell: "docker exec {{ source_device }} pgrep -f '{{ guest_traffic_generator_file | basename }}' || echo 'not_running'"
           register: process_status
           failed_when: false
 
         - name: Check if wrapper script is still running in container
-          shell: "docker exec {{ source_device }} pgrep -f 'run_traffic_test.sh' || echo 'not_running'"
+          shell: "docker exec {{ source_device }} pgrep -f '{{ guest_run_traffic_test_file | basename }}' || echo 'not_running'"
           register: wrapper_status
           failed_when: false
 
