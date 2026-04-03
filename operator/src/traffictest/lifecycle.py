@@ -41,8 +41,8 @@ async def initial_setup(logger):
             name = tt_dict['metadata']['name']
             status = tt_dict.get('status', {})
             
-            # Check for allocated_ports (list) or allocated_port/base_port (fallback)
-            ports = status.get('allocated_ports') or status.get('allocated_port') or status.get('base_port')
+            # Check for allocated_ports (list)
+            ports = status.get('allocated_ports')
             
             if ports:
                 # Reserve in allocator
@@ -104,32 +104,33 @@ async def create_traffic_test_handler(body, spec, name, namespace, uid, logger, 
             raise kopf.PermanentError("No free port blocks available for TrafficTest")
         
         # Consistent integer for single-port status/ansible
-        base_port = allocated_ports[0]
-        logger.info(f"Allocated ports {allocated_ports} for {num_sources} sources (base port: {base_port})")
+        logger.info(f"Allocated ports {allocated_ports} for {num_sources} sources)")
 
-        source_info = {}
-        all_ready = True
+        all_sources_ready = True
         not_ready_devices = []
+        devices_info = {}
         
+        # Check if all source devices are ready
         for index, source_device in enumerate(source_devices):
             ready, device_ip = await check_device_ready(source_device, namespace)
-            # Assign unique port per source from the allocated list
-            assigned_port = allocated_ports[index]
-            source_info[source_device] = {
+            if not ready:
+                all_sources_ready = False
+                not_ready_devices.append(source_device)
+
+            devices_info[source_device]= {
                 'ready': ready,
                 'ip': device_ip,
-                'port': assigned_port  # Each source gets its own port
+                'port': allocated_ports[index]
             }
-            if not ready:
-                all_ready = False
-                not_ready_devices.append(source_device)
-        
-        logger.info(f"Port assignments: {[(dev, info['port']) for dev, info in source_info.items()]}")
-        
+
+                
         # Check if destination device is ready
         dest_ready, dest_ip = await check_device_ready(destination_device, namespace)
-
-        if not all_ready or not dest_ready:
+        devices_info[destination_device] = {
+            'ready': dest_ready,
+            'ip': dest_ip
+        }
+        if not all_sources_ready or not dest_ready:
             not_ready_list = not_ready_devices + ([destination_device] if not dest_ready else [])
             error_msg = f"Waiting for Devices to be ready: {', '.join(not_ready_list)}"
             logger.warning(f"TrafficTest {name}: {error_msg}")
@@ -144,15 +145,8 @@ async def create_traffic_test_handler(body, spec, name, namespace, uid, logger, 
                           f"Starting traffic test deployment for {len(source_devices)} source(s)",
                           additional_data={'source_count': len(source_devices)})
 
-        # Add test name and source info to spec for tracking
-        spec_with_name = dict(spec)
-        spec_with_name['test_name'] = name
-        spec_with_name['source_info'] = source_info  # {device_name: {ready: bool, ip: str}}
-        spec_with_name['destination_ip'] = dest_ip
-        spec_with_name['port'] = base_port # Override with allocated port
-
         # Create the TrafficTest using Ansible
-        result = await create_traffic_test(ip_address, spec_with_name)
+        result = await create_traffic_test(name, ip_address, spec, devices_info)
 
         if result['success']:
             # Initialize per-source status
@@ -182,10 +176,11 @@ async def create_traffic_test_handler(body, spec, name, namespace, uid, logger, 
             )
             logger.info(f"Successfully started TrafficTest {name} with {len(source_devices)} source device(s)")
             
+            status = body.get('status', {})
             # Start background task to monitor the test
-            asyncio.create_task(monitor_traffic_test(
-                name, namespace, spec_with_name, ip_address
-            ))
+            asyncio.create_task(
+                monitor_traffic_test(name, namespace, spec, allocated_ports, ip_address)
+            )
             
         else:
             await update_status(name, namespace, "Failed", f"Failed to start traffic test: {result['error']}")
@@ -212,63 +207,89 @@ async def delete_traffic_test_handler(body, spec, name, namespace, logger, **kwa
     """Handle TrafficTest deletion using Ansible"""
     logger.info(f"Deleting TrafficTest: {name} in namespace: {namespace}")
 
-    try:
-        # Get Network VM IP address
-        ip_address = await get_ip("automation", "networkvm")
-        if ip_address is None:
-            logger.warning("No IP address found on Network VM, skipping traffic test deletion")
-            return
-        
-        # Add test name and allocated port to spec for tracking
-        spec_with_name = dict(spec)
-        spec_with_name['test_name'] = name
-        
-        status = body.get('status', {})
-        ports = status.get('allocated_ports') or status.get('allocated_port')
-        
-        if ports:
-            # Handle both list and singleton int
-            base_port = ports[0] if isinstance(ports, list) else ports
-            spec_with_name['port'] = base_port
-        
-        # Delete the traffic test using Ansible
-        result = await delete_traffic_test(ip_address, spec_with_name)
-        
-        # Free the ports in the internal allocator regardless of Ansible success
-        # since the CR will be removed from Kubernetes and we don't raise an error.
-        allocated_ports = status.get('allocated_ports') or status.get('allocated_port')
-        if allocated_ports:
-            port_allocator.free(allocated_ports)
-            logger.info(f"Freed ports {allocated_ports}")
+    #try:
+    # Get Network VM IP address
+    ip_address = await get_ip("automation", "networkvm")
+    if ip_address is None:
+        logger.warning("No IP address found on Network VM, skipping traffic test deletion")
+        return
+            
+    status = body.get('status', {})
+
+    # Validate required Devices exist and are ready
+    source_devices = spec.get('source_devices', [])
+    destination_device = spec.get('destination_device')
+    allocated_ports = status.get('allocated_ports')
+    devices_info = {}
+
+    dest_ready, dest_ip = await check_device_ready(destination_device, namespace)
+    devices_info[destination_device] = {
+        'ready': dest_ready,
+        'ip': dest_ip
+    }
+
+    if allocated_ports and source_devices:
+        # Add source device infos
+        for index, source_device in enumerate(source_devices):
+            if index < len(allocated_ports):
+                devices_info[source_device]= {
+                    'port': allocated_ports[index]
+                }
+
+        result = await delete_traffic_test(name, ip_address, spec, devices_info)
 
         if result['success']:
+            # Free the ports in the internal allocator 
+            port_allocator.free(allocated_ports)
+            logger.info(f"Freed ports {allocated_ports}")
             logger.info(f"Successfully deleted TrafficTest {name}")
         else:
             logger.warning(f"Failed to delete TrafficTest {name}: {result['error']}")
-            # Don't raise error on delete failure - resource should still be removed from Kubernetes
-            
-    except Exception as e:
-        logger.error(f"Error during TrafficTest deletion {name}: {e}")
+    else:
+        logger.info(f"No allocated ports/sources found for TrafficTest {name}, skipping remote deletion")
+        # Don't raise error on delete failure - resource should still be removed from Kubernetes
+        
+    # except Exception as e:
+    #     logger.error(f"Error during TrafficTest deletion {name}: {e}")
+    #     logger.error(f"{e.backtrace.join("\n")}")
         # Don't raise error on delete failure
 
 #########################################################################
 # Background Monitoring
 #########################################################################
 
-async def monitor_traffic_test(name: str, namespace: str, spec: dict, ip_address: str):
+async def monitor_traffic_test(name: str, namespace: str, spec: dict, ports: list, ip_address: str):
     """Monitor a running traffic test and update status"""
     logger.info(f"Starting monitoring for TrafficTest {name}")
     
     duration = spec.get('duration', 60)
     metrics_interval = spec.get('metrics_interval', 5)
-    
-    # Get allocated port from status if available
-    status = kwargs.get('status', {}) # Wait, monitor_traffic_test doesn't have status in args yet
-    
+    source_devices = spec.get('source_devices')
+    allocated_ports = status.get('allocated_ports')
+
+    if allocated_ports and source_devices:
+        # Build device infos
+        devices_info = {}
+        for index, source_device in enumerate(source_devices):
+            if index < len(allocated_ports):
+                devices_info[source_device]= {
+                    'port': allocated_ports[index]
+                }
+    else:
+        logger.warning(f"monitor_traffic_test called for {name} without devices or ports!")
+    return
+
     # Monitor for the duration of the test
     start_time = datetime.now(timezone.utc)
     
     try:
+
+        # Get Network VM IP address
+        ip_address = await get_ip("automation", "networkvm")
+        if ip_address is None:
+            logger.warning("No IP address found on Network VM, skipping traffic test deletion")
+            return
+
         while True:
             elapsed = (datetime.now(timezone.utc) - start_time).total_seconds()
             
@@ -277,7 +298,7 @@ async def monitor_traffic_test(name: str, namespace: str, spec: dict, ip_address
                 logger.info(f"TrafficTest {name} duration reached, checking final status")
                 
                 # Get final status
-                status_result = await get_traffic_test_status(ip_address, spec)
+                status_result = await get_traffic_test_status(name, ip_address, spec, devices_info)
                 
                 if status_result['success']:
                     await update_status(
@@ -297,13 +318,10 @@ async def monitor_traffic_test(name: str, namespace: str, spec: dict, ip_address
             
             # Get current status and metrics
             try:
-                status_result = await get_traffic_test_status(ip_address, spec)
+                status_result = await get_traffic_test_status(name, ip_address, spec, devices_info)
                 
                 if status_result['success']:
                     current_metrics = status_result.get('current_metrics', {})
-                    
-                    # Find the allocated port from spec
-                    allocated_port = spec.get('port')
                     
                     await update_status(
                         name, namespace, "Running",
@@ -317,7 +335,7 @@ async def monitor_traffic_test(name: str, namespace: str, spec: dict, ip_address
                     
             except Exception as e:
                 logger.error(f"Error monitoring TrafficTest {name}: {e}")
-            
+                logger.error(f"{e.backtrace.join("\n")}")            
             # Wait for next check
             await asyncio.sleep(min(metrics_interval, 30))  # Check at least every 30s
             

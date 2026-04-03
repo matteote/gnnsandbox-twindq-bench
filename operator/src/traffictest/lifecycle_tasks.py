@@ -3,7 +3,7 @@ import ansible_runner
 import os
 import utils.constants as constants
 import logging
-from typing import Dict, Any
+from typing import Dict, List, Any
 from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
@@ -12,15 +12,16 @@ logger = logging.getLogger(__name__)
 # Ansible-based TrafficTest Management
 #########################################################################
 
-async def create_traffic_test(networkvm_ip_address:str, spec: Dict[str, Any]) -> Dict[str, Any]:
+async def create_traffic_test(name: str, networkvm_ip_address:str, spec: Dict[str, Any], devices_info: Dict[str, Any]) -> Dict[str, Any]:
     """Create a TrafficTest using Ansible - runs playbook once per source device"""
-    source_info = spec.get('source_info', {})
-    source_devices_list = list(source_info.keys())
-    logger.info(f"Creating TrafficTest: {len(source_devices_list)} source(s) -> {spec.get('destination_device')}")
 
     # Extract common fields from spec
     destination_device = spec.get('destination_device')
-    destination_ip = spec.get('destination_ip')
+    destination_ip = devices_info[destination_device]['ip']
+    source_devices = spec.get('source_devices')
+
+    logger.info(f"Creating TrafficTest: {len(source_devices)} source(s) -> {destination_device} ({destination_ip})")
+
     protocol = spec.get('protocol', 'TCP')
     duration = spec.get('duration', 60)
     bandwidth = spec.get('bandwidth', '10Mbps')
@@ -41,21 +42,21 @@ async def create_traffic_test(networkvm_ip_address:str, spec: Dict[str, Any]) ->
     # Run Ansible playbook once for each source device
     # Each source gets its own unique port (assigned in lifecycle.py)
     failed_sources = []
-    for source_device, device_info in source_info.items():
+    for source_device in source_devices:
         # Get the unique port assigned to this source
-        assigned_port = device_info.get('port', 5201)
-        logger.info(f"Starting traffic test for source: {source_device} on port {assigned_port}")
+        port = devices_info[source_device]['port']
+        logger.info(f"Starting traffic test for source: {source_device} on port {port}")
         
         # Prepare extra variables for this specific source device
         extravars = {
             'operation': 'create',
-            'test_name': f"{spec.get('test_name')}_{source_device}",  # Unique name per source
+            'test_name': f"{name}_{source_device}",  # Unique name per source
             'source_device': source_device,
-            'source_ip': device_info.get('ip'),
+            'source_ip': devices_info[source_device]['ip'],
             'destination_device': destination_device,
             'destination_ip': destination_ip,
             'protocol': protocol,
-            'port': assigned_port,  # Use unique port per source
+            'dest_port': port,
             'duration': duration,
             'bandwidth': bandwidth,
             'pattern_type': pattern_type,
@@ -68,7 +69,7 @@ async def create_traffic_test(networkvm_ip_address:str, spec: Dict[str, Any]) ->
             'start_time': start_time,
         }
 
-        result = await _run_ansible_playbook(networkvm_ip_address, 'traffic.yaml', extravars)
+        result = await _run_ansible_playbook(networkvm_ip_address, 'traffic_create.yaml', extravars)
         
         if not result['success']:
             logger.error(f"Failed to start traffic test for source {source_device}: {result.get('error')}")
@@ -76,7 +77,7 @@ async def create_traffic_test(networkvm_ip_address:str, spec: Dict[str, Any]) ->
 
     # Return overall result
     if failed_sources:
-        if len(failed_sources) == len(source_devices_list):
+        if len(failed_sources) == len(source_devices):
             # All sources failed
             return {
                 'success': False,
@@ -87,47 +88,43 @@ async def create_traffic_test(networkvm_ip_address:str, spec: Dict[str, Any]) ->
             return {
                 'success': True,  # Partial success
                 'start_time': start_time,
-                'message': f'Traffic test started with {len(source_devices_list) - len(failed_sources)}/{len(source_devices_list)} sources. Failed: {", ".join(failed_sources)}'
+                'message': f'Traffic test started with {len(source_devices) - len(failed_sources)}/{len(source_devices)} sources. Failed: {", ".join(failed_sources)}'
             }
     else:
         # All sources succeeded
         return {
             'success': True,
             'start_time': start_time,
-            'message': f'Traffic test started successfully with all {len(source_devices_list)} source(s)'
+            'message': f'Traffic test started successfully with all {len(source_devices)} source(s)'
         }
 
-async def delete_traffic_test(networkvm_ip_address:str,spec: Dict[str, Any]) -> Dict[str, Any]:
+async def delete_traffic_test(name: str, networkvm_ip_address:str,spec: Dict[str, Any], devices_info: Dict[str, Any]) -> Dict[str, Any]:
     """Delete a TrafficTest using Ansible - runs playbook once per source device"""
     source_devices = spec.get('source_devices', [])
-    source_info = spec.get('source_info', {})
     destination_device = spec.get('destination_device')
-    base_port = spec.get('port', 5201)
+    destination_ip = devices_info[destination_device]['ip']
     logger.info(f"Deleting TrafficTest: {len(source_devices)} source(s) -> {destination_device}")
     
     end_time = datetime.now(timezone.utc).isoformat()
     
     # Run delete for each source device
     failed_deletes = []
-    for index, source_device in enumerate(source_devices):
-        # Reconstruct the port assignment (same logic as create)
-        if source_info and source_device in source_info:
-            assigned_port = source_info[source_device].get('port', base_port + index)
-        else:
-            assigned_port = base_port + index
-            
-        logger.info(f"Deleting traffic test for source: {source_device} on port {assigned_port}")
+    for source_device in source_devices:
+        port = devices_info[source_device]['port']
+        logger.info(f"Deleting traffic test for source: {source_device} on port {port}")
         
         extravars = {
             'operation': 'delete',
+            'test_name': f"{name}_{source_device}",  # Unique name per source
             'source_device': source_device,
             'destination_device': destination_device,
+            'destination_ip': destination_ip,
             'protocol': spec.get('protocol', 'TCP'),
-            'port': assigned_port,  # Use the same port that was assigned during create
+            'dest_port': port,  # Use the same port that was assigned during create
             'end_time': end_time
         }
 
-        result = await _run_ansible_playbook(networkvm_ip_address,'traffic.yaml', extravars)
+        result = await _run_ansible_playbook(networkvm_ip_address,'traffic_delete.yaml', extravars)
         
         if not result['success']:
             logger.warning(f"Failed to delete traffic test for source {source_device}: {result.get('error')}")
@@ -139,13 +136,12 @@ async def delete_traffic_test(networkvm_ip_address:str,spec: Dict[str, Any]) -> 
         'end_time': end_time
     }
 
-async def get_traffic_test_status(networkvm_ip_address:str,spec: Dict[str, Any]) -> Dict[str, Any]:
+async def get_traffic_test_status(name: str, networkvm_ip_address:str, spec: Dict[str, Any], devices_info: Dict[str, Any]) -> Dict[str, Any]:
     """Get current status of a TrafficTest using Ansible - queries each source device separately"""
     source_devices = spec.get('source_devices', [])
-    source_info = spec.get('source_info', {})
     destination_device = spec.get('destination_device')
-    base_port = spec.get('port', 5201)
-    logger.info(f"Getting TrafficTest status: {len(source_devices)} source(s) -> {destination_device}")
+    destination_ip = devices_info[destination_device]['ip']
+    logger.info(f"Getting TrafficTest '{name}' status: {len(source_devices)} source(s) -> {destination_device}")
     
     # Collect status from each source device
     source_statuses = {}
@@ -158,22 +154,19 @@ async def get_traffic_test_status(networkvm_ip_address:str,spec: Dict[str, Any])
     
     successful_queries = 0
     
-    for index, source_device in enumerate(source_devices):
-        # Reconstruct the port assignment
-        if source_info and source_device in source_info:
-            assigned_port = source_info[source_device].get('port', base_port + index)
-        else:
-            assigned_port = base_port + index
+    for source_device in source_devices:
+        port = devices_info[source_device]['port']
             
         extravars = {
             'operation': 'status',
             'source_device': source_device,
             'destination_device': destination_device,
+            'destination_ip': destination_ip,
             'protocol': spec.get('protocol', 'TCP'),
-            'port': assigned_port,  # Use the correct port for this source
+            'dest_port': port,
         }
 
-        result = await _run_ansible_playbook(networkvm_ip_address,'traffic.yaml', extravars)
+        result = await _run_ansible_playbook(networkvm_ip_address,'traffic_status.yaml', extravars)
         
         if result['success']:
             metrics = result.get('current_metrics', {})

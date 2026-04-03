@@ -600,7 +600,7 @@ Start()
     # On glinux machines gcloud components cannot be installed
     # through gcloud. apt must be used instead
     if [[ `uname -v` =~ "rodete" ]]; then
-        for p in kubectl google-cloud-cli-gke-gcloud-auth-plugin; do
+        for p in kubectl google-cloud-cli gke-gcloud-auth-plugin; do
             (dpkg -s $p &> /dev/null) || sudo apt install $p
         done
     else
@@ -868,7 +868,8 @@ DeployOperator()
 {
 
     jinja -E GOOGLE_VM_USER -E GOOGLE_PROJECT -E GOOGLE_PROJECT_NUMBER -E GOOGLE_REGION -E GOOGLE_ZONE -E GOOGLE_REPO -E WEBAPPS_LOGIN \
-          -E WEBAPPS_PWD -E NETWORK_OPERATOR -E GIT_OPERATOR -E GOOGLE_ORG_NAME operator/deployment.j2 > operator/deployment.yaml
+          -E WEBAPPS_PWD -E NETWORK_OPERATOR -E GIT_OPERATOR -E GOOGLE_ORG_NAME -E GOOGLE_NAMESPACE \
+          operator/deployment.j2 > operator/deployment.yaml
 
     echo "######################################"
     echo "Deploy the Operator, networks and CRDs"

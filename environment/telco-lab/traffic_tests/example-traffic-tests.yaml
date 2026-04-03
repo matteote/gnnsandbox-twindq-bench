@@ -70,8 +70,8 @@ spec:
   duration: 1800  # 30 minutes
   pattern_type: burst
   pattern_config:
-    burst_duration: 180    # 3 minute bursts (representing busy periods)
-    burst_interval: 600    # every 10 minutes
+    burst_duration: 60    # 3 minute bursts (representing busy periods)
+    burst_interval: 120    # every 10 minutes
     burst_rate: 100Mbps    # high traffic during business hours
     idle_rate: 5Mbps       # low traffic during off-hours
   concurrent_users: 50

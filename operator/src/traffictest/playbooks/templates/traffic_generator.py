@@ -136,8 +136,9 @@ class TrafficGenerator:
             '-p', str(self.port),
             '-t', str(duration),
             '-b', bandwidth_str,
-            '-J',  # JSON output
-            '--logfile', f'/tmp/iperf3_client_{client_id}.log'
+            '-J',  # log format JSON
+            # traffic_generator.py expects iperf3 logs on stdout
+#            '--logfile', f'/tmp/iperf3_client_{client_id}.log'
         ]
         
         # Add parallel streams if more than 1
