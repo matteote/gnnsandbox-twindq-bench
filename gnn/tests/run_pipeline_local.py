@@ -57,8 +57,8 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 
-# ── Add gnn/src to path (this file lives at gnn/src/pipeline/) ───────────────
-_GNN_SRC = Path(__file__).resolve().parent.parent   # gnn/src/
+# ── Add gnn/src to path (this file lives at gnn/tests/) ───────────────
+_GNN_SRC = Path(__file__).resolve().parent.parent / "src"  # gnn/src/
 sys.path.insert(0, str(_GNN_SRC))
 
 # Import the shared training function — same code the Vertex AI container runs

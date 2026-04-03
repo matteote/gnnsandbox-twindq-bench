@@ -112,3 +112,4 @@ lib/build
 
 **/submit_pipeline.py
 **/gnn_pipeline.yaml
+gnn/tests/notebook_artifacts/
