@@ -69,6 +69,8 @@ async def create_linuxnetwork(body, spec, name, namespace, uid, logger, **kwargs
             await update_status(name, namespace, "Failed", f"Failed to create network: {result['error']}")
             raise kopf.PermanentError(f"Linux network creation failed: {result['error']}")
 
+    except (kopf.TemporaryError, kopf.PermanentError):
+        raise
     except Exception as e:
         logger.error(f"Failed to create LinuxNetwork {name}: {e}")
         await update_status(name, namespace, "Failed", str(e))

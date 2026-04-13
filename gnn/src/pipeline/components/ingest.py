@@ -108,13 +108,16 @@ def ingest_snapshots(
             "Check that the network operator is running and has written topology data."
         )
 
-    # Write each snapshot as a pickle file to GCS
+    # Write each snapshot as a pickle file and JSON file to GCS
     for i, snapshot in enumerate(snapshots):
         blob_name = f"{gcs_prefix}/snapshot_{i:04d}.pkl"
         blob = bucket.blob(blob_name)
         blob.upload_from_string(pickle.dumps(snapshot))
 
-    logger.info(f"Wrote {len(snapshots)} snapshot pickle files to {output_gcs_path}")
+        json_blob = bucket.blob(f"{gcs_prefix}/snapshot_{i:04d}.json")
+        json_blob.upload_from_string(json.dumps(snapshot, indent=2))
+
+    logger.info(f"Wrote {len(snapshots)} snapshot pickle+JSON files to {output_gcs_path}")
 
     # Write manifest so downstream components can verify the run
     manifest = {

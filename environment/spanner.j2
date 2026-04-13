@@ -163,18 +163,14 @@ spec:
       valid_end_ts TIMESTAMP OPTIONS (allow_commit_timestamp=true)
     ) PRIMARY KEY (entity_id, subnet_id, valid_start_ts DESC)"
   - "CREATE TABLE NodeEmbedding (
-      id STRING(MAX) NOT NULL,
-      node_id STRING(MAX) NOT NULL,
-      node_type STRING(MAX) NOT NULL,
-      stgnn_embedding ARRAY<FLOAT64>,
-      stgnn_score FLOAT64,
-      dgat_embedding ARRAY<FLOAT64>,
-      dgat_score FLOAT64,
-      hetgnn_embedding ARRAY<FLOAT64>,
-      hetgnn_score FLOAT64,
-      anomaly_explanation JSON,
-      timestamp TIMESTAMP NOT NULL OPTIONS (allow_commit_timestamp=true)
-    ) PRIMARY KEY (node_id, timestamp DESC)"
+       id STRING(36) NOT NULL DEFAULT (GENERATE_UUID()),
+       node_id STRING(MAX) NOT NULL,
+       node_type STRING(MAX) NOT NULL,
+       hetgnn_embedding ARRAY<FLOAT64>,
+       hetgnn_score FLOAT64,
+       anomaly_explanation JSON,
+       timestamp TIMESTAMP NOT NULL OPTIONS (allow_commit_timestamp=true)
+     ) PRIMARY KEY (node_id, timestamp DESC)"
   - "CREATE TABLE Incident (
         id STRING(MAX) NOT NULL,
         recordedTimestamp TIMESTAMP NOT NULL,
@@ -262,19 +258,19 @@ spec:
   - "CREATE VIEW RouterHasEmbedding_Edge SQL SECURITY INVOKER AS
        SELECT
          r.id AS router_id, r.valid_start_ts AS router_ts,
-         e.id AS embedding_id, e.timestamp AS embedding_ts
+         e.node_id AS embedding_node_id, e.timestamp AS embedding_ts
        FROM PhysicalRouter r
        JOIN NodeEmbedding e ON r.id = e.node_id
        WHERE e.timestamp >= r.valid_start_ts AND e.timestamp < IFNULL(r.valid_end_ts, TIMESTAMP('9999-12-31T23:59:59Z'))
-       GROUP BY router_id, router_ts, embedding_id, embedding_ts"
+       GROUP BY router_id, router_ts, embedding_node_id, embedding_ts"
   - "CREATE VIEW InterfaceHasEmbedding_Edge SQL SECURITY INVOKER AS
        SELECT
          i.id AS interface_id, i.valid_start_ts AS interface_ts,
-         e.id AS embedding_id, e.timestamp AS embedding_ts
+         e.node_id AS embedding_node_id, e.timestamp AS embedding_ts
        FROM PhysicalInterface i
        JOIN NodeEmbedding e ON i.id = e.node_id
        WHERE e.timestamp >= i.valid_start_ts AND e.timestamp < IFNULL(i.valid_end_ts, TIMESTAMP('9999-12-31T23:59:59Z'))
-       GROUP BY interface_id, interface_ts, embedding_id, embedding_ts"
+       GROUP BY interface_id, interface_ts, embedding_node_id, embedding_ts"
   - "CREATE VIEW LinkedTo_Edge SQL SECURITY INVOKER AS 
        SELECT 
          l.id AS link_id, l.valid_start_ts AS link_ts,
@@ -382,16 +378,16 @@ spec:
            KEY (interface_id, interface_ts, link_id, link_ts)
            SOURCE KEY (interface_id, interface_ts) REFERENCES PhysicalInterface (id, valid_start_ts)
            DESTINATION KEY (link_id, link_ts) REFERENCES PhysicalLink (id, valid_start_ts),
-         RouterHasEmbedding_Edge 
-           AS RouterHasEmbedding
-           KEY (router_id, router_ts, embedding_id, embedding_ts)
-           SOURCE KEY (router_id, router_ts) REFERENCES PhysicalRouter (id, valid_start_ts)
-           DESTINATION KEY (embedding_id, embedding_ts) REFERENCES NodeEmbedding (id, timestamp),
-         InterfaceHasEmbedding_Edge 
-           AS InterfaceHasEmbedding
-           KEY (interface_id, interface_ts, embedding_id, embedding_ts)
-           SOURCE KEY (interface_id, interface_ts) REFERENCES PhysicalInterface (id, valid_start_ts)
-           DESTINATION KEY (embedding_id, embedding_ts) REFERENCES NodeEmbedding (id, timestamp),
+          RouterHasEmbedding_Edge 
+            AS RouterHasEmbedding
+            KEY (router_id, router_ts, embedding_node_id, embedding_ts)
+            SOURCE KEY (router_id, router_ts) REFERENCES PhysicalRouter (id, valid_start_ts)
+            DESTINATION KEY (embedding_node_id, embedding_ts) REFERENCES NodeEmbedding (node_id, timestamp),
+          InterfaceHasEmbedding_Edge 
+            AS InterfaceHasEmbedding
+            KEY (interface_id, interface_ts, embedding_node_id, embedding_ts)
+            SOURCE KEY (interface_id, interface_ts) REFERENCES PhysicalInterface (id, valid_start_ts)
+            DESTINATION KEY (embedding_node_id, embedding_ts) REFERENCES NodeEmbedding (node_id, timestamp),
          LinkedTo_Edge 
            AS LinkedTo
            KEY (link_id, link_ts, interface_id, interface_ts)

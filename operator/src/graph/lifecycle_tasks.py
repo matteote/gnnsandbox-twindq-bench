@@ -1269,7 +1269,7 @@ async def sync_l3vpn_service(body, spec, name, uid, logger):
                     if row:
                         existing_config = row[0]
                         existing_status = row[1]
-                        if existing_config == bgp_config and existing_status == bgp_status.lower():
+                        if existing_config == bgp_config and existing_status == bgp_status:
                             need_insert = False
                         else:
                             # Close existing
@@ -1288,7 +1288,7 @@ async def sync_l3vpn_service(body, spec, name, uid, logger):
                                 'local_as': router_local_as,
                                 'remote_as': remote_as,
                                 'peer_ip': peer_ip,
-                                'status': bgp_status.lower(),
+                                'status': bgp_status,
                                 'config': bgp_config
                             },
                             param_types={
@@ -1373,60 +1373,6 @@ async def delete_l3vpn_service(uid):
         logger.debug(f"Successfully closed L3VPN services and related entities for CRD {uid}")
     except Exception as e:
         logger.error(f"Failed to delete L3VPN service {uid}: {e}")
-
-
-# ------------------------------------------
-# Create BGP Peering Relationship
-# ------------------------------------------
-async def _create_bgp_peering(bgp_session_id, peer_ip, vrf_name, logger):
-    """
-    Create BGP peering relationship in BGP_Peering table.
-    This finds the matching reverse BGP session and creates the peering link.
-    """
-    # Query to find the reverse BGP session (where local peer IP matches our peer_ip)
-    query = """
-        SELECT id FROM BGPSession 
-        WHERE peer_ip != @peer_ip 
-        AND vrf_id LIKE @vrf_pattern
-        LIMIT 10
-    """
-    
-    try:
-        with db_container['db'].snapshot() as snapshot:
-            results = snapshot.execute_sql(
-                query,
-                params={
-                    'peer_ip': peer_ip,
-                    'vrf_pattern': f'%:{vrf_name}'
-                },
-                param_types={
-                    'peer_ip': spanner.param_types.STRING,
-                    'vrf_pattern': spanner.param_types.STRING
-                }
-            )
-            
-            for row in results:
-                peer_bgp_id = row[0]
-                
-                # Create bidirectional peering entries
-                def sql_insert_peering(transaction):
-                    # Insert both directions
-                    transaction.execute_update(
-                        "INSERT OR IGNORE INTO BGP_Peering (session_id_a, session_id_b) VALUES (@id_a, @id_b)",
-                        params={'id_a': bgp_session_id, 'id_b': peer_bgp_id},
-                        param_types={'id_a': spanner.param_types.STRING, 'id_b': spanner.param_types.STRING}
-                    )
-                    transaction.execute_update(
-                        "INSERT OR IGNORE INTO BGP_Peering (session_id_a, session_id_b) VALUES (@id_a, @id_b)",
-                        params={'id_a': peer_bgp_id, 'id_b': bgp_session_id},
-                        param_types={'id_a': spanner.param_types.STRING, 'id_b': spanner.param_types.STRING}
-                    )
-                
-                db_container['db'].run_in_transaction(sql_insert_peering)
-                logger.debug(f"Created BGP peering: {bgp_session_id} <-> {peer_bgp_id}")
-                
-    except Exception as e:
-        logger.debug(f"Could not create BGP peering for {bgp_session_id}: {e}")
 
 
 # ------------------------------------------

@@ -68,8 +68,8 @@ spec:
                       description: "Region/state name"
                 role:
                   type: string
-                  enum: ["P", "PE", "CE", "p", "pe", "ce"]
-                  description: "Router role (P, PE, CE)"
+                  enum: ["P", "PE", "CE", "RR"]
+                  description: "Router role (P, PE, CE, RR)"
                 interfaces:
                   type: array
                   description: "Network interfaces (generated from VyOSNetwork)"

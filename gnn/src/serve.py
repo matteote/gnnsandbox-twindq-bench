@@ -46,7 +46,10 @@ GCS_BUCKET_NAME      = os.getenv("GCS_BUCKET_NAME",     "network-model-artifacts
 SPANNER_INSTANCE     = os.getenv("SPANNER_INSTANCE",     "networktopology-instance")
 SPANNER_DATABASE     = os.getenv("SPANNER_DATABASE",     "networktopology-db")
 GOOGLE_CLOUD_PROJECT = os.getenv("GOOGLE_CLOUD_PROJECT", None)
-ANOMALY_THRESHOLD    = float(os.getenv("ANOMALY_THRESHOLD", "0.5"))
+# Per-type thresholds are loaded from model_stats.pth at runtime;
+# these are only the hard fallback defaults.
+_FALLBACK_THRESHOLDS = {"router": 0.15, "interface": 0.20, "bgp_session": 0.10}
+INTERVAL_MINUTES     = int(os.getenv("INTERVAL_MINUTES", "5"))
 CACHE_DIR            = Path(tempfile.gettempdir()) / "gnn_model_cache"
 
 # ── In-process model cache (warm across concurrent requests) ──────────────────
@@ -103,9 +106,10 @@ def _download_artefacts(manifest: dict) -> Path:
 
 def _ensure_model_loaded(manifest: dict):
     """Load or refresh the HetGNN model + GraphBuilder into _cache."""
+    import joblib
     import torch
     from model.hetgnn import HetGNN
-    from utils.gnn_utils import GraphBuilder, INTERVAL_MINUTES
+    from utils.gnn_utils import GraphBuilder, FEATURE_DIMS, ANOMALY_THRESHOLDS
     from utils.data import SpannerDataset
 
     run_id = manifest["run_id"]
@@ -119,9 +123,8 @@ def _ensure_model_loaded(manifest: dict):
     scalers_pth = local_dir / "scalers.pkl"
     if not scalers_pth.exists():
         raise FileNotFoundError(f"scalers.pkl not found at {scalers_pth}")
-    graph_builder = GraphBuilder(scaler_path=str(scalers_pth))
-    if not graph_builder.load_scalers():
-        raise RuntimeError(f"Failed to load scalers from {scalers_pth}")
+    scalers = joblib.load(str(scalers_pth))
+    graph_builder = GraphBuilder(scalers=scalers)
 
     # Fetch one snapshot to derive graph metadata
     dataset = SpannerDataset(
@@ -133,8 +136,9 @@ def _ensure_model_loaded(manifest: dict):
     )
     timestamps = dataset._get_timestamps()
     snapshot = dataset.fetch_snapshot(timestamps[-1])
-    hetero_data, input_dims = graph_builder.process_snapshot(snapshot)
+    hetero_data = graph_builder.process_snapshot(snapshot)
     metadata = hetero_data.metadata()
+    input_dims = FEATURE_DIMS
 
     # Load model weights
     model_pth = local_dir / "model.pth"
@@ -154,26 +158,34 @@ def _ensure_model_loaded(manifest: dict):
     model.eval()
     model.to(device)
 
+    # Load per-type anomaly thresholds from model_stats (fall back to defaults)
+    thresholds = dict(ANOMALY_THRESHOLDS)
+    stats_pth = local_dir / "model_stats.pth"
+    if stats_pth.exists():
+        try:
+            stats = torch.load(str(stats_pth), map_location="cpu", weights_only=False)
+            thresholds.update(stats.get("anomaly_thresholds", {}))
+            logger.info(f"Loaded per-type thresholds from model_stats: {thresholds}")
+        except Exception as exc:
+            logger.warning(f"Could not load model_stats.pth: {exc}")
+
     _cache.update({
         "run_id":        run_id,
         "model":         model,
         "graph_builder": graph_builder,
         "dataset":       dataset,
         "device":        device,
+        "thresholds":    thresholds,
     })
     logger.info(f"HetGNN model loaded (run_id={run_id}, device={device})")
 
 
 # ── Spanner writer ────────────────────────────────────────────────────────────
 
-def _write_results_to_spanner(database, graph_builder, snapshot: dict, results: dict):
-    """Write one NodeEmbedding row per node (embeddings + anomaly scores)."""
+def _write_results_to_spanner(database, node_id_map: dict, snapshot: dict, results: dict):
+    """Write one NodeEmbedding row per node (embeddings + anomaly scores + explanation)."""
     from google.cloud import spanner as gspanner
 
-    reverse_id_maps = {
-        ntype: {idx: nid for nid, idx in id_map.items()}
-        for ntype, id_map in graph_builder.global_id_map.items()
-    }
     node_names = {
         node["id"]: node.get("hostname", node.get("name", node["id"]))
         for node in snapshot.get("nodes", [])
@@ -181,20 +193,22 @@ def _write_results_to_spanner(database, graph_builder, snapshot: dict, results: 
 
     rows = []
     for ntype, emb_list in results["embeddings"].items():
-        scores  = results["anomaly_scores"].get(ntype, [])
-        rev_map = reverse_id_maps.get(ntype, {})
+        scores      = results["anomaly_scores"].get(ntype, [])
+        explanations = results.get("anomaly_explanations", {}).get(ntype, [])
+        id_list     = node_id_map.get(ntype, [])
         for idx, embedding in enumerate(emb_list):
-            node_id = rev_map.get(idx)
+            node_id = id_list[idx] if idx < len(id_list) else None
             if node_id is None:
                 continue
             score = float(scores[idx]) if idx < len(scores) else 0.0
+            expl  = explanations[idx] if idx < len(explanations) else {}
             rows.append((
                 str(uuid.uuid4()),
                 node_id,
                 ntype,
                 embedding,
                 score,
-                json.dumps({"name": node_names.get(node_id, node_id)}),
+                json.dumps({"name": node_names.get(node_id, node_id), **expl}),
                 gspanner.COMMIT_TIMESTAMP,
             ))
 
@@ -218,8 +232,14 @@ def _write_results_to_spanner(database, graph_builder, snapshot: dict, results: 
 async def _run_inference() -> dict:
     """Run one HetGNN inference cycle and return a result summary dict."""
     import torch
-    from utils.gnn_utils import INTERVAL_MINUTES
+    from utils.gnn_utils import ROUTER_FEATURES, INTERFACE_FEATURES, BGP_SESSION_FEATURES
     from utils.data import SpannerDataset
+
+    FEATURE_NAMES = {
+        "router":      ROUTER_FEATURES,
+        "interface":   INTERFACE_FEATURES,
+        "bgp_session": BGP_SESSION_FEATURES,
+    }
 
     manifest = _load_manifest()
     _ensure_model_loaded(manifest)
@@ -227,6 +247,7 @@ async def _run_inference() -> dict:
     model         = _cache["model"]
     graph_builder = _cache["graph_builder"]
     device        = _cache["device"]
+    thresholds    = _cache.get("thresholds", _FALLBACK_THRESHOLDS)
 
     # Fetch the latest snapshot
     dataset = SpannerDataset(
@@ -241,7 +262,8 @@ async def _run_inference() -> dict:
     snapshot   = dataset.fetch_snapshot(latest_ts)
     logger.info(f"Fetched snapshot at {latest_ts.isoformat()}")
 
-    hetero_data, _ = graph_builder.process_snapshot(snapshot)
+    hetero_data = graph_builder.process_snapshot(snapshot)
+    node_id_map = hetero_data.node_id_map   # {ntype: [node_id, ...]}
     hetero_data = hetero_data.to(device)
 
     with torch.no_grad():
@@ -249,19 +271,48 @@ async def _run_inference() -> dict:
             hetero_data.x_dict, hetero_data.edge_index_dict
         )
 
-    # MSE reconstruction error → anomaly score
+    # Per-type MSE anomaly scoring + per-feature explanations
     anomaly_scores: dict = {}
+    anomaly_explanations: dict = {}
     total_anomalies = 0
+
     for ntype, recon in recon_dict.items():
-        orig = hetero_data[ntype].x
-        mse  = ((recon - orig) ** 2).mean(dim=1)
-        anomaly_scores[ntype] = mse.cpu().tolist()
-        count = int((mse > ANOMALY_THRESHOLD).sum().item())
+        if ntype not in hetero_data.x_dict:
+            continue
+        orig      = hetero_data[ntype].x
+        feat_mse  = ((recon - orig) ** 2)           # [N, F]
+        node_mse  = feat_mse.mean(dim=1)             # [N]
+        threshold = thresholds.get(ntype, 0.20)
+        is_anomaly = node_mse > threshold
+
+        anomaly_scores[ntype] = node_mse.cpu().tolist()
+        count = int(is_anomaly.sum().item())
         total_anomalies += count
         logger.info(
-            f"  {ntype}: {len(mse)} nodes, {count} anomalies "
-            f"(MSE > {ANOMALY_THRESHOLD})"
+            f"  {ntype}: {len(node_mse)} nodes, {count} anomalies "
+            f"(MSE > {threshold})"
         )
+
+        # Per-feature explanation for anomalous nodes
+        feat_names = FEATURE_NAMES.get(ntype, [])
+        expl_list = []
+        for node_idx in range(node_mse.size(0)):
+            if is_anomaly[node_idx]:
+                per_feat = feat_mse[node_idx].cpu().tolist()
+                top_feat = sorted(
+                    enumerate(per_feat), key=lambda x: x[1], reverse=True
+                )[:3]
+                expl_list.append({
+                    "anomalous": True,
+                    "top_features": [
+                        {"feature": feat_names[fi] if fi < len(feat_names) else str(fi),
+                         "mse": round(fv, 5)}
+                        for fi, fv in top_feat
+                    ],
+                })
+            else:
+                expl_list.append({"anomalous": False})
+        anomaly_explanations[ntype] = expl_list
 
     embeddings = {
         ntype: emb.cpu().tolist()
@@ -269,13 +320,14 @@ async def _run_inference() -> dict:
     }
 
     results = {
-        "snapshot_timestamp": latest_ts.isoformat(),
-        "embeddings":         embeddings,
-        "anomaly_scores":     anomaly_scores,
-        "anomaly_count":      total_anomalies,
+        "snapshot_timestamp":  latest_ts.isoformat(),
+        "embeddings":          embeddings,
+        "anomaly_scores":      anomaly_scores,
+        "anomaly_explanations": anomaly_explanations,
+        "anomaly_count":       total_anomalies,
     }
 
-    _write_results_to_spanner(dataset.database, graph_builder, snapshot, results)
+    _write_results_to_spanner(dataset.database, node_id_map, snapshot, results)
 
     logger.info(f"Inference complete — {total_anomalies} anomalies detected.")
     return results

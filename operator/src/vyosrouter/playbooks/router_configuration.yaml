@@ -50,6 +50,7 @@
         '
       register: hosts_file_update
       changed_when: true
+      ignore_errors: true   # Non-critical: hosts resolution failure does not affect routing
       when: operation in ['configure', 'update']
 
     # CONFIGURE/UPDATE OPERATIONS
@@ -74,10 +75,13 @@
             {{ vyos_config_commands }}
             CONFIGEOF
           register: copy_result
+          retries: 3
+          delay: 5
+          until: copy_result.rc == 0
 
         - name: Apply VyOS configuration via docker exec
           shell: |
-            docker exec {{ router_name }} timeout 60 vbash /tmp/vyos_config.sh
+            docker exec {{ router_name }} timeout 120 vbash /tmp/vyos_config.sh
           register: config_result
 
         - name: Display configuration result

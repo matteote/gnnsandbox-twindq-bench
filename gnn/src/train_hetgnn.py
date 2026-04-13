@@ -1,6 +1,8 @@
+import json
 import os
-import sys
+import pathlib
 import pickle
+import sys
 import torch
 import torch.nn as nn
 from tqdm import tqdm
@@ -9,7 +11,24 @@ import joblib
 import logging
 from model.hetgnn import HetGNN
 from utils.data import SpannerDataset
-from utils.gnn_utils import SPANNER_INSTANCE, SPANNER_DATABASE, GCS_BUCKET_NAME, INTERVAL_MINUTES, GraphBuilder, HIDDEN_CHANNELS, OUT_CHANNELS, NUM_HEADS, NUM_LAYERS
+from utils.gnn_utils import (
+    GraphBuilder,
+    fit_scalers,
+    FEATURE_DIMS,
+    ANOMALY_THRESHOLDS,
+    NODE_TYPES,
+    EDGE_TYPES,
+)
+
+# ── Runtime constants (from env vars) ────────────────────────────────────────
+SPANNER_INSTANCE = os.getenv("SPANNER_INSTANCE", "networktopology-instance")
+SPANNER_DATABASE = os.getenv("SPANNER_DATABASE", "networktopology-db")
+GCS_BUCKET_NAME  = os.getenv("GCS_BUCKET_NAME", "")
+INTERVAL_MINUTES = int(os.getenv("INTERVAL_MINUTES", "5"))
+
+# ── Model architecture constants ─────────────────────────────────────────────
+HIDDEN_CHANNELS = int(os.getenv("HIDDEN_CHANNELS", "64"))
+NUM_LAYERS      = int(os.getenv("NUM_LAYERS", "2"))
 
 # Configure logging
 logging.basicConfig(
@@ -52,9 +71,10 @@ VALIDATION_SPLIT = 0.2  # 20% for validation
 EARLY_STOPPING_PATIENCE = 10  # Stop if no improvement for 10 epochs
 MIN_DELTA = 0.001  # Minimum change to qualify as an improvement
 
-# Multi-task objective weights (bgp_session removed — redistributed to router)
-ALPHA = 0.6  # Weight for Router Loss
-GAMMA = 0.4  # Weight for Interface Loss
+# Multi-task objective weights (3 node types)
+ALPHA = 0.5  # Weight for Router Loss
+GAMMA = 0.3  # Weight for Interface Loss
+BETA  = 0.2  # Weight for BGP Session Loss
 DIVERSITY_WEIGHT = 0.1  # Weight for contrastive diversity penalty (10%)
 
 def contrastive_diversity_loss(embeddings_dict):
@@ -145,23 +165,21 @@ def train_hetgnn_on_snapshots(
     local_stats_path  = str(out / "model_stats.pth")
 
     # ── Fit scalers ──────────────────────────────────────────────────────────
-    gb = GraphBuilder(local_scaler_path)
-    gb.init_config_encoder()
-    logger.info("Fitting scalers...")
-    gb.fit_scalers(snapshot_objects)
-    gb.save_scalers()  # saves to local_scaler_path
+    logger.info("Fitting scalers on all snapshots...")
+    scalers = fit_scalers(snapshot_objects)
+    joblib.dump(scalers, local_scaler_path)
+    logger.info(f"Scalers saved to {local_scaler_path}")
+
+    gb = GraphBuilder(scalers=scalers)
 
     # ── Convert to HeteroData ────────────────────────────────────────────────
     logger.info("Processing snapshots into HeteroData...")
     snapshots = []
-    input_dims = None
+    input_dims = FEATURE_DIMS  # defined in gnn_utils
     for idx, data in enumerate(snapshot_objects):
         logger.debug(f"Processing snapshot {idx+1}/{len(snapshot_objects)}")
-        hdata, dims = gb.process_snapshot(data)
+        hdata = gb.process_snapshot(data)
         snapshots.append(hdata)
-        if input_dims is None:
-            input_dims = dims
-            logger.info(f"Input dimensions: {input_dims}")
 
     node_types = list(input_dims.keys())
     all_edge_types = set()
@@ -206,7 +224,7 @@ def train_hetgnn_on_snapshots(
 
     max_epochs = epochs_override if epochs_override is not None else EPOCHS
     logger.info(f"Starting training for up to {max_epochs} epochs with early stopping (patience={EARLY_STOPPING_PATIENCE})")
-    logger.info(f"Multi-task weights: α={ALPHA} (router), γ={GAMMA} (interface), diversity={DIVERSITY_WEIGHT}")
+    logger.info(f"Multi-task weights: α={ALPHA} (router), γ={GAMMA} (interface), β={BETA} (bgp_session), diversity={DIVERSITY_WEIGHT}")
 
     # ── Training loop ────────────────────────────────────────────────────────
     best_val_loss = float('inf')
@@ -236,6 +254,7 @@ def train_hetgnn_on_snapshots(
 
             loss_router = 0
             loss_interface = 0
+            loss_bgp = 0
             for node_type, recon_x in recon_dict.items():
                 if node_type in snapshot.x_dict:
                     node_loss = criterion(recon_x, snapshot.x_dict[node_type])
@@ -243,9 +262,16 @@ def train_hetgnn_on_snapshots(
                         loss_router += node_loss
                     elif node_type == "interface":
                         loss_interface += node_loss
+                    elif node_type == "bgp_session":
+                        loss_bgp += node_loss
 
             diversity_loss = contrastive_diversity_loss(embeddings)
-            total_loss = (ALPHA * loss_router) + (GAMMA * loss_interface) + (DIVERSITY_WEIGHT * diversity_loss)
+            total_loss = (
+                (ALPHA * loss_router) +
+                (GAMMA * loss_interface) +
+                (BETA  * loss_bgp) +
+                (DIVERSITY_WEIGHT * diversity_loss)
+            )
             total_loss.backward()
             optimizer.step()
 
@@ -273,6 +299,7 @@ def train_hetgnn_on_snapshots(
                 recon_dict, embeddings = model(snapshot.x_dict, snapshot.edge_index_dict)
                 loss_router = 0
                 loss_interface = 0
+                loss_bgp = 0
                 for node_type, recon_x in recon_dict.items():
                     if node_type in snapshot.x_dict:
                         node_loss = criterion(recon_x, snapshot.x_dict[node_type])
@@ -280,8 +307,15 @@ def train_hetgnn_on_snapshots(
                             loss_router += node_loss
                         elif node_type == "interface":
                             loss_interface += node_loss
+                        elif node_type == "bgp_session":
+                            loss_bgp += node_loss
                 diversity_loss = contrastive_diversity_loss(embeddings)
-                total_loss = (ALPHA * loss_router) + (GAMMA * loss_interface) + (DIVERSITY_WEIGHT * diversity_loss)
+                total_loss = (
+                    (ALPHA * loss_router) +
+                    (GAMMA * loss_interface) +
+                    (BETA  * loss_bgp) +
+                    (DIVERSITY_WEIGHT * diversity_loss)
+                )
                 val_loss_tensors.append(total_loss.detach())
                 if isinstance(loss_router, torch.Tensor) and loss_router.numel() > 0:
                     val_router_tensors.append(loss_router.detach())
@@ -368,9 +402,10 @@ def train_hetgnn_on_snapshots(
                 }
 
     stats_data = {
-        'cluster_stats': cluster_stats,
-        'node_stats':    node_stats,
-        'gb_id_map':     gb.global_id_map,
+        'cluster_stats':      cluster_stats,
+        'node_stats':         node_stats,
+        'anomaly_thresholds': ANOMALY_THRESHOLDS,
+        'feature_dims':       FEATURE_DIMS,
     }
     torch.save(stats_data, local_stats_path)
     logger.info(f"Saved cluster statistics to {local_stats_path}")
@@ -401,6 +436,21 @@ def run_training_pipeline():
                         snapshot_objects.append(snapshot)
                 except Exception as e:
                     logger.error(f"Error fetching snapshot at {ts}: {e}")
+
+            # Compute temporal gradient/delta features across consecutive snapshots
+            SpannerDataset.compute_temporal_features(
+                snapshot_objects, interval_seconds=INTERVAL_MINUTES * 60
+            )
+            logger.info("Temporal features computed across snapshot sequence")
+
+            # Dump JSON copies for offline testing / inspection
+            snap_dir = pathlib.Path("snapshots")
+            snap_dir.mkdir(exist_ok=True)
+            for i, snap in enumerate(snapshot_objects):
+                (snap_dir / f"snapshot_{i:04d}.json").write_text(
+                    json.dumps(snap, indent=2)
+                )
+            logger.info(f"Wrote {len(snapshot_objects)} snapshot JSON files to {snap_dir}/")
 
         if not snapshot_objects:
             logger.error("Error: No data found. Exiting.")

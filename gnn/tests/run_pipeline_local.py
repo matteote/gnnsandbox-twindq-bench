@@ -78,14 +78,13 @@ logger = logging.getLogger("local_pipeline")
 def step_ingest(args, snapshots_dir: Path) -> list:
     """Fetch snapshots from Spanner and save them to snapshots_dir as pkl files."""
     from utils.data import SpannerDataset
-    from utils.gnn_utils import INTERVAL_MINUTES
 
     logger.info("=" * 60)
     logger.info("STEP 1 — INGEST")
     logger.info("=" * 60)
 
     snapshots_dir.mkdir(parents=True, exist_ok=True)
-    interval = args.interval_minutes or INTERVAL_MINUTES
+    interval = args.interval_minutes or 5  # default: 5-minute snapshot cadence
 
     logger.info(
         f"Fetching {args.num_snapshots} snapshots from "
@@ -119,6 +118,10 @@ def step_ingest(args, snapshots_dir: Path) -> list:
             "No snapshots fetched. Check that the network operator is running "
             "and has written topology data to Spanner."
         )
+
+    # Compute temporal gradient/delta features across the ordered snapshot sequence
+    SpannerDataset.compute_temporal_features(snapshots, interval_seconds=interval * 60)
+    logger.info("Temporal features (rx_err_gradient, prefix_count_delta, session_uptime_norm) computed")
 
     for i, snap in enumerate(snapshots):
         with open(snapshots_dir / f"snapshot_{i:04d}.pkl", "wb") as f:
@@ -227,8 +230,8 @@ def parse_args():
                    help="GCP project ID (or set GOOGLE_PROJECT)")
     p.add_argument("--spanner-instance", default="networktopology-instance")
     p.add_argument("--spanner-database", default="networktopology-db")
-    p.add_argument("--interval-minutes", type=int, default=None,
-                   help="Snapshot interval (defaults to INTERVAL_MINUTES in gnn_utils)")
+    p.add_argument("--interval-minutes", type=int, default=5,
+                   help="Snapshot interval in minutes (default: 5)")
 
     # Data
     p.add_argument("--num-snapshots",   type=int, default=20)

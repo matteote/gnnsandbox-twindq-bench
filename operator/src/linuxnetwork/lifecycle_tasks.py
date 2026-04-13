@@ -244,20 +244,36 @@ async def _run_ansible_playbook(ip_address:str, playbook: str, extravars: Dict[s
                     **result_data
                 }
             else:
-                # Extract error information
+                # Extract error information — check unreachable first (transient), then task failures
                 error_msg = f"Ansible playbook failed with status: {runner.status}"
-                
-                # Try to get more detailed error from events
+
                 for event in runner.events:
-                    if event.get('event') == 'runner_on_failed':
-                        event_data = event.get('event_data', {})
-                        res = event_data.get('res', {})
-                        if 'stderr' in res and res['stderr']:
-                            error_msg = res['stderr']
-                        elif 'msg' in res:
-                            error_msg = res['msg']
+                    event_type = event.get('event', '')
+                    event_data = event.get('event_data', {})
+                    res = event_data.get('res', {})
+
+                    if event_type == 'runner_on_unreachable':
+                        # SSH/network connectivity failure — always transient
+                        detail = res.get('msg', event_data.get('task', 'unknown host'))
+                        error_msg = f"Host unreachable: {detail}"
                         break
-                
+
+                    if event_type == 'runner_on_failed':
+                        task_name = event_data.get('task', '')
+                        msg = res.get('msg', '')
+                        stderr = res.get('stderr', '')
+                        rc = res.get('rc', None)
+
+                        # Prefer the most informative field
+                        raw_detail = msg or stderr or str(res)
+
+                        # Annotate timeout kills (exit code 124 from timeout(1) wrapper)
+                        if rc == 124 or 'Killed' in raw_detail or 'exit code 124' in raw_detail:
+                            error_msg = f"exit code 124: command timed out in task '{task_name}'"
+                        else:
+                            error_msg = f"Task '{task_name}' failed: {raw_detail}" if task_name else raw_detail
+                        break
+
                 logger.error(f"Ansible playbook execution failed: {error_msg}")
                 return {
                     'success': False,

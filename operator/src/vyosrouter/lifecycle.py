@@ -70,18 +70,25 @@ async def create_vyosrouter(body, spec, name, namespace, uid, logger, **kwargs):
         all_ready, not_ready_networks = await check_linux_networks_ready(interfaces, namespace)
         
         if not all_ready:
-            # Build detailed error message
+            # Build detailed error message and check for permanent failures
             network_details = []
+            has_permanent_failure = False
             for net in not_ready_networks:
                 network_details.append(f"{net['name']} (phase: {net['phase']}, message: {net['message']})")
-            
+                if net['phase'] == 'Failed':
+                    has_permanent_failure = True
+
             error_msg = f"Waiting for LinuxNetwork(s) to be ready: {', '.join(network_details)}"
             logger.warning(f"VyOSRouter {name}: {error_msg}")
-            
+
             await update_status(name, namespace, "Pending", error_msg)
-            
-            # Raise temporary error to retry later
-            raise kopf.TemporaryError(error_msg, delay=20)
+
+            if has_permanent_failure:
+                # A dependency is permanently failed — stop retrying
+                raise kopf.PermanentError(error_msg)
+            else:
+                # Dependency is still coming up — retry later
+                raise kopf.TemporaryError(error_msg, delay=20)
         
     try:
         # Update status to indicate creation has started (automatically syncs to Spanner)
@@ -204,15 +211,32 @@ async def update_vyosrouter(body, spec, name, namespace, uid, logger, **kwargs):
                                applied_config=result.get('applied_config'))
             logger.info(f"Successfully updated VyOSRouter {name}")
         else:
-            await update_status(name, namespace, "Failed", f"Failed to update router: {result['error']}",
-                               body=body, spec=spec, uid=uid, logger_obj=logger)
-            raise kopf.PermanentError(f"VyOS router update failed: {result['error']}")
-            
-    except Exception as e:
-        logger.error(f"Failed to update VyOSRouter {name}: {e}")
-        await update_status(name, namespace, "Failed", str(e),
-                           body=body, spec=spec, uid=uid, logger_obj=logger)
+            error_msg = result.get('error', 'Unknown update error')
+            if _is_transient_error(error_msg):
+                logger.warning(f"Transient update error for {name}, will retry: {error_msg}")
+                await update_status(name, namespace, "Updating", f"Update pending retry: {error_msg}",
+                                   body=body, spec=spec, uid=uid, logger_obj=logger)
+                raise kopf.TemporaryError(f"Transient update error: {error_msg}", delay=30)
+            else:
+                await update_status(name, namespace, "Failed", f"Failed to update router: {error_msg}",
+                                   body=body, spec=spec, uid=uid, logger_obj=logger)
+                raise kopf.PermanentError(f"VyOS router update failed: {error_msg}")
+
+    except (kopf.TemporaryError, kopf.PermanentError):
+        # Re-raise kopf control exceptions without double-handling
         raise
+    except Exception as e:
+        error_msg = str(e)
+        logger.error(f"Failed to update VyOSRouter {name}: {error_msg}")
+        if _is_transient_error(error_msg):
+            logger.warning(f"Treating as transient error, will retry: {error_msg}")
+            await update_status(name, namespace, "Updating", f"Retrying after error: {error_msg}",
+                               body=body, spec=spec, uid=uid, logger_obj=logger)
+            raise kopf.TemporaryError(error_msg, delay=30)
+        else:
+            await update_status(name, namespace, "Failed", error_msg,
+                               body=body, spec=spec, uid=uid, logger_obj=logger)
+            raise
 
 @kopf.on.delete('google.dev', 'v1', 'vyosrouter')
 async def delete_vyosrouter(body, spec, name, namespace, logger, **kwargs):
@@ -370,6 +394,9 @@ def _is_transient_error(error_msg: str) -> bool:
         'i/o timeout',
         'broken pipe',
         'eof',
+        'not ready',                # VyOS container not yet ready (still starting)
+        'exit code 124',            # timeout(1) killed vbash commit (slow router)
+        'timed out waiting',        # Generic readiness wait timeout
     ]
     
     return any(pattern in error_lower for pattern in transient_patterns)

@@ -340,7 +340,7 @@ spec:
     - name: "rr1"
       hostname: "rr1"
       router_id: "10.0.0.1"
-      role: "P"
+      role: "RR"
       location:
         latitude: 52.4862
         longitude: -1.8904
@@ -359,7 +359,7 @@ spec:
     - name: "rr2"
       hostname: "rr2"
       router_id: "10.0.0.2"
-      role: "P"
+      role: "RR"
       location:
         latitude: 51.4545
         longitude: -2.5879
