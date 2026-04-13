@@ -11,6 +11,30 @@ from google.cloud import spanner
 logger = logging.getLogger(__name__)
 
 
+def _render_spanner_query(query: str, params: dict) -> str:
+    """Substitute @param placeholders with Spanner-literal values for copy-paste into Spanner Studio."""
+    rendered = query
+    # Sort by length descending so longer names are replaced before shorter prefixes
+    for key in sorted(params.keys(), key=len, reverse=True):
+        value = params[key]
+        if isinstance(value, datetime.datetime):
+            literal = f"TIMESTAMP '{value.isoformat()}'"
+        elif isinstance(value, list):
+            parts = []
+            for item in value:
+                parts.append(f"'{item}'" if isinstance(item, str) else str(item))
+            literal = f"[{', '.join(parts)}]"
+        elif isinstance(value, str):
+            escaped = value.replace("'", "\\'")
+            literal = f"'{escaped}'"
+        elif value is None:
+            literal = "NULL"
+        else:
+            literal = str(value)
+        rendered = rendered.replace(f"@{key}", literal)
+    return rendered
+
+
 def _parse_speed_bps(speed_str: str) -> float:
     """Convert a speed string ('1G', '10G', '1000M', '100M') to bits-per-second.
 
@@ -101,9 +125,11 @@ class SpannerDataset:
                     ts = row[0]
                     if hasattr(ts, "tzinfo") and ts.tzinfo is not None:
                         ts = ts.replace(tzinfo=None)
+                    logger.debug(ts)
                     return ts
         except Exception as e:
-            logger.warning(f"Could not determine latest timestamp, falling back: {e}")
+            logger.warning(f"Exception: Could not determine latest timestamp, falling back: {e}")
+        logger.debug(f"Could not determine latest timestamp, falling back: {e}")
         return datetime.datetime.utcnow()
 
     def _get_timestamps(self) -> List[datetime.datetime]:
@@ -151,6 +177,7 @@ class SpannerDataset:
         params = {"ts": timestamp}
         param_types = {"ts": spanner.param_types.TIMESTAMP}
 
+        logger.debug(f"[snapshot] Opening Spanner snapshot for ts={timestamp.isoformat()}")
         with self.database.snapshot(multi_use=True) as sn:
 
             # ── 1. Routers ──────────────────────────────────────────────────
@@ -159,11 +186,13 @@ class SpannerDataset:
                 SELECT id, name, role, status
                 FROM PhysicalRouter WHERE {valid_filter}
             """
+            logger.debug("[snapshot:sql] PhysicalRouter:\n%s", _render_spanner_query(query_routers, params))
             for row in sn.execute_sql(query_routers, params=params, param_types=param_types):
                 r_id, r_name, r_role, r_status = row
                 state_val = 1.0 if r_status and r_status.lower() == "running" else 0.0
                 role_str = (r_role or "").upper()
                 router_ids[r_id] = r_name
+                logger.debug(f"[snapshot]   router: id={r_id} name={r_name} role={role_str} status={r_status} state={state_val}")
                 snapshot_data["nodes"].append({
                     "id": r_id,
                     "type": "router",
@@ -184,12 +213,17 @@ class SpannerDataset:
                 SELECT id, router_id, name, speed, status
                 FROM PhysicalInterface WHERE {valid_filter}
             """
+            logger.debug("[snapshot:sql] PhysicalInterface:\n%s", _render_spanner_query(query_ifaces, params))
             for row in sn.execute_sql(query_ifaces, params=params, param_types=param_types):
                 i_id, i_router_id, i_name, i_speed, i_status = row
                 state_val = 1.0 if i_status and i_status.lower() == "up" else 0.0
                 speed_bps = _parse_speed_bps(i_speed)
                 iface_ids[i_id] = i_router_id
                 iface_speed[i_id] = speed_bps
+                logger.debug(
+                    f"[snapshot]   interface: id={i_id} name={i_name} router={i_router_id} "
+                    f"speed={i_speed}({speed_bps:.0f}bps) status={i_status} state={state_val}"
+                )
                 snapshot_data["nodes"].append({
                     "id": i_id,
                     "type": "interface",
@@ -211,6 +245,7 @@ class SpannerDataset:
             logger.info(f"Fetched {len(iface_ids)} interfaces")
 
             # ── 3. has_interface edges (router → interface) ──────────────────
+            logger.debug("[snapshot] Building has_interface edges")
             for iface_node in snapshot_data["nodes"]:
                 if iface_node["type"] == "interface":
                     snapshot_data["edges"].append({
@@ -218,8 +253,13 @@ class SpannerDataset:
                         "target": iface_node["id"],
                         "relation": "has_interface",
                     })
+                    logger.debug(
+                        f"[snapshot]   has_interface: {iface_node['device_id']} -> {iface_node['id']} ({iface_node['name']})"
+                    )
+            logger.debug(f"[snapshot] has_interface edges: {sum(1 for e in snapshot_data['edges'] if e['relation'] == 'has_interface')}")
 
             # ── 4. connected_to edges (interface ↔ interface) ────────────────
+            connected_to_count = 0
             query_links = f"""
                 SELECT il1.interface_id, il2.interface_id
                 FROM Interface_Link il1
@@ -230,13 +270,18 @@ class SpannerDataset:
                   AND il2.valid_start_ts <= @ts
                   AND (il2.valid_end_ts > @ts OR il2.valid_end_ts IS NULL)
             """
+            logger.debug("[snapshot:sql] Interface_Link (connected_to):\n%s", _render_spanner_query(query_links, params))
             for row in sn.execute_sql(query_links, params=params, param_types=param_types):
                 a, b = row
+                logger.debug(f"[snapshot]   connected_to: {a} <-> {b}")
                 snapshot_data["edges"].append({"source": a, "target": b, "relation": "connected_to"})
                 snapshot_data["edges"].append({"source": b, "target": a, "relation": "connected_to"})
+                connected_to_count += 1
+            logger.debug(f"[snapshot] connected_to pairs: {connected_to_count} ({connected_to_count * 2} directed edges)")
 
             # ── 5. ospf_peer edges (router ↔ router via shared PhysicalLink) ─
             # Two routers sharing a p2p PhysicalLink are OSPF peers.
+            ospf_peer_count = 0
             query_ospf = f"""
                 SELECT DISTINCT r1.id AS router_a, r2.id AS router_b
                 FROM PhysicalLink pl
@@ -263,11 +308,15 @@ class SpannerDataset:
                   AND (il2.valid_end_ts > @ts OR il2.valid_end_ts IS NULL)
                   AND r1.id != r2.id
             """
+            logger.debug("[snapshot:sql] ospf_peer:\n%s", _render_spanner_query(query_ospf, params))
             for row in sn.execute_sql(query_ospf, params=params, param_types=param_types):
                 ra, rb = row
                 if ra != rb:
+                    logger.debug(f"[snapshot]   ospf_peer: {ra} <-> {rb}")
                     snapshot_data["edges"].append({"source": ra, "target": rb, "relation": "ospf_peer"})
                     snapshot_data["edges"].append({"source": rb, "target": ra, "relation": "ospf_peer"})
+                    ospf_peer_count += 1
+            logger.debug(f"[snapshot] ospf_peer pairs: {ospf_peer_count}")
 
             # ── 6. BGP Sessions ──────────────────────────────────────────────
             bgp_to_router: Dict[str, str] = {}  # bgp_session_id → router_id
@@ -281,6 +330,7 @@ class SpannerDataset:
                 WHERE bs.valid_start_ts <= @ts
                   AND (bs.valid_end_ts > @ts OR bs.valid_end_ts IS NULL)
             """
+            logger.debug("[snapshot:sql] BGPSession:\n%s", _render_spanner_query(query_bgp, params))
             for row in sn.execute_sql(query_bgp, params=params, param_types=param_types):
                 bs_id, vrf_id, peer_ip, bs_status, bs_start, router_id = row
                 bgp_state = 1.0 if bs_status and bs_status.lower() == "established" else 0.0
@@ -288,6 +338,10 @@ class SpannerDataset:
                 if bs_start and hasattr(bs_start, "tzinfo") and bs_start.tzinfo is not None:
                     bs_start = bs_start.replace(tzinfo=None)
                 bgp_to_router[bs_id] = router_id
+                logger.debug(
+                    f"[snapshot]   bgp_session: id={bs_id} peer_ip={peer_ip} status={bs_status} "
+                    f"bgp_state={bgp_state} vrf={vrf_id} router={router_id} start={bs_start}"
+                )
                 snapshot_data["nodes"].append({
                     "id": bs_id,
                     "type": "bgp_session",
@@ -304,6 +358,7 @@ class SpannerDataset:
 
                 # session_on edge: bgp_session → router
                 if router_id:
+                    logger.debug(f"[snapshot]   session_on edge: {bs_id} -> {router_id}")
                     snapshot_data["edges"].append({
                         "source": bs_id,
                         "target": router_id,
@@ -332,16 +387,20 @@ class SpannerDataset:
                   AND v1.router_id != v2.router_id
             """
             bgp_peer_pairs = set()
+            logger.debug("[snapshot:sql] bgp_peer:\n%s", _render_spanner_query(query_bgp_peer, params))
             for row in sn.execute_sql(query_bgp_peer, params=params, param_types=param_types):
                 ra, rb = row
                 pair = tuple(sorted([ra, rb]))
                 if pair not in bgp_peer_pairs:
                     bgp_peer_pairs.add(pair)
+                    logger.debug(f"[snapshot]   bgp_peer: {ra} <-> {rb}")
                     snapshot_data["edges"].append({"source": ra, "target": rb, "relation": "bgp_peer"})
                     snapshot_data["edges"].append({"source": rb, "target": ra, "relation": "bgp_peer"})
+            logger.debug(f"[snapshot] bgp_peer pairs: {len(bgp_peer_pairs)}")
 
             # ── 8. Prometheus metrics ────────────────────────────────────────
             t_start = timestamp - datetime.timedelta(minutes=self.interval_minutes)
+            logger.debug(f"[snapshot] Metrics window: {t_start.isoformat()} -> {timestamp.isoformat()}")
 
             PROMETHEUS_METRIC_MAP = {
                 # interface
@@ -380,15 +439,20 @@ class SpannerDataset:
 
             # Accumulators: {target_id: {metric_key: [values]}}
             prom_agg: Dict[str, Dict[str, list]] = {}
+            metrics_row_count = 0
 
+            logger.debug("[snapshot:sql] NetworkMetrics:\n%s", _render_spanner_query(query_metrics, params_m))
             for row in sn.execute_sql(query_metrics, params=params_m, param_types=ptypes_m):
                 node_name, iface_name, metric_name, value, labels_json = row
                 if not node_name or value is None:
+                    logger.debug(f"[snapshot]   metrics row skipped: node_name={node_name!r} value={value!r}")
                     continue
                 entry = PROMETHEUS_METRIC_MAP.get(metric_name)
                 if not entry:
+                    logger.debug(f"[snapshot]   metrics row skipped: unknown metric={metric_name!r}")
                     continue
                 scope, field, _ = entry
+                metrics_row_count += 1
 
                 labels: Dict = {}
                 try:
@@ -401,8 +465,10 @@ class SpannerDataset:
                     if iface_name:
                         target_id = f"{node_name}:interface:{iface_name}"
                         prom_agg.setdefault(target_id, {}).setdefault(field, []).append(float(value))
+                        logger.debug(f"[snapshot]   metric[interface] key={target_id} field={field} value={value}")
                 elif scope == "router":
                     prom_agg.setdefault(node_name, {}).setdefault(field, []).append(float(value))
+                    logger.debug(f"[snapshot]   metric[router] key={node_name} field={field} value={value}")
                 elif scope == "bgp_or_router":
                     # Map to router-level sum AND to per-session if peer label available
                     prom_agg.setdefault(node_name, {}).setdefault("pfx_count_router", []).append(float(value))
@@ -411,20 +477,24 @@ class SpannerDataset:
                     if peer_ip:
                         session_key = f"bgp:{node_name}:{peer_ip}"
                         prom_agg.setdefault(session_key, {}).setdefault("pfx_count_session", []).append(float(value))
+                        logger.debug(f"[snapshot]   metric[bgp_session] key={session_key} pfx_count_session={value}")
+                    logger.debug(f"[snapshot]   metric[bgp_or_router] router_key={node_name} pfx_count_router={value}")
+
+            logger.debug(f"[snapshot] Metrics rows processed: {metrics_row_count}; unique target keys: {len(prom_agg)}")
 
             # Average all accumulated samples
             avg_metrics: Dict[str, Dict[str, float]] = {
                 tid: {k: sum(vs) / len(vs) for k, vs in mdict.items() if vs}
                 for tid, mdict in prom_agg.items()
             }
+            logger.debug(f"[snapshot] avg_metrics keys: {sorted(avg_metrics.keys())}")
 
-            # Build lookup: interface_name_on_router → interface node
-            # id format for interfaces: "{router_id}:interface:{iface_name}"
+            # Build lookup: router_id → hostname (for resolving interface metric keys)
             # Prometheus uses node_name (hostname) and interface name
-            # Build hostname → router_id map
-            hostname_to_router_id: Dict[str, str] = {
-                n["hostname"]: n["id"] for n in snapshot_data["nodes"] if n["type"] == "router"
+            router_id_to_hostname: Dict[str, str] = {
+                n["id"]: n["hostname"] for n in snapshot_data["nodes"] if n["type"] == "router"
             }
+            logger.debug(f"[snapshot] router_id_to_hostname: {router_id_to_hostname}")
 
             # Apply metrics to nodes
             for node in snapshot_data["nodes"]:
@@ -432,11 +502,16 @@ class SpannerDataset:
 
                 if ntype == "interface":
                     iid = node["id"]
-                    # Try key as "{hostname}:interface:{iface_name}"
-                    host = hostname_to_router_id.get(iface_ids.get(iid, ""), "")
-                    iface_key = f"{host}:interface:{node['name']}" if host else iid
+                    # Resolve: interface_id → router_id → hostname
+                    # Prometheus metric keys are stored as "{hostname}:interface:{iface_name}"
+                    hostname = router_id_to_hostname.get(iface_ids.get(iid, ""), "")
+                    iface_key = f"{hostname}:interface:{node['name']}" if hostname else iid
 
                     m = avg_metrics.get(iface_key, {})
+                    if not m:
+                        logger.debug(f"[snapshot]   interface {node['name']} (key={iface_key}): no metrics found")
+                    else:
+                        logger.debug(f"[snapshot]   interface {node['name']} (key={iface_key}): metrics={m}")
                     node["rx_drops"] = m.get("rx_drops", 0.0)
                     node["tx_drops"] = m.get("tx_drops", 0.0)
                     mtu_raw = m.get("mtu_raw", 0.0)
@@ -448,36 +523,47 @@ class SpannerDataset:
                     # node_network_up overrides the CRD-derived state if present
                     if "net_up" in m:
                         node["state"] = float(m["net_up"] > 0)
+                        logger.debug(f"[snapshot]   interface {node['name']}: net_up override -> state={node['state']}")
 
                     # Compute utilisation (bits per second / speed)
                     spd = node.get("speed_bps", 1e9)
                     if spd > 0:
                         node["tx_util"] = min(node["tx_bytes_rate"] * 8 / spd, 1.0)
                         node["rx_util"] = min(node["rx_bytes_rate"] * 8 / spd, 1.0)
+                    logger.debug(
+                        f"[snapshot]   interface {node['name']}: tx_util={node['tx_util']:.4f} "
+                        f"rx_util={node['rx_util']:.4f} rx_errs_rate={node['rx_errs_rate']}"
+                    )
 
                 elif ntype == "router":
                     hostname = node.get("hostname", "")
                     m = avg_metrics.get(hostname, {})
+                    if not m:
+                        logger.debug(f"[snapshot]   router {hostname}: no metrics found")
+                    else:
+                        logger.debug(f"[snapshot]   router {hostname}: metrics={m}")
                     node["cpu"] = m.get("cpu", 0.0)
                     mem_bytes = m.get("mem_bytes", 0.0)
                     node["mem"] = min(mem_bytes / (4 * 1024 * 1024 * 1024), 1.0)
                     node["ospf_num_routes"] = m.get("ospf_num_routes", 0.0)
                     # Sum per-peer pfx_count_router values already summed via pfx_count_router
                     node["pfx_count_norm"] = m.get("pfx_count_router", 0.0)
+                    logger.debug(
+                        f"[snapshot]   router {hostname}: cpu={node['cpu']} mem={node['mem']:.4f} "
+                        f"ospf_routes={node['ospf_num_routes']} pfx_count_norm={node['pfx_count_norm']}"
+                    )
 
                 elif ntype == "bgp_session":
                     peer_ip = node.get("peer_ip", "")
-                    # Find hostname for this session's router
                     router_id = node.get("router_id", "")
-                    # Reverse lookup: router_id → hostname
-                    hostname = ""
-                    for n in snapshot_data["nodes"]:
-                        if n["type"] == "router" and n["id"] == router_id:
-                            hostname = n.get("hostname", "")
-                            break
+                    hostname = router_id_to_hostname.get(router_id, "")
                     session_key = f"bgp:{hostname}:{peer_ip}" if hostname and peer_ip else ""
                     m_sess = avg_metrics.get(session_key, {})
                     node["pfx_count_raw"] = m_sess.get("pfx_count_session", 0.0)
+                    logger.debug(
+                        f"[snapshot]   bgp_session id={node['id']} peer={peer_ip} key={session_key}: "
+                        f"pfx_count_raw={node['pfx_count_raw']} bgp_state={node['bgp_state']}"
+                    )
 
         logger.info(
             f"Snapshot {timestamp.isoformat()}: "
@@ -559,17 +645,25 @@ class SpannerDataset:
 
 if __name__ == "__main__":
     import sys
+    from pathlib import Path
 
     logging.basicConfig(
-        level=logging.INFO,
+        level=logging.DEBUG,
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
         handlers=[logging.StreamHandler(sys.stdout)],
     )
 
+    _local_creds = str((Path(__file__).resolve().parent.parent / "networkagent.json").resolve())
+    logger.info(_local_creds)
+    creds_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", _local_creds)
+
+    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = creds_path
+    print(f"Using service-account credentials: {creds_path}")
+
     INSTANCE_ID = os.getenv("SPANNER_INSTANCE", "networktopology-instance")
     DATABASE_ID = os.getenv("SPANNER_DATABASE", "networktopology-db")
-    PROJECT_ID = os.getenv("GOOGLE_CLOUD_PROJECT", None)
-    NUM_SNAPSHOTS = 5
+    PROJECT_ID = os.getenv("GOOGLE_CLOUD_PROJECT", "agents-1234")
+    NUM_SNAPSHOTS = 1
     INTERVAL_MINUTES = 5
 
     dataset = SpannerDataset(

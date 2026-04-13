@@ -71,6 +71,23 @@ logging.basicConfig(
 logger = logging.getLogger("local_pipeline")
 
 
+def _debug_check_snapshot(snap: dict, label: str = "snapshot") -> None:
+    """Log counts and warn about any zero numeric values in a snapshot dict."""
+    def _iter_numbers(obj, path=""):
+        if isinstance(obj, dict):
+            for k, v in obj.items():
+                yield from _iter_numbers(v, f"{path}.{k}" if path else k)
+        elif isinstance(obj, list):
+            for i, v in enumerate(obj):
+                yield from _iter_numbers(v, f"{path}[{i}]")
+        elif isinstance(obj, (int, float)):
+            yield path, obj
+
+    fields = list(_iter_numbers(snap))
+    zeros  = [(k, v) for k, v in fields if v == 0]
+    logger.debug("[debug] %s — %d numeric fields, %d zero, %d non-zero",
+                 label, len(fields), len(zeros), len(fields) - len(zeros))
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Step 1 — Ingest
 # ─────────────────────────────────────────────────────────────────────────────
@@ -124,9 +141,13 @@ def step_ingest(args, snapshots_dir: Path) -> list:
     logger.info("Temporal features (rx_err_gradient, prefix_count_delta, session_uptime_norm) computed")
 
     for i, snap in enumerate(snapshots):
+        # ── Debug: check values are non-zero before serialisation ─────────
+        _debug_check_snapshot(snap, label=f"snapshot_{i:04d}")
+
         with open(snapshots_dir / f"snapshot_{i:04d}.pkl", "wb") as f:
             pickle.dump(snap, f)
-        with open(snapshots_dir / f"snapshot_{i:04d}.json", "w") as f:
+        json_path = snapshots_dir / f"snapshot_{i:04d}.json"
+        with open(json_path, "w") as f:
             json.dump(snap, f, indent=2)
 
     logger.info(f"Saved {len(snapshots)} snapshots (pkl + json) to {snapshots_dir}")
@@ -143,6 +164,8 @@ def load_snapshots_from_dir(snapshots_dir: Path) -> list:
         )
     snapshots = [pickle.load(open(p, "rb")) for p in paths]
     logger.info(f"Loaded {len(snapshots)} snapshots from {snapshots_dir}")
+    for i, snap in enumerate(snapshots):
+        _debug_check_snapshot(snap, label=f"snapshot_{i:04d}.pkl")
     return snapshots
 
 
@@ -228,15 +251,17 @@ def parse_args():
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     # GCP / Spanner
-    p.add_argument("--project",          default=os.getenv("GOOGLE_PROJECT"),
-                   help="GCP project ID (or set GOOGLE_PROJECT)")
-    p.add_argument("--spanner-instance", default="networktopology-instance")
-    p.add_argument("--spanner-database", default="networktopology-db")
+    p.add_argument("--project",          default=os.getenv("GOOGLE_CLOUD_PROJECT", "agents-1234"),
+                   help="GCP project ID (or set GOOGLE_CLOUD_PROJECT)")
+    p.add_argument("--spanner-instance", default=os.getenv("SPANNER_INSTANCE", "networktopology-instance"),
+                   help="Spanner instance ID (or set SPANNER_INSTANCE)")
+    p.add_argument("--spanner-database", default=os.getenv("SPANNER_DATABASE", "networktopology-db"),
+                   help="Spanner database ID (or set SPANNER_DATABASE)")
     p.add_argument("--interval-minutes", type=int, default=5,
                    help="Snapshot interval in minutes (default: 5)")
 
     # Data
-    p.add_argument("--num-snapshots",   type=int, default=20)
+    p.add_argument("--num-snapshots",   type=int, default=1)
     p.add_argument("--skip-ingest",     action="store_true",
                    help="Skip ingest; load snapshots from --snapshots-dir")
     p.add_argument("--snapshots-dir",   type=Path,
@@ -283,7 +308,7 @@ def main():
         snapshots = load_snapshots_from_dir(args.snapshots_dir)
     else:
         if not args.project:
-            raise ValueError("--project is required (or set GOOGLE_PROJECT env var)")
+            raise ValueError("--project is required (or set GOOGLE_CLOUD_PROJECT / GOOGLE_PROJECT env var)")
         snapshots = step_ingest(args, snapshots_dir)
 
     # ── Step 2 — Train (scalers + model + cluster stats) ─────────────────────
