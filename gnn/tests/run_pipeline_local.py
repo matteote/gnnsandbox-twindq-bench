@@ -126,8 +126,10 @@ def step_ingest(args, snapshots_dir: Path) -> list:
     for i, snap in enumerate(snapshots):
         with open(snapshots_dir / f"snapshot_{i:04d}.pkl", "wb") as f:
             pickle.dump(snap, f)
+        with open(snapshots_dir / f"snapshot_{i:04d}.json", "w") as f:
+            json.dump(snap, f, indent=2)
 
-    logger.info(f"Saved {len(snapshots)} snapshots to {snapshots_dir}")
+    logger.info(f"Saved {len(snapshots)} snapshots (pkl + json) to {snapshots_dir}")
     return snapshots
 
 
