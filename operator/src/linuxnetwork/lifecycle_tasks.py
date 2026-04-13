@@ -138,8 +138,8 @@ async def _run_ansible_playbook(ip_address:str, playbook: str, extravars: Dict[s
                 inventory={'all': hosts},
                 playbook=playbook,
                 extravars=extravars,
-                quiet=True,
-                verbosity=0
+                quiet=False,
+                verbosity=1
             )
             # Wait for the thread to complete
             thread.join()
@@ -247,7 +247,18 @@ async def _run_ansible_playbook(ip_address:str, playbook: str, extravars: Dict[s
                 # Extract error information — check unreachable first (transient), then task failures
                 error_msg = f"Ansible playbook failed with status: {runner.status}"
 
-                for event in runner.events:
+                all_events = list(runner.events)
+                logger.error(f"Ansible playbook '{playbook}' failed (status={runner.status}, rc={runner.rc}). "
+                             f"Total events: {len(all_events)}")
+
+                # Log every event type so we can see what's happening
+                for event in all_events:
+                    event_type = event.get('event', '')
+                    event_data = event.get('event_data', {})
+                    logger.error(f"  event={event_type} task={event_data.get('task','')!r} "
+                                 f"res_keys={list(event_data.get('res', {}).keys())}")
+
+                for event in all_events:
                     event_type = event.get('event', '')
                     event_data = event.get('event_data', {})
                     res = event_data.get('res', {})
@@ -262,10 +273,11 @@ async def _run_ansible_playbook(ip_address:str, playbook: str, extravars: Dict[s
                         task_name = event_data.get('task', '')
                         msg = res.get('msg', '')
                         stderr = res.get('stderr', '')
+                        stdout = res.get('stdout', '')
                         rc = res.get('rc', None)
 
                         # Prefer the most informative field
-                        raw_detail = msg or stderr or str(res)
+                        raw_detail = msg or stderr or stdout or str(res)
 
                         # Annotate timeout kills (exit code 124 from timeout(1) wrapper)
                         if rc == 124 or 'Killed' in raw_detail or 'exit code 124' in raw_detail:
@@ -273,6 +285,17 @@ async def _run_ansible_playbook(ip_address:str, playbook: str, extravars: Dict[s
                         else:
                             error_msg = f"Task '{task_name}' failed: {raw_detail}" if task_name else raw_detail
                         break
+
+                # Fallback: try runner stdout if still generic
+                if error_msg.startswith("Ansible playbook failed with status:"):
+                    try:
+                        stdout_lines = list(runner.stdout)
+                        if stdout_lines:
+                            stdout_tail = ''.join(stdout_lines[-20:]).strip()
+                            if stdout_tail:
+                                error_msg = f"Ansible stdout: {stdout_tail[-800:]}"
+                    except Exception:
+                        pass
 
                 logger.error(f"Ansible playbook execution failed: {error_msg}")
                 return {
