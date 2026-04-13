@@ -29,13 +29,13 @@ if [ -n "$WRAPPER_PID" ]; then
   pkill -P $WRAPPER_PID 2>/dev/null || true
   kill $WRAPPER_PID 2>/dev/null || true
   sleep 1
-  kill -9 $WRAPPER_PID 2>/dev/null || true
+  kill -TERM $WRAPPER_PID 2>/dev/null || true
 fi
 
 if [ "$side" == "source" ]; then
   iperf_cmd="iperf3.*-c.*$dest_ip.*-p $dest_port"
   # Kill python process
-  pkill -9 -f "traffic_generator.py.*--config.*config_{$dest_port}.json" 2>/dev/null || true
+  pkill -TERM -f "traffic_generator.py.*--config.*config_{$dest_port}.json" 2>/dev/null || true
 fi
 
 if [ "$side" == "destination" ]; then
@@ -43,7 +43,7 @@ if [ "$side" == "destination" ]; then
 fi
 
 # Kill any orphaned iperf3 clients
-pkill -9 -f "$iperf_cmd" 2>/dev/null || true
+pkill -TERM -f "$iperf_cmd" 2>/dev/null || true
 
 sleep 2
 
@@ -65,6 +65,6 @@ if [ -n "$ZOMBIES" ]; then
 fi
 
 # Final cleanup: kill any remaining process references
-pkill -9 -f "$iperf_cmd" 2>/dev/null || true
+pkill -TERM -f "$iperf_cmd" 2>/dev/null || true
 
 exit 0

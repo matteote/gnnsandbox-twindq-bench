@@ -148,34 +148,51 @@ class TrafficGenerator:
         if self.protocol == 'UDP':
             cmd.append('-u')
         
-        logger.info(f"Running iperf3 client {client_id} with {parallel_streams} parallel streams: {' '.join(cmd)}")
-        
-        try:
-            process = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
-            
-            self.processes.append(process)
-            stdout, stderr = await process.communicate()
-            
-            if process.returncode == 0:
-                try:
-                    result = json.loads(stdout.decode())
-                    return result
-                except json.JSONDecodeError as e:
-                    logger.error(f"Failed to parse iperf3 JSON output: {e}")
-                    logger.error(f"Raw output: {stdout.decode()}")
-                    return None
-            else:
-                logger.error(f"iperf3 client {client_id} failed with return code {process.returncode}")
-                logger.error(f"stderr: {stderr.decode()}")
-                return None
+        max_retries = 30
+        retry_delay = 5  # seconds
+
+        for attempt in range(max_retries):
+            logger.info(f"Running iperf3 client {client_id} (Attempt {attempt + 1}/{max_retries}) with {parallel_streams} parallel streams: {' '.join(cmd)}")
+            try:
+                process = await asyncio.create_subprocess_exec(
+                    *cmd,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE
+                )
                 
-        except Exception as e:
-            logger.error(f"Error running iperf3 client {client_id}: {e}")
-            return None
+                self.processes.append(process)
+                stdout, stderr = await process.communicate()
+
+                # Check return code and restart the iperf3 client if it
+                # was an abnormal stop (meaning anything different than a 
+                # normal exit, a SIGHUP or SIGTERM signal will cause a restart)
+                if process.returncode == 0:
+                    try:
+                        result = json.loads(stdout.decode())
+                        return result
+                    except json.JSONDecodeError as e:
+                        logger.error(f"Failed to parse iperf3 JSON output: {e}")
+                        logger.error(f"Raw output: {stdout.decode()}")
+                        return None
+                else:
+                    logger.error(f"iperf3 client {client_id} failed on attempt {attempt + 1} with return code {process.returncode}")
+                    logger.error(f"stderr: {stderr.decode()}")
+                    if attempt < max_retries - 1:
+                        logger.info(f"Retrying in {retry_delay} seconds...")
+                        await asyncio.sleep(retry_delay)
+                    else:
+                        logger.error(f"iperf3 client {client_id} failed after {max_retries} attempts.")
+                        return None
+                    
+            except Exception as e:
+                logger.error(f"Error running iperf3 client {client_id} on attempt {attempt + 1}: {e}")
+                if attempt < max_retries - 1:
+                    logger.info(f"Retrying in {retry_delay} seconds...")
+                    await asyncio.sleep(retry_delay)
+                else:
+                    logger.error(f"iperf3 client {client_id} failed after {max_retries} attempts due to exception.")
+                    return None
+        return None
     
     async def _run_constant_pattern(self):
         """Run constant bandwidth traffic pattern"""
