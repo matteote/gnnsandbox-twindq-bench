@@ -129,6 +129,11 @@ async def _run_ansible_playbook(ip_address:str, playbook: str, extravars: Dict[s
     logger.info(f"Running Ansible playbook: {playbook}")
     logger.info(f"Extra vars: {extravars}")
     
+    # Hard timeout (seconds) for any single Ansible playbook run.
+    # Prevents a hung SSH connection or stalled command from keeping
+    # a resource permanently stuck in "Creating".
+    ANSIBLE_TIMEOUT_SECONDS = 600
+
     def run_ansible(temp_dir):
         """Wrapper function to run ansible_runner.run_async"""
         try:
@@ -141,8 +146,16 @@ async def _run_ansible_playbook(ip_address:str, playbook: str, extravars: Dict[s
                 quiet=False,
                 verbosity=1
             )
-            # Wait for the thread to complete
-            thread.join()
+            # Wait for the thread to complete, but don't block forever.
+            # If Ansible hangs (e.g. SSH stall, tc deadlock) the thread.join()
+            # without a timeout would park the resource in "Creating" indefinitely.
+            thread.join(timeout=ANSIBLE_TIMEOUT_SECONDS)
+            if thread.is_alive():
+                logger.error(
+                    f"Ansible playbook '{playbook}' did not finish within "
+                    f"{ANSIBLE_TIMEOUT_SECONDS}s — treating as failure"
+                )
+                return None
             return runner
         except Exception as e:
             logger.error(f"Ansible execution failed: {e}")

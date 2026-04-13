@@ -28,10 +28,17 @@ logger = logging.getLogger(__name__)
 #########################################################################
 
 @kopf.on.create('google.dev', 'v1', 'linuxnetwork')
-async def create_linuxnetwork(body, spec, name, namespace, uid, logger, **kwargs):
+async def create_linuxnetwork(body, spec, name, namespace, uid, logger, retry=0, **kwargs):
     """Handle LinuxNetwork creation using Ansible"""
     logger.info(f"Creating LinuxNetwork: {name} in namespace: {namespace}")
     logger.info(f"spec {spec}")
+
+    # Idempotency guard: if already Ready (e.g. operator restarted mid-handler after
+    # Ansible succeeded but before kopf recorded completion), skip re-creation entirely.
+    current_phase = body.get('status', {}).get('phase')
+    if current_phase == 'Ready':
+        logger.info(f"LinuxNetwork {name} already in Ready state, skipping re-creation")
+        return
 
     ip_address = await get_ip("automation", "networkvm")
     if ip_address is None:
@@ -39,8 +46,11 @@ async def create_linuxnetwork(body, spec, name, namespace, uid, logger, **kwargs
     logger.info(f"network vm address = {ip_address}")
 
     try:
-        # Update status to indicate creation has started
-        await update_status(name, namespace, "Creating", "Creating Linux network")
+        # Only emit "Creating" on the first attempt.  On kopf retries the resource is
+        # likely already in "Failed" (set below before re-raise) so flipping back to
+        # "Creating" would produce spurious Ready->Creating->Ready churn.
+        if retry == 0:
+            await update_status(name, namespace, "Creating", "Creating Linux network")
 
         # Create the Linux network using Ansible
         result = await create_linux_network(ip_address, spec)
@@ -101,6 +111,24 @@ async def delete_linuxnetwork(body, spec, status, name, namespace, logger, **kwa
     except Exception as e:
         logger.error(f"Error during DockerNetwork deletion {name}: {e}")
         # Don't raise error on delete failure
+
+@kopf.on.resume('google.dev', 'v1', 'linuxnetwork')
+async def resume_linuxnetwork(body, spec, name, namespace, logger, **kwargs):
+    """Handle operator restart against already-created LinuxNetwork resources.
+
+    kopf fires on.resume (not on.create) when the operator restarts and the
+    on.create handler previously completed.  We just log current state here —
+    the periodic monitor will reconcile any drift.  This prevents the operator
+    from re-running the full creation flow (and causing a Creating blip) every
+    time it restarts.
+    """
+    current_phase = body.get('status', {}).get('phase')
+    logger.info(f"Resuming LinuxNetwork {name} (phase={current_phase})")
+    if current_phase != 'Ready':
+        logger.warning(
+            f"LinuxNetwork {name} is not Ready on resume (phase={current_phase}). "
+            f"The periodic monitor will attempt to reconcile state."
+        )
 
 @kopf.timer('google.dev', 'v1', 'linuxnetwork', interval=300.0)
 async def monitor_linuxnetwork(body, spec, name, namespace, uid, logger, **kwargs):
