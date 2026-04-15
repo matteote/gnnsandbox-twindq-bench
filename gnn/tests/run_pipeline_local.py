@@ -101,7 +101,7 @@ def step_ingest(args, snapshots_dir: Path) -> list:
     logger.info("=" * 60)
 
     snapshots_dir.mkdir(parents=True, exist_ok=True)
-    interval = args.interval_minutes or 0.5  # default: 30 s for compressed traffic
+    interval = args.interval_minutes or 5  # default: 5-minute snapshot cadence
 
     logger.info(
         f"Fetching {args.num_snapshots} snapshots from "
@@ -140,7 +140,7 @@ def step_ingest(args, snapshots_dir: Path) -> list:
 
     # Compute temporal gradient/delta features across the ordered snapshot sequence
     SpannerDataset.compute_temporal_features(snapshots, interval_seconds=interval * 60)
-    logger.info("Temporal features (rx_err_gradient, prefix_count_delta, vrf_route_count_delta, throughput_delta) computed")
+    logger.info("Temporal features (rx_err_gradient, prefix_count_delta, session_uptime_norm) computed")
 
     for i, snap in enumerate(snapshots):
         # ── Debug: check values are non-zero before serialisation ─────────
@@ -259,12 +259,11 @@ def parse_args():
                    help="Spanner instance ID (or set SPANNER_INSTANCE)")
     p.add_argument("--spanner-database", default=os.getenv("SPANNER_DATABASE", "networktopology-db"),
                    help="Spanner database ID (or set SPANNER_DATABASE)")
-    p.add_argument("--interval-minutes", type=float, default=0.5,
-                   help="Snapshot interval in minutes (default: 0.5 = 30 s for "
-                        "240x time-compressed traffic; use 5 for real-world cadence)")
+    p.add_argument("--interval-minutes", type=int, default=5,
+                   help="Snapshot interval in minutes (default: 5)")
 
     # Data
-    p.add_argument("--num-snapshots",   type=int, default=576)
+    p.add_argument("--num-snapshots",   type=int, default=1)
     p.add_argument("--skip-ingest",     action="store_true",
                    help="Skip ingest; load snapshots from --snapshots-dir")
     p.add_argument("--snapshots-dir",   type=Path,

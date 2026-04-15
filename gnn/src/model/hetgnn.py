@@ -17,14 +17,11 @@ class HetGNN(nn.Module):
 
         # Spatial Graph Convolutions
         self.convs = nn.ModuleList()
-        for i in range(num_layers):
-            conv_dict = {}
-            for edge_type in metadata[1]:
-                # SAGEConv supports bipartite message passing for heterogeneous graphs
-                if i == 0:
-                    conv_dict[edge_type] = SAGEConv((-1, -1), hidden_channels)
-                else:
-                    conv_dict[edge_type] = SAGEConv(hidden_channels, hidden_channels)
+        for _ in range(num_layers):
+            conv_dict = {
+                edge_type: SAGEConv(hidden_channels, hidden_channels)
+                for edge_type in metadata[1]
+            }
             self.convs.append(HeteroConv(conv_dict, aggr='mean'))
 
         # Projections
