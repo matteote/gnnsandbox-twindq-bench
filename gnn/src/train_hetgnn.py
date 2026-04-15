@@ -227,7 +227,7 @@ def train_hetgnn_on_snapshots(
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
         optimizer, mode='min', factor=0.5, patience=5, min_lr=1e-6
     )
-    criterion = nn.MSELoss(reduction='sum')
+    criterion = nn.MSELoss(reduction='mean')
 
     logger.info("Model created (parameters will be initialized on first forward pass)")
     logger.info(f"Learning rate scheduler: ReduceLROnPlateau (factor=0.5, patience=5)")
@@ -499,10 +499,11 @@ def run_training_pipeline():
                     logger.error(f"Error fetching snapshot at {ts}: {e}")
 
             # Compute temporal gradient/delta features across consecutive snapshots
-            SpannerDataset.compute_temporal_features(
-                snapshot_objects, interval_seconds=INTERVAL_MINUTES * 60
-            )
-            logger.info("Temporal features computed across snapshot sequence")
+            # SpannerDataset.compute_temporal_features(
+            #     snapshot_objects, interval_seconds=INTERVAL_MINUTES * 60
+            # )
+            # logger.info("Temporal features computed across snapshot sequence")
+            logger.info("Temporal features calculation skipped (TEMPORAL_FEATURE_DISABLED)")
 
             # Dump JSON copies for offline testing / inspection
             snap_dir = pathlib.Path("snapshots")

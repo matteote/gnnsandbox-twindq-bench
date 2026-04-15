@@ -24,7 +24,7 @@ class HetGNN(nn.Module):
                     conv_dict[edge_type] = SAGEConv((-1, -1), hidden_channels)
                 else:
                     conv_dict[edge_type] = SAGEConv(hidden_channels, hidden_channels)
-            self.convs.append(HeteroConv(conv_dict, aggr='sum'))
+            self.convs.append(HeteroConv(conv_dict, aggr='mean'))
 
         # Projections
         self.lin_dict = nn.ModuleDict()
