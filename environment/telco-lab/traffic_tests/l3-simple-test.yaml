@@ -7,6 +7,8 @@ metadata:
 spec:
   source_devices:
     - dev1  # First source device
+    - dev2
+    - dev3
   destination_device: devhub
   protocol: TCP
   port_mode: auto # Self allocated by the traffic test operator
