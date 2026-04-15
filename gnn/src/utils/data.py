@@ -71,11 +71,14 @@ class SpannerDataset:
         num_snapshots: int = 50,
         interval_minutes: int = 5,
         project_id: Optional[str] = None,
+        from_time: Optional[datetime.datetime] = None,
+        to_time: Optional[datetime.datetime] = None,
     ):
         logger.info(
             f"Initializing SpannerDataset: instance_id={instance_id}, "
             f"database_id={database_id}, num_snapshots={num_snapshots}, "
-            f"interval_minutes={interval_minutes}, project_id={project_id}"
+            f"interval_minutes={interval_minutes}, project_id={project_id}, "
+            f"from_time={from_time}, to_time={to_time}"
         )
 
         creds_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "/agent/networkagent.json")
@@ -104,6 +107,8 @@ class SpannerDataset:
         self.database = self.instance.database(database_id)
         self.num_snapshots = num_snapshots
         self.interval_minutes = interval_minutes
+        self.from_time = from_time
+        self.to_time = to_time
         logger.info("SpannerDataset initialized successfully")
 
     def _get_latest_timestamp(self) -> datetime.datetime:
@@ -133,14 +138,34 @@ class SpannerDataset:
         return datetime.datetime.utcnow()
 
     def _get_timestamps(self) -> List[datetime.datetime]:
-        """Generates a list of timestamps ending at the latest data timestamp."""
-        end_time = self._get_latest_timestamp()
-        timestamps = []
-        for i in range(self.num_snapshots):
-            delta = datetime.timedelta(
-                minutes=self.interval_minutes * (self.num_snapshots - 1 - i)
-            )
-            timestamps.append(end_time - delta)
+        """Generates a list of timestamps stepping backwards from an end time.
+
+        End time selection:
+            - ``to_time`` provided → use it directly.
+            - ``to_time`` not provided → query Spanner for the latest data timestamp.
+
+        Number of snapshots:
+            - ``from_time`` provided → step back at ``interval_minutes`` until the
+              next step would go before ``from_time`` (``num_snapshots`` is ignored).
+            - ``from_time`` not provided → generate exactly ``num_snapshots`` timestamps.
+        """
+        end_time = self.to_time if self.to_time is not None else self._get_latest_timestamp()
+
+        step = datetime.timedelta(minutes=self.interval_minutes)
+
+        if self.from_time is not None:
+            timestamps = []
+            ts = end_time
+            while ts >= self.from_time:
+                timestamps.append(ts)
+                ts = ts - step
+            timestamps.reverse()
+        else:
+            timestamps = []
+            for i in range(self.num_snapshots):
+                delta = step * (self.num_snapshots - 1 - i)
+                timestamps.append(end_time - delta)
+
         logger.info(
             f"Generated {len(timestamps)} timestamps from "
             f"{timestamps[0].isoformat()} to {timestamps[-1].isoformat()}"
@@ -666,12 +691,17 @@ if __name__ == "__main__":
     NUM_SNAPSHOTS = 1
     INTERVAL_MINUTES = 5
 
+    FROM_TIME = datetime.datetime(2026, 4, 14, 18, 0, 0)
+    TO_TIME = datetime.datetime(2026, 4, 14, 21, 0, 0)
+
     dataset = SpannerDataset(
         instance_id=INSTANCE_ID,
         database_id=DATABASE_ID,
         num_snapshots=NUM_SNAPSHOTS,
         interval_minutes=INTERVAL_MINUTES,
         project_id=PROJECT_ID,
+        # from_time=FROM_TIME,
+        # to_time=TO_TIME,
     )
 
     timestamps = dataset._get_timestamps()
