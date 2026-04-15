@@ -158,6 +158,7 @@ def _ensure_model_loaded(manifest: dict):
         metadata=metadata,
         hidden_channels=checkpoint.get("hidden_channels", 64),
         num_layers=checkpoint.get("num_layers", 2),
+        dropout=checkpoint.get("dropout", 0.0),  # 0.0 for backwards compat with old checkpoints
     )
     model.set_input_dims(input_dims)
     model.load_state_dict(checkpoint["model_state_dict"])

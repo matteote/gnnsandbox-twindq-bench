@@ -35,6 +35,7 @@ INTERVAL_MINUTES = float(os.getenv("INTERVAL_MINUTES", "0.5"))
 # ── Model architecture constants ─────────────────────────────────────────────
 HIDDEN_CHANNELS = int(os.getenv("HIDDEN_CHANNELS", "64"))
 NUM_LAYERS      = int(os.getenv("NUM_LAYERS", "2"))
+DROPOUT         = float(os.getenv("DROPOUT", "0.3"))
 
 # Configure logging
 logging.basicConfig(
@@ -142,6 +143,7 @@ def train_hetgnn_on_snapshots(
     output_dir: str = ".",
     hidden_channels: int = HIDDEN_CHANNELS,
     num_layers: int = NUM_LAYERS,
+    dropout: float = DROPOUT,
     epochs_override: int = None,
 ) -> tuple:
     """Core HetGNN training function. Accepts pre-loaded snapshot dicts.
@@ -160,6 +162,8 @@ def train_hetgnn_on_snapshots(
         output_dir:       Directory to write artefacts (created if absent).
         hidden_channels:  Hidden dimension for HetGNN layers.
         num_layers:       Number of HetGNN message-passing layers.
+        dropout:          Dropout probability applied after input projection and
+                          between conv layers (0.0 disables dropout).
         epochs_override:  Override the EPOCHS constant (useful for quick local runs).
 
     Returns:
@@ -219,8 +223,9 @@ def train_hetgnn_on_snapshots(
     logger.info(f"Dataset split: {len(train_snapshots)} training, {len(val_snapshots)} validation snapshots")
 
     # ── Build model ──────────────────────────────────────────────────────────
-    logger.info(f"Creating HetGNN model with hidden_channels={hidden_channels}, num_layers={num_layers}")
-    model = HetGNN(metadata, hidden_channels, num_layers)
+    out_channels = hidden_channels  # autoencoder symmetric dims
+    logger.info(f"Creating HetGNN model with hidden_channels={hidden_channels}, num_layers={num_layers}, dropout={dropout}")
+    model = HetGNN(metadata, hidden_channels, out_channels, num_layers, dropout=dropout)
     model.set_input_dims(input_dims)
 
     optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE)
@@ -415,6 +420,7 @@ def train_hetgnn_on_snapshots(
             "model_state_dict": model.state_dict(),
             "hidden_channels":  hidden_channels,
             "num_layers":       num_layers,
+            "dropout":          dropout,
             "val_loss":         best_val_loss,
         },
         local_model_path,
