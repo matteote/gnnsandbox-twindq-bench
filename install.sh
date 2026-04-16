@@ -906,6 +906,7 @@ DeployOperator()
     kubectl apply -f config/traffic.yaml
     kubectl apply -f config/free5gc/
     kubectl apply -f config/transport/
+    kubectl apply -f config/networkfailure.yaml
 
     cd ..
 }

@@ -77,6 +77,7 @@ def legacy_import_modules():
         import linuxnetwork.lifecycle
         import device.lifecycle
         import traffictest.lifecycle
+        import networkfailure.lifecycle
 
     if os.getenv("FREE5GC") is not None:
         logger.info("FREE5GC Lifecycle")

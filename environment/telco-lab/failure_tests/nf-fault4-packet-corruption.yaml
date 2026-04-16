@@ -1,0 +1,46 @@
+# NetworkFailure: Hardware Degradation / Packet Corruption (SFP Simulation)
+#
+# Fault Type   : PACKET_CORRUPTION
+# Target       : P1, interface eth2 (P1-to-P3 core link)
+# Impact       : Progressive packet corruption simulating a degrading optical SFP.
+#                Initially unnoticeable (slight retransmissions), escalating to
+#                OSPF LSA and LDP drops, microburst packet drops, and eventual
+#                routing flaps. Models slow hardware failure over time.
+#
+# GNN Detection Signatures:
+#   STGNN  : Observes accelerating "Trajectory of Health" vector drift on
+#             rx_errors_acceleration 35+ minutes prior to terminal failure
+#   HetGNN : Targets hardware layer Interface Metric; keeps Config sub-embedding normal
+#   D-GAT  : Maps directional nature of P1 TX corruption (asymmetric error pattern)
+#
+# Mechanism: Linux tc netem
+#   Injects CRC errors AND random packet loss at the specified rate using the
+#   Linux traffic control netem (network emulator) module on the P1 container.
+#   This simulates a failing optical transceiver without modifying any router
+#   protocol configuration, leaving the control plane believing the link is healthy.
+#
+# Usage:
+#   kubectl apply  -f nf-fault4-packet-corruption.yaml    # Start SFP degradation
+#   kubectl delete -f nf-fault4-packet-corruption.yaml    # Restore clean link
+---
+apiVersion: google.dev/v1
+kind: NetworkFailure
+metadata:
+  name: fault4-packet-corruption
+  namespace: default
+  labels:
+    scenario: l3vpn-hub-spoke
+    fault-type: packet-corruption
+    severity: medium
+spec:
+  failureType: PACKET_CORRUPTION
+  infrastructureRef: l3vpn-hub-spoke-infra
+  target:
+    router: p1
+    # eth2 is the P1-to-P3 provider core link (VLAN 302, 172.16.40.0/24)
+    interface: eth2
+  parameters:
+    # 5% corruption + loss rate simulates early-stage SFP degradation.
+    # Increase to 20% for visible routing instability, 50% for terminal failure.
+    # Format: percentage with % sign.
+    error_rate: "5%"

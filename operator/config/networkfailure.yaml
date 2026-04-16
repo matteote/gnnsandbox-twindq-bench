@@ -1,0 +1,358 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: networkfailures.google.dev
+  labels:
+    type: network
+spec:
+  scope: Namespaced
+  group: google.dev
+  names:
+    kind: NetworkFailure
+    plural: networkfailures
+    singular: networkfailure
+    shortNames:
+      - nf
+  versions:
+    - name: v1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          description: |
+            NetworkFailure defines a controlled fault injection scenario in the network operator.
+
+            A NetworkFailure resource encodes a single, reversible network fault that is injected
+            into the running VyOS router topology when the resource is created, and fully restored
+            when the resource is deleted.
+
+            Supported Failure Types:
+            - MTU_MISMATCH: Alters the MTU on a router interface causing silent large-packet drops
+              while leaving the control plane intact.
+            - BGP_SESSION_DOWN: Tears down a specific eBGP/iBGP session, withdrawing customer routes
+              and causing traffic blackouts on the affected VPN.
+            - PROCESS_CRASH: Simulates a BGP process crash or loopback-interface disable on a
+              Route Reflector, testing reconvergence and backup mechanisms.
+            - PACKET_CORRUPTION: Progressively injects CRC errors or packet drops using Linux tc
+              to simulate a failing optical SFP on a provider core link.
+            - LINK_DOWN: Simulates a physical cable pull or port failure, triggering immediate
+              L1/L2 down events and forcing OSPF/LDP to recalculate paths.
+            - OSPF_AREA_MISMATCH: Places an interface in the wrong OSPF area, causing an adjacency
+              failure without bringing down the physical link.
+            - DUPLICATE_IP: Assigns an IP address already in use by another node, causing routing
+              instability, intermittent connectivity, and ARP flapping.
+
+            Lifecycle:
+            - CREATE: The operator injects the fault and saves the original state in status.original_state.
+            - DELETE: The operator restores the original configuration using the saved state.
+            - Status tracks the injection phase (Injecting, Active, Restoring, Restored, Failed).
+          required:
+            - spec
+          properties:
+            spec:
+              type: object
+              required:
+                - failureType
+                - infrastructureRef
+                - target
+              description: |
+                Specification of the network fault to inject.
+              properties:
+                failureType:
+                  type: string
+                  enum:
+                    - MTU_MISMATCH
+                    - BGP_SESSION_DOWN
+                    - PROCESS_CRASH
+                    - PACKET_CORRUPTION
+                    - LINK_DOWN
+                    - OSPF_AREA_MISMATCH
+                    - DUPLICATE_IP
+                  description: |
+                    Type of network fault to inject. Determines which parameters are required
+                    and which ansible tasks will be executed.
+
+                    MTU_MISMATCH:
+                      Alters the MTU on a specific router interface (e.g., PE1 eth1) from the
+                      standard 1500 bytes to a lower value (e.g., 1400). Large BGP UPDATE messages
+                      and data packets exceeding the new MTU are silently dropped while the
+                      control plane and OSPF adjacencies remain healthy.
+                      Required parameters: target.router, target.interface, parameters.mtu
+
+                    BGP_SESSION_DOWN:
+                      Shuts down the eBGP session between a Provider Edge and a Customer Edge by
+                      removing the BGP neighbor configuration from the specified VRF. Customer
+                      routes are withdrawn, causing a total blackout for the affected VPN service.
+                      Required parameters: target.router, target.peer_ip, target.vrf,
+                                          parameters.remote_as
+
+                    PROCESS_CRASH:
+                      Simulates a crash of the BGP daemon (bgpd) on a Route Reflector, or
+                      disables its loopback interface, dropping all PE-to-RR BGP sessions.
+                      Required parameters: target.router, parameters.method
+
+                    PACKET_CORRUPTION:
+                      Uses Linux tc (traffic control) with the netem module to inject CRC errors
+                      or random packet drops on a specific interface, simulating a degrading
+                      optical SFP or a failing hardware component.
+                      Required parameters: target.router, target.interface, parameters.error_rate
+
+                    LINK_DOWN:
+                      Brings down a router interface at the Linux level using 'ip link set down',
+                      simulating a physical cable pull or port hardware failure. Triggers immediate
+                      L1/L2 down events on both ends of the link.
+                      Required parameters: target.router, target.interface
+
+                    OSPF_AREA_MISMATCH:
+                      Modifies the OSPF area assignment of a specific interface via VyOS
+                      configuration commands, placing it in the wrong area. The OSPF adjacency
+                      fails without bringing down the physical link, simulating an operator
+                      misconfiguration during maintenance.
+                      Required parameters: target.router, target.interface, parameters.wrong_area,
+                                          parameters.correct_area
+
+                    DUPLICATE_IP:
+                      Adds an IP address that is already assigned to another critical node
+                      (e.g., a core router's loopback or P-to-P link address) to a target
+                      interface. This causes severe ARP flapping, routing instability, and
+                      intermittent connectivity throughout the network.
+                      Required parameters: target.router, target.interface,
+                                          parameters.duplicate_ip
+
+                infrastructureRef:
+                  type: string
+                  description: |
+                    Name of the VyOSInfrastructure resource that defines the network topology
+                    this failure will be injected into. The operator uses this reference to
+                    retrieve router management IP addresses and interface mappings.
+
+                    Example: "l3vpn-hub-spoke-infra"
+
+                target:
+                  type: object
+                  required:
+                    - router
+                  description: |
+                    Identifies the specific network element (router, interface, or BGP session)
+                    that will be affected by the fault injection.
+                  properties:
+                    router:
+                      type: string
+                      description: |
+                        Name of the router container on the network VM that will be targeted.
+                        Must correspond to a router name defined in the referenced
+                        VyOSInfrastructure resource.
+
+                        Examples: "pe1", "pe2", "pe3", "rr1", "rr2", "p1", "p2", "p3", "p4",
+                                  "ce1-spoke", "ce1-hub", "ce2-spoke"
+
+                    interface:
+                      type: string
+                      description: |
+                        Name of the network interface on the target router. Required for
+                        MTU_MISMATCH, PACKET_CORRUPTION, LINK_DOWN, OSPF_AREA_MISMATCH,
+                        and DUPLICATE_IP failure types.
+
+                        Examples: "eth1", "eth2", "eth3", "lo"
+
+                    peer_ip:
+                      type: string
+                      description: |
+                        IP address of the BGP peer whose session will be torn down.
+                        Required for BGP_SESSION_DOWN failure type.
+
+                        Examples: "10.80.80.2", "10.50.50.2"
+
+                    vrf:
+                      type: string
+                      description: |
+                        Name of the VRF containing the BGP neighbor configuration to be removed.
+                        Required for BGP_SESSION_DOWN failure type. Use "global" for the
+                        default routing table (e.g., for iBGP sessions between PEs and RRs).
+
+                        Examples: "BLUE_HUB", "BLUE_SPOKE", "global"
+
+                parameters:
+                  type: object
+                  description: |
+                    Failure-type-specific configuration parameters. Only the parameters
+                    relevant to the selected failureType need to be provided.
+                  properties:
+                    mtu:
+                      type: integer
+                      minimum: 576
+                      maximum: 9216
+                      description: |
+                        Target MTU value to set on the interface for MTU_MISMATCH failures.
+                        The original MTU (typically 1500) is saved in status.original_state
+                        and restored on deletion.
+
+                        Recommended values:
+                        - 1400: Causes silent drops for typical BGP UPDATE messages
+                        - 1280: Minimum IPv6 MTU, causes widespread fragmentation issues
+                        - 576: Minimum IPv4 MTU, extreme misconfiguration scenario
+
+                        Default: 1400
+
+                    error_rate:
+                      type: string
+                      pattern: '^[0-9]+(\.[0-9]+)?%$'
+                      description: |
+                        Packet corruption or drop rate to inject for PACKET_CORRUPTION failures.
+                        Expressed as a percentage. Uses Linux tc netem module.
+
+                        Examples:
+                        - "1%": Light corruption, simulates early SFP degradation
+                        - "5%": Moderate corruption, causes visible retransmissions
+                        - "20%": Heavy corruption, causes routing protocol instability
+                        - "50%": Severe corruption, simulates near-failed hardware
+
+                        Default: "5%"
+
+                    method:
+                      type: string
+                      enum:
+                        - process_kill
+                        - loopback_disable
+                      description: |
+                        Method to use for PROCESS_CRASH failure simulation.
+
+                        process_kill:
+                          Sends SIGKILL to the bgpd process inside the router container,
+                          simulating a BGP daemon crash. VyOS will attempt to restart the
+                          process, so the failure may self-heal after some time.
+
+                        loopback_disable:
+                          Administratively shuts down the loopback interface (lo) on the
+                          router. Since iBGP router-IDs are sourced from loopback addresses,
+                          this drops all iBGP sessions without directly killing the daemon.
+                          More persistent than process_kill.
+
+                        Default: "loopback_disable"
+
+                    remote_as:
+                      type: integer
+                      minimum: 1
+                      maximum: 4294967295
+                      description: |
+                        BGP Autonomous System number of the peer whose session is being torn
+                        down. Required for BGP_SESSION_DOWN to correctly reconstruct the
+                        neighbor configuration during restoration.
+
+                        Examples:
+                        - 65001: Provider AS (for iBGP sessions)
+                        - 65035: Customer AS (for eBGP PE-CE sessions)
+
+                    wrong_area:
+                      type: string
+                      description: |
+                        The incorrect OSPF area ID to assign to the interface for
+                        OSPF_AREA_MISMATCH failures. Must be different from the correct area.
+
+                        Examples: "0.0.0.1", "0.0.0.99", "1.1.1.1"
+
+                    correct_area:
+                      type: string
+                      description: |
+                        The original, correct OSPF area ID for the interface. Used during
+                        restoration to revert the area assignment. If not provided, the
+                        operator will attempt to read it from the VyOSInfrastructure spec.
+
+                        Examples: "0.0.0.0"
+
+                    duplicate_ip:
+                      type: string
+                      description: |
+                        The IP address (in CIDR notation) to assign as a duplicate on the
+                        target interface. This should be an IP already used by another
+                        critical network node to maximize the routing disruption impact.
+
+                        Examples:
+                        - "172.16.30.1/24": Duplicate of P1's P1-P2 link address
+                        - "10.0.0.3/32": Duplicate of P1's loopback address
+
+            status:
+              type: object
+              description: |
+                Runtime status of the fault injection, tracking the lifecycle of the failure
+                from injection through restoration.
+              x-kubernetes-preserve-unknown-fields: true
+              properties:
+                phase:
+                  type: string
+                  enum:
+                    - Injecting
+                    - Active
+                    - Restoring
+                    - Restored
+                    - Failed
+                  description: |
+                    Current lifecycle phase of the network failure.
+
+                    Injecting: The fault is currently being injected via Ansible playbook.
+                    Active: The fault has been successfully injected and is affecting the network.
+                    Restoring: The original configuration is being restored via Ansible playbook.
+                    Restored: The fault has been fully reversed and the network is back to normal.
+                    Failed: An error occurred during injection or restoration. Check message field.
+
+                message:
+                  type: string
+                  description: |
+                    Human-readable status message describing the current state or any errors.
+
+                injected_at:
+                  type: string
+                  format: date-time
+                  description: |
+                    Timestamp when the fault was successfully injected (ISO 8601 format).
+
+                restored_at:
+                  type: string
+                  format: date-time
+                  description: |
+                    Timestamp when the fault was successfully restored (ISO 8601 format).
+
+                original_state:
+                  type: object
+                  x-kubernetes-preserve-unknown-fields: true
+                  description: |
+                    Snapshot of the original network configuration saved immediately before
+                    fault injection. Used by the restoration playbook to revert the network
+                    to its prior state. The structure varies by failure type.
+
+                    MTU_MISMATCH: { "mtu": 1500 }
+                    BGP_SESSION_DOWN: { "remote_as": 65035, "peer_ip": "10.80.80.2",
+                                        "vrf": "BLUE_HUB" }
+                    PROCESS_CRASH: { "method": "loopback_disable" }
+                    PACKET_CORRUPTION: { "had_existing_qdisc": false }
+                    LINK_DOWN: { "interface": "eth1" }
+                    OSPF_AREA_MISMATCH: { "correct_area": "0.0.0.0",
+                                          "wrong_area": "0.0.0.1" }
+                    DUPLICATE_IP: { "duplicate_ip": "172.16.30.1/24" }
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: Type
+          type: string
+          jsonPath: .spec.failureType
+          description: The type of network failure
+        - name: Router
+          type: string
+          jsonPath: .spec.target.router
+          description: Target router
+        - name: Interface
+          type: string
+          jsonPath: .spec.target.interface
+          description: Target interface
+        - name: Phase
+          type: string
+          jsonPath: .status.phase
+          description: Current injection phase
+        - name: Injected
+          type: date
+          jsonPath: .status.injected_at
+          description: Time of fault injection
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp

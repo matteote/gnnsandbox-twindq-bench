@@ -1,0 +1,343 @@
+---
+# NetworkFailure Injection Playbook
+#
+# Injects a controlled network fault into a VyOS router running as a Docker
+# container on the network VM. The playbook:
+#   1. Saves the current (original) router configuration for later restoration
+#   2. Applies the fault configuration using docker exec on the target router
+#   3. Returns the original_state as an Ansible fact for the operator to persist
+#
+# Supported failure_type values:
+#   - MTU_MISMATCH
+#   - BGP_SESSION_DOWN
+#   - PROCESS_CRASH
+#   - PACKET_CORRUPTION
+#   - LINK_DOWN
+#   - OSPF_AREA_MISMATCH
+#   - DUPLICATE_IP
+#
+# Variables (passed via extravars):
+#   failure_name    - Name of the NetworkFailure resource
+#   failure_type    - One of the failure types above
+#   router          - Docker container name of the target router
+#   interface       - Router interface name (e.g., eth1)
+#   peer_ip         - BGP peer IP address (BGP_SESSION_DOWN only)
+#   vrf             - VRF name (BGP_SESSION_DOWN only)
+#   mtu             - Target MTU value (MTU_MISMATCH only)
+#   error_rate      - Packet error rate e.g. "5%" (PACKET_CORRUPTION only)
+#   method          - "process_kill" or "loopback_disable" (PROCESS_CRASH only)
+#   remote_as       - BGP remote AS number (BGP_SESSION_DOWN only)
+#   wrong_area      - OSPF area to wrongly assign (OSPF_AREA_MISMATCH only)
+#   correct_area    - Current correct OSPF area (OSPF_AREA_MISMATCH only)
+#   duplicate_ip    - IP/prefix to duplicate (DUPLICATE_IP only)
+
+- name: NetworkFailure - Fault Injection
+  hosts: all
+  become: true
+  gather_facts: false
+  tasks:
+
+    - name: Log injection start
+      debug:
+        msg: >
+          [{{ failure_name }}] Injecting '{{ failure_type }}' on router '{{ router }}'
+          (interface={{ interface | default('N/A') }})
+
+    # =========================================================================
+    # MTU_MISMATCH
+    # =========================================================================
+    - name: "[MTU_MISMATCH] Read current MTU from router interface"
+      shell: >
+        docker exec {{ router }}
+        ip link show {{ interface }} | awk '/mtu/ {for(i=1;i<=NF;i++) if ($i=="mtu") print $(i+1)}'
+      register: current_mtu_result
+      when: failure_type == 'MTU_MISMATCH'
+      failed_when: false
+
+    - name: "[MTU_MISMATCH] Save original MTU as Ansible fact"
+      set_fact:
+        original_state:
+          mtu: "{{ current_mtu_result.stdout | trim | default('1500') | int }}"
+      when: failure_type == 'MTU_MISMATCH'
+
+    - name: "[MTU_MISMATCH] Apply faulty MTU via VyOS configuration"
+      shell: |
+        docker exec {{ router }} vtysh \
+          -c "configure terminal" \
+          -c "interface {{ interface }}" \
+          -c "ip mtu {{ mtu }}" \
+          -c "exit" \
+          -c "exit"
+      when: failure_type == 'MTU_MISMATCH'
+      register: mtu_inject_result
+      failed_when: mtu_inject_result.rc != 0
+
+    - name: "[MTU_MISMATCH] Verify MTU was applied"
+      shell: >
+        docker exec {{ router }}
+        ip link show {{ interface }} | awk '/mtu/ {for(i=1;i<=NF;i++) if ($i=="mtu") print $(i+1)}'
+      register: verify_mtu
+      when: failure_type == 'MTU_MISMATCH'
+      failed_when: false
+
+    - name: "[MTU_MISMATCH] Log verification"
+      debug:
+        msg: "[{{ failure_name }}] MTU on {{ router }}/{{ interface }} is now {{ verify_mtu.stdout | trim }} (target: {{ mtu }})"
+      when: failure_type == 'MTU_MISMATCH'
+
+    # =========================================================================
+    # BGP_SESSION_DOWN
+    # =========================================================================
+    - name: "[BGP_SESSION_DOWN] Save original BGP neighbor config as fact"
+      set_fact:
+        original_state:
+          peer_ip: "{{ peer_ip }}"
+          remote_as: "{{ remote_as }}"
+          vrf: "{{ vrf }}"
+      when: failure_type == 'BGP_SESSION_DOWN'
+
+    - name: "[BGP_SESSION_DOWN] Tear down eBGP session in VRF via VyOS"
+      shell: |
+        docker exec {{ router }} vtysh \
+          -c "configure terminal" \
+          -c "router bgp {{ remote_as }} vrf {{ vrf }}" \
+          -c "no neighbor {{ peer_ip }}" \
+          -c "exit" \
+          -c "exit"
+      when: failure_type == 'BGP_SESSION_DOWN' and vrf != 'global'
+      register: bgp_vrf_inject_result
+      failed_when: bgp_vrf_inject_result.rc != 0
+
+    - name: "[BGP_SESSION_DOWN] Tear down iBGP session in global table via VyOS"
+      shell: |
+        docker exec {{ router }} vtysh \
+          -c "configure terminal" \
+          -c "router bgp {{ remote_as }}" \
+          -c "no neighbor {{ peer_ip }}" \
+          -c "exit" \
+          -c "exit"
+      when: failure_type == 'BGP_SESSION_DOWN' and vrf == 'global'
+      register: bgp_global_inject_result
+      failed_when: bgp_global_inject_result.rc != 0
+
+    - name: "[BGP_SESSION_DOWN] Verify BGP session is gone"
+      shell: >
+        docker exec {{ router }} vtysh -c "show bgp vrf {{ vrf }} summary" 2>/dev/null |
+        grep "{{ peer_ip }}" || echo "session removed"
+      when: failure_type == 'BGP_SESSION_DOWN'
+      failed_when: false
+      register: bgp_verify
+
+    - name: "[BGP_SESSION_DOWN] Log verification"
+      debug:
+        msg: "[{{ failure_name }}] BGP session to {{ peer_ip }} status: {{ bgp_verify.stdout | trim }}"
+      when: failure_type == 'BGP_SESSION_DOWN'
+
+    # =========================================================================
+    # PROCESS_CRASH
+    # =========================================================================
+    - name: "[PROCESS_CRASH] Save method as original state"
+      set_fact:
+        original_state:
+          method: "{{ method }}"
+          router: "{{ router }}"
+      when: failure_type == 'PROCESS_CRASH'
+
+    - name: "[PROCESS_CRASH] Kill bgpd process inside router container"
+      shell: >
+        docker exec {{ router }}
+        /bin/sh -c "kill -9 \$(cat /var/run/frr/bgpd.pid 2>/dev/null || pgrep bgpd) 2>/dev/null || true"
+      when: failure_type == 'PROCESS_CRASH' and method == 'process_kill'
+      register: bgpd_kill_result
+      failed_when: false
+
+    - name: "[PROCESS_CRASH] Disable loopback interface on router container"
+      shell: >
+        docker exec {{ router }} ip link set lo down
+      when: failure_type == 'PROCESS_CRASH' and method == 'loopback_disable'
+      register: loopback_down_result
+      failed_when: loopback_down_result.rc != 0
+
+    - name: "[PROCESS_CRASH] Verify BGP sessions dropped (process_kill)"
+      shell: >
+        docker exec {{ router }} vtysh -c "show bgp summary" 2>/dev/null |
+        grep -E "Active|Connect|Idle" | head -5 || echo "BGP not responding"
+      when: failure_type == 'PROCESS_CRASH' and method == 'process_kill'
+      failed_when: false
+      register: bgp_crash_verify
+
+    - name: "[PROCESS_CRASH] Verify loopback is down"
+      shell: >
+        docker exec {{ router }} ip link show lo | grep -o "DOWN\|UP"
+      when: failure_type == 'PROCESS_CRASH' and method == 'loopback_disable'
+      failed_when: false
+      register: loopback_verify
+
+    - name: "[PROCESS_CRASH] Log verification"
+      debug:
+        msg: "[{{ failure_name }}] PROCESS_CRASH method={{ method }} applied on {{ router }}"
+      when: failure_type == 'PROCESS_CRASH'
+
+    # =========================================================================
+    # PACKET_CORRUPTION
+    # =========================================================================
+    - name: "[PACKET_CORRUPTION] Check for existing qdisc on interface"
+      shell: >
+        docker exec {{ router }} tc qdisc show dev {{ interface }} |
+        grep -v "^qdisc noqueue" | grep -v "^qdisc mq" | grep -c "qdisc" || echo "0"
+      when: failure_type == 'PACKET_CORRUPTION'
+      register: existing_qdisc_check
+      failed_when: false
+
+    - name: "[PACKET_CORRUPTION] Save original state (including qdisc info)"
+      set_fact:
+        original_state:
+          interface: "{{ interface }}"
+          had_existing_qdisc: "{{ (existing_qdisc_check.stdout | trim | int) > 0 }}"
+      when: failure_type == 'PACKET_CORRUPTION'
+
+    - name: "[PACKET_CORRUPTION] Remove any existing root qdisc before applying netem"
+      shell: >
+        docker exec {{ router }} tc qdisc del dev {{ interface }} root 2>/dev/null || true
+      when: failure_type == 'PACKET_CORRUPTION'
+      failed_when: false
+
+    - name: "[PACKET_CORRUPTION] Inject packet corruption/drop rate using tc netem"
+      shell: >
+        docker exec {{ router }}
+        tc qdisc add dev {{ interface }} root netem corrupt {{ error_rate }} loss {{ error_rate }}
+      when: failure_type == 'PACKET_CORRUPTION'
+      register: tc_inject_result
+      failed_when: tc_inject_result.rc != 0
+
+    - name: "[PACKET_CORRUPTION] Verify tc qdisc was applied"
+      shell: >
+        docker exec {{ router }} tc qdisc show dev {{ interface }}
+      when: failure_type == 'PACKET_CORRUPTION'
+      register: tc_verify
+      failed_when: false
+
+    - name: "[PACKET_CORRUPTION] Log verification"
+      debug:
+        msg: "[{{ failure_name }}] tc qdisc on {{ router }}/{{ interface }}: {{ tc_verify.stdout | trim }}"
+      when: failure_type == 'PACKET_CORRUPTION'
+
+    # =========================================================================
+    # LINK_DOWN
+    # =========================================================================
+    - name: "[LINK_DOWN] Save interface name as original state"
+      set_fact:
+        original_state:
+          interface: "{{ interface }}"
+          router: "{{ router }}"
+      when: failure_type == 'LINK_DOWN'
+
+    - name: "[LINK_DOWN] Bring interface down using ip link set"
+      shell: >
+        docker exec {{ router }} ip link set {{ interface }} down
+      when: failure_type == 'LINK_DOWN'
+      register: link_down_result
+      failed_when: link_down_result.rc != 0
+
+    - name: "[LINK_DOWN] Verify interface is down"
+      shell: >
+        docker exec {{ router }} ip link show {{ interface }} | grep -o "DOWN\|UP"
+      when: failure_type == 'LINK_DOWN'
+      register: link_verify
+      failed_when: false
+
+    - name: "[LINK_DOWN] Log verification"
+      debug:
+        msg: "[{{ failure_name }}] Interface {{ router }}/{{ interface }} state: {{ link_verify.stdout | trim }}"
+      when: failure_type == 'LINK_DOWN'
+
+    # =========================================================================
+    # OSPF_AREA_MISMATCH
+    # =========================================================================
+    - name: "[OSPF_AREA_MISMATCH] Save correct area as original state"
+      set_fact:
+        original_state:
+          interface: "{{ interface }}"
+          correct_area: "{{ correct_area }}"
+          wrong_area: "{{ wrong_area }}"
+      when: failure_type == 'OSPF_AREA_MISMATCH'
+
+    - name: "[OSPF_AREA_MISMATCH] Remove interface from correct OSPF area"
+      shell: |
+        docker exec {{ router }} vtysh \
+          -c "configure terminal" \
+          -c "interface {{ interface }}" \
+          -c "no ip ospf area {{ correct_area }}" \
+          -c "exit" \
+          -c "exit"
+      when: failure_type == 'OSPF_AREA_MISMATCH'
+      register: ospf_remove_result
+      failed_when: ospf_remove_result.rc != 0
+
+    - name: "[OSPF_AREA_MISMATCH] Assign interface to wrong OSPF area"
+      shell: |
+        docker exec {{ router }} vtysh \
+          -c "configure terminal" \
+          -c "interface {{ interface }}" \
+          -c "ip ospf area {{ wrong_area }}" \
+          -c "exit" \
+          -c "exit"
+      when: failure_type == 'OSPF_AREA_MISMATCH'
+      register: ospf_inject_result
+      failed_when: ospf_inject_result.rc != 0
+
+    - name: "[OSPF_AREA_MISMATCH] Verify OSPF neighbor state (should be degraded)"
+      shell: >
+        docker exec {{ router }} vtysh -c "show ip ospf neighbor" 2>/dev/null |
+        grep -E "Full|2-Way|ExStart|Exchange|Loading|Init|Down" | head -10 ||
+        echo "No OSPF neighbors found"
+      when: failure_type == 'OSPF_AREA_MISMATCH'
+      register: ospf_verify
+      failed_when: false
+
+    - name: "[OSPF_AREA_MISMATCH] Log verification"
+      debug:
+        msg: >
+          [{{ failure_name }}] OSPF area on {{ router }}/{{ interface }} changed from
+          {{ correct_area }} to {{ wrong_area }}. Neighbor states: {{ ospf_verify.stdout | trim }}
+      when: failure_type == 'OSPF_AREA_MISMATCH'
+
+    # =========================================================================
+    # DUPLICATE_IP
+    # =========================================================================
+    - name: "[DUPLICATE_IP] Save duplicate IP as original state"
+      set_fact:
+        original_state:
+          interface: "{{ interface }}"
+          duplicate_ip: "{{ duplicate_ip }}"
+      when: failure_type == 'DUPLICATE_IP'
+
+    - name: "[DUPLICATE_IP] Add duplicate IP address to target interface"
+      shell: >
+        docker exec {{ router }} ip addr add {{ duplicate_ip }} dev {{ interface }}
+      when: failure_type == 'DUPLICATE_IP'
+      register: dup_ip_result
+      failed_when: dup_ip_result.rc != 0
+
+    - name: "[DUPLICATE_IP] Verify duplicate IP was added"
+      shell: >
+        docker exec {{ router }} ip addr show {{ interface }} | grep "{{ duplicate_ip.split('/')[0] }}"
+      when: failure_type == 'DUPLICATE_IP'
+      register: dup_ip_verify
+      failed_when: false
+
+    - name: "[DUPLICATE_IP] Log verification"
+      debug:
+        msg: >
+          [{{ failure_name }}] Duplicate IP {{ duplicate_ip }} added to
+          {{ router }}/{{ interface }}: {{ dup_ip_verify.stdout | trim }}
+      when: failure_type == 'DUPLICATE_IP'
+
+    # =========================================================================
+    # Final summary
+    # =========================================================================
+    - name: Log injection completion
+      debug:
+        msg: >
+          [{{ failure_name }}] Fault '{{ failure_type }}' successfully injected on router
+          '{{ router }}'. original_state={{ original_state }}

@@ -1,0 +1,288 @@
+---
+# NetworkFailure Restoration Playbook
+#
+# Restores the original network configuration that was saved during fault injection.
+# This playbook is the exact inverse of failure_inject.yaml and uses the
+# original_state values that were persisted in the NetworkFailure resource status.
+#
+# Variables (passed via extravars):
+#   failure_name        - Name of the NetworkFailure resource
+#   failure_type        - The failure type that was injected
+#   router              - Docker container name of the target router
+#   interface           - Router interface name (e.g., eth1)
+#   peer_ip             - BGP peer IP address (BGP_SESSION_DOWN only)
+#   vrf                 - VRF name (BGP_SESSION_DOWN only)
+#   method              - "process_kill" or "loopback_disable" (PROCESS_CRASH only)
+#   original_mtu        - MTU to restore (MTU_MISMATCH only)
+#   original_remote_as  - AS number to restore (BGP_SESSION_DOWN only)
+#   correct_area        - The correct OSPF area to restore (OSPF_AREA_MISMATCH only)
+#   wrong_area          - The wrong area that was injected (OSPF_AREA_MISMATCH only)
+#   duplicate_ip        - IP/prefix that was duplicated (DUPLICATE_IP only)
+#   had_existing_qdisc  - Whether a qdisc existed before injection (PACKET_CORRUPTION only)
+
+- name: NetworkFailure - Fault Restoration
+  hosts: all
+  become: true
+  gather_facts: false
+  tasks:
+
+    - name: Log restoration start
+      debug:
+        msg: >
+          [{{ failure_name }}] Restoring '{{ failure_type }}' on router '{{ router }}'
+          (interface={{ interface | default('N/A') }})
+
+    # =========================================================================
+    # MTU_MISMATCH — Restore original MTU
+    # =========================================================================
+    - name: "[MTU_MISMATCH] Restore original MTU via VyOS configuration"
+      shell: |
+        docker exec {{ router }} vtysh \
+          -c "configure terminal" \
+          -c "interface {{ interface }}" \
+          -c "ip mtu {{ original_mtu }}" \
+          -c "exit" \
+          -c "exit"
+      when: failure_type == 'MTU_MISMATCH'
+      register: mtu_restore_result
+      failed_when: mtu_restore_result.rc != 0
+
+    - name: "[MTU_MISMATCH] Verify MTU was restored"
+      shell: >
+        docker exec {{ router }}
+        ip link show {{ interface }} | awk '/mtu/ {for(i=1;i<=NF;i++) if ($i=="mtu") print $(i+1)}'
+      when: failure_type == 'MTU_MISMATCH'
+      register: mtu_verify
+      failed_when: false
+
+    - name: "[MTU_MISMATCH] Log restoration result"
+      debug:
+        msg: >
+          [{{ failure_name }}] MTU on {{ router }}/{{ interface }} restored to
+          {{ mtu_verify.stdout | trim }} (expected: {{ original_mtu }})
+      when: failure_type == 'MTU_MISMATCH'
+
+    # =========================================================================
+    # BGP_SESSION_DOWN — Re-add the BGP neighbor
+    # =========================================================================
+    - name: "[BGP_SESSION_DOWN] Re-add BGP neighbor in VRF"
+      shell: |
+        docker exec {{ router }} vtysh \
+          -c "configure terminal" \
+          -c "router bgp {{ original_remote_as }} vrf {{ vrf }}" \
+          -c "neighbor {{ peer_ip }} remote-as {{ original_remote_as }}" \
+          -c "exit" \
+          -c "exit"
+      when: failure_type == 'BGP_SESSION_DOWN' and vrf != 'global'
+      register: bgp_vrf_restore_result
+      failed_when: bgp_vrf_restore_result.rc != 0
+
+    - name: "[BGP_SESSION_DOWN] Re-add BGP neighbor in global routing table"
+      shell: |
+        docker exec {{ router }} vtysh \
+          -c "configure terminal" \
+          -c "router bgp {{ original_remote_as }}" \
+          -c "neighbor {{ peer_ip }} remote-as {{ original_remote_as }}" \
+          -c "exit" \
+          -c "exit"
+      when: failure_type == 'BGP_SESSION_DOWN' and vrf == 'global'
+      register: bgp_global_restore_result
+      failed_when: bgp_global_restore_result.rc != 0
+
+    - name: "[BGP_SESSION_DOWN] Verify BGP session is re-establishing"
+      shell: >
+        docker exec {{ router }} vtysh
+        -c "show bgp vrf {{ vrf }} summary" 2>/dev/null |
+        grep "{{ peer_ip }}" || echo "neighbor not yet visible"
+      when: failure_type == 'BGP_SESSION_DOWN'
+      register: bgp_restore_verify
+      failed_when: false
+
+    - name: "[BGP_SESSION_DOWN] Log restoration result"
+      debug:
+        msg: >
+          [{{ failure_name }}] BGP neighbor {{ peer_ip }} restored on {{ router }}.
+          Status: {{ bgp_restore_verify.stdout | trim }}
+      when: failure_type == 'BGP_SESSION_DOWN'
+
+    # =========================================================================
+    # PROCESS_CRASH — Restart BGP daemon or re-enable loopback
+    # =========================================================================
+    - name: "[PROCESS_CRASH] Restart BGP daemon (process_kill restoration)"
+      shell: >
+        docker exec {{ router }}
+        /bin/sh -c "vtysh -c 'clear bgp *' 2>/dev/null || true; \
+          supervisorctl restart bgpd 2>/dev/null || \
+          service frr restart 2>/dev/null || \
+          /usr/lib/frr/frr start 2>/dev/null || true"
+      when: failure_type == 'PROCESS_CRASH' and method == 'process_kill'
+      register: bgpd_restart_result
+      failed_when: false
+
+    - name: "[PROCESS_CRASH] Re-enable loopback interface (loopback_disable restoration)"
+      shell: >
+        docker exec {{ router }} ip link set lo up
+      when: failure_type == 'PROCESS_CRASH' and method == 'loopback_disable'
+      register: loopback_up_result
+      failed_when: loopback_up_result.rc != 0
+
+    - name: "[PROCESS_CRASH] Verify loopback is back up"
+      shell: >
+        docker exec {{ router }} ip link show lo | grep -o "DOWN\|UP" | head -1
+      when: failure_type == 'PROCESS_CRASH' and method == 'loopback_disable'
+      register: loopback_restore_verify
+      failed_when: false
+
+    - name: "[PROCESS_CRASH] Wait for BGP to re-establish after loopback restore"
+      pause:
+        seconds: 5
+      when: failure_type == 'PROCESS_CRASH'
+
+    - name: "[PROCESS_CRASH] Verify BGP is recovering"
+      shell: >
+        docker exec {{ router }} vtysh -c "show bgp summary" 2>/dev/null |
+        grep -E "Established|Active|Connect" | head -5 || echo "BGP recovering"
+      when: failure_type == 'PROCESS_CRASH'
+      register: bgp_recovery_verify
+      failed_when: false
+
+    - name: "[PROCESS_CRASH] Log restoration result"
+      debug:
+        msg: >
+          [{{ failure_name }}] PROCESS_CRASH restored on {{ router }} using method={{ method }}.
+          BGP status: {{ bgp_recovery_verify.stdout | trim }}
+      when: failure_type == 'PROCESS_CRASH'
+
+    # =========================================================================
+    # PACKET_CORRUPTION — Remove tc netem qdisc
+    # =========================================================================
+    - name: "[PACKET_CORRUPTION] Remove netem qdisc from interface"
+      shell: >
+        docker exec {{ router }} tc qdisc del dev {{ interface }} root 2>/dev/null || true
+      when: failure_type == 'PACKET_CORRUPTION'
+      register: tc_remove_result
+      failed_when: false
+
+    - name: "[PACKET_CORRUPTION] Verify qdisc was removed"
+      shell: >
+        docker exec {{ router }} tc qdisc show dev {{ interface }}
+      when: failure_type == 'PACKET_CORRUPTION'
+      register: tc_restore_verify
+      failed_when: false
+
+    - name: "[PACKET_CORRUPTION] Log restoration result"
+      debug:
+        msg: >
+          [{{ failure_name }}] tc netem removed from {{ router }}/{{ interface }}.
+          Current qdisc: {{ tc_restore_verify.stdout | trim }}
+      when: failure_type == 'PACKET_CORRUPTION'
+
+    # =========================================================================
+    # LINK_DOWN — Bring interface back up
+    # =========================================================================
+    - name: "[LINK_DOWN] Bring interface back up"
+      shell: >
+        docker exec {{ router }} ip link set {{ interface }} up
+      when: failure_type == 'LINK_DOWN'
+      register: link_up_result
+      failed_when: link_up_result.rc != 0
+
+    - name: "[LINK_DOWN] Verify interface is up"
+      shell: >
+        docker exec {{ router }} ip link show {{ interface }} | grep -o "DOWN\|UP"
+      when: failure_type == 'LINK_DOWN'
+      register: link_restore_verify
+      failed_when: false
+
+    - name: "[LINK_DOWN] Wait for OSPF/LDP reconvergence"
+      pause:
+        seconds: 5
+      when: failure_type == 'LINK_DOWN'
+
+    - name: "[LINK_DOWN] Log restoration result"
+      debug:
+        msg: >
+          [{{ failure_name }}] Interface {{ router }}/{{ interface }} state restored:
+          {{ link_restore_verify.stdout | trim }}
+      when: failure_type == 'LINK_DOWN'
+
+    # =========================================================================
+    # OSPF_AREA_MISMATCH — Restore correct OSPF area
+    # =========================================================================
+    - name: "[OSPF_AREA_MISMATCH] Remove interface from wrong OSPF area"
+      shell: |
+        docker exec {{ router }} vtysh \
+          -c "configure terminal" \
+          -c "interface {{ interface }}" \
+          -c "no ip ospf area {{ wrong_area }}" \
+          -c "exit" \
+          -c "exit"
+      when: failure_type == 'OSPF_AREA_MISMATCH'
+      register: ospf_remove_wrong_result
+      failed_when: ospf_remove_wrong_result.rc != 0
+
+    - name: "[OSPF_AREA_MISMATCH] Restore interface to correct OSPF area"
+      shell: |
+        docker exec {{ router }} vtysh \
+          -c "configure terminal" \
+          -c "interface {{ interface }}" \
+          -c "ip ospf area {{ correct_area }}" \
+          -c "exit" \
+          -c "exit"
+      when: failure_type == 'OSPF_AREA_MISMATCH'
+      register: ospf_restore_result
+      failed_when: ospf_restore_result.rc != 0
+
+    - name: "[OSPF_AREA_MISMATCH] Wait for OSPF adjacency to re-form"
+      pause:
+        seconds: 10
+      when: failure_type == 'OSPF_AREA_MISMATCH'
+
+    - name: "[OSPF_AREA_MISMATCH] Verify OSPF neighbor state"
+      shell: >
+        docker exec {{ router }} vtysh -c "show ip ospf neighbor" 2>/dev/null |
+        grep -E "Full|2-Way" | head -10 || echo "OSPF reconverging"
+      when: failure_type == 'OSPF_AREA_MISMATCH'
+      register: ospf_restore_verify
+      failed_when: false
+
+    - name: "[OSPF_AREA_MISMATCH] Log restoration result"
+      debug:
+        msg: >
+          [{{ failure_name }}] OSPF area on {{ router }}/{{ interface }} restored to
+          {{ correct_area }}. Neighbor states: {{ ospf_restore_verify.stdout | trim }}
+      when: failure_type == 'OSPF_AREA_MISMATCH'
+
+    # =========================================================================
+    # DUPLICATE_IP — Remove the duplicate IP address
+    # =========================================================================
+    - name: "[DUPLICATE_IP] Remove duplicate IP address from interface"
+      shell: >
+        docker exec {{ router }} ip addr del {{ duplicate_ip }} dev {{ interface }} 2>/dev/null || true
+      when: failure_type == 'DUPLICATE_IP'
+      register: dup_ip_remove_result
+      failed_when: false
+
+    - name: "[DUPLICATE_IP] Verify duplicate IP was removed"
+      shell: >
+        docker exec {{ router }} ip addr show {{ interface }} |
+        grep "{{ duplicate_ip.split('/')[0] }}" || echo "IP removed"
+      when: failure_type == 'DUPLICATE_IP'
+      register: dup_ip_restore_verify
+      failed_when: false
+
+    - name: "[DUPLICATE_IP] Log restoration result"
+      debug:
+        msg: >
+          [{{ failure_name }}] Duplicate IP {{ duplicate_ip }} removed from
+          {{ router }}/{{ interface }}. Verification: {{ dup_ip_restore_verify.stdout | trim }}
+      when: failure_type == 'DUPLICATE_IP'
+
+    # =========================================================================
+    # Final summary
+    # =========================================================================
+    - name: Log restoration completion
+      debug:
+        msg: >
+          [{{ failure_name }}] Fault '{{ failure_type }}' successfully restored on router
+          '{{ router }}'. Network configuration reverted to original state.

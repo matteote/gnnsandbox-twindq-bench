@@ -209,6 +209,7 @@ def register_network_services_phase():
             import linuxnetwork.lifecycle
             import device.lifecycle
             import traffictest.lifecycle
+            import networkfailure.lifecycle
         phase.add_module(load_vpn)
     
     if os.getenv("GITEA") is not None:

@@ -7,14 +7,14 @@
     - name: Create native Linux bridge network (brctl)
       command: brctl addbr {{ network_name }}
       register: network_result
-      ignore_errors: yes # Ignore errors if the bridge already exists
+      ignore_errors: true # Ignore errors if the bridge already exists
 
     - name: Bring up the bridge
       command: ip link set {{ network_name }} up
 
     - name: Assign gateway IP to management bridge
       command: ip addr add {{ gateway_ip }}/24 dev {{ network_name }}
-      ignore_errors: yes
+      ignore_errors: true
       when: 
         - network_type == 'management'
         - gateway_ip is defined

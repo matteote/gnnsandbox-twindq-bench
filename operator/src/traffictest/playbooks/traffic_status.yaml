@@ -2,7 +2,7 @@
 - name: Traffic Test Management
   hosts: all
   become: true
-  gather_facts: yes
+  gather_facts: true
   vars:
     # === Paths on host VM (host)
     # global files
@@ -44,7 +44,7 @@
       failed_when: false
 
     - name: Check iperf3 server status
-      shell: "docker exec {{ destination_device }} sh -c '{{ is_traffic_test_running_file }} {{ dest_port }} destination'
+      shell: "docker exec {{ destination_device }} sh -c '{{ is_traffic_test_running_file }} {{ destination_ip }} {{ dest_port }} destination'"
       register: server_status
       failed_when: false
 
