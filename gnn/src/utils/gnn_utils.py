@@ -71,8 +71,8 @@ FEATURE_DIMS = {
 
 # Per-type reconstruction MSE thresholds for anomaly detection
 ANOMALY_THRESHOLDS = {
-    "router":      0.15,
-    "interface":   0.20,
+    "router":      1.0,
+    "interface":   0.2,
     "bgp_session": 0.10,
 }
 

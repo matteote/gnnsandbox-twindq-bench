@@ -160,6 +160,7 @@ def train_hetgnn_on_snapshots(
     """
     from collections import defaultdict
     from pathlib import Path as _Path
+    import statistics as _stats
 
     out = _Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
@@ -168,9 +169,66 @@ def train_hetgnn_on_snapshots(
     local_model_path  = str(out / "model.pth")
     local_stats_path  = str(out / "model_stats.pth")
 
-    # ── Fit scalers ──────────────────────────────────────────────────────────
-    logger.info("Fitting scalers on all snapshots...")
-    scalers = fit_scalers(snapshot_objects)
+    # ── Drop bad snapshots (data collection artifacts) ───────────────────────
+    _FILTER_FIELDS = {
+        "router":    ["cpu", "mem", "ospf_num_routes", "pfx_count_norm"],
+        "interface": ["rx_bytes_rate", "tx_bytes_rate", "tx_util", "rx_util", "mtu_norm"],
+    }
+    _Z_THRESH = 4.0  # drop snapshot if any feature mean is >4σ from dataset mean
+
+    # Pass 1: compute per-(ntype, field) mean for each snapshot
+    snap_means = []
+    accum = defaultdict(list)
+    for snap in snapshot_objects:
+        sm = {}
+        for ntype, fields in _FILTER_FIELDS.items():
+            nodes = [n for n in snap.get("nodes", []) if n.get("type") == ntype]
+            if not nodes:
+                continue
+            for field in fields:
+                vals = [n.get(field, 0.0) for n in nodes if n.get(field) is not None]
+                if vals:
+                    m = sum(vals) / len(vals)
+                    sm[(ntype, field)] = m
+                    accum[(ntype, field)].append(m)
+        snap_means.append(sm)
+
+    # Pass 2: compute global mean/std and flag outlier snapshots
+    global_stats = {}
+    for key, means in accum.items():
+        if len(means) > 1:
+            mu = sum(means) / len(means)
+            sigma = _stats.pstdev(means)
+            global_stats[key] = (mu, sigma)
+
+    filtered, n_dropped = [], 0
+    for snap, sm in zip(snapshot_objects, snap_means):
+        bad = False
+        for key, val in sm.items():
+            mu, sigma = global_stats.get(key, (val, 0))
+            if sigma > 0 and abs(val - mu) / sigma > _Z_THRESH:
+                bad = True
+                break
+        if bad:
+            n_dropped += 1
+            logger.warning(f"Dropped bad snapshot {snap.get('timestamp')} "
+                           f"(feature '{key}' mean={val:.4f}, z={(val-mu)/sigma:.1f}σ)")
+        else:
+            filtered.append(snap)
+
+    snapshot_objects = filtered
+    if n_dropped:
+        logger.info(f"Filtered {n_dropped} bad snapshot(s) — {len(snapshot_objects)} remaining")
+
+    # ── Train / val split (before scaler fitting to avoid leakage) ───────────
+    split_idx = int(len(snapshot_objects) * (1 - VALIDATION_SPLIT))
+    train_objects = snapshot_objects[:split_idx]
+    val_objects   = snapshot_objects[split_idx:]
+    logger.info(f"Dataset split: {len(train_objects)} training, {len(val_objects)} validation snapshots")
+
+    # ── Fit scalers on training data only ────────────────────────────────────
+    logger.info("Fitting scalers on training snapshots only...")
+    scalers = fit_scalers(train_objects)
     joblib.dump(scalers, local_scaler_path)
     logger.info(f"Scalers saved to {local_scaler_path}")
 
@@ -178,12 +236,10 @@ def train_hetgnn_on_snapshots(
 
     # ── Convert to HeteroData ────────────────────────────────────────────────
     logger.info("Processing snapshots into HeteroData...")
-    snapshots = []
     input_dims = FEATURE_DIMS  # defined in gnn_utils
-    for idx, data in enumerate(snapshot_objects):
-        logger.debug(f"Processing snapshot {idx+1}/{len(snapshot_objects)}")
-        hdata = gb.process_snapshot(data)
-        snapshots.append(hdata)
+    train_snapshots = [gb.process_snapshot(d) for d in train_objects]
+    val_snapshots   = [gb.process_snapshot(d) for d in val_objects]
+    snapshots       = train_snapshots + val_snapshots
 
     node_types = list(input_dims.keys())
     all_edge_types = set()
@@ -194,9 +250,8 @@ def train_hetgnn_on_snapshots(
     logger.info(f"Node types ({len(node_types)}): {node_types}")
     logger.info(f"Edge types ({len(all_edge_types)}): {list(all_edge_types)}")
 
-    # Log snapshot statistics
-    if snapshots:
-        sample = snapshots[0]
+    if train_snapshots:
+        sample = train_snapshots[0]
         logger.info("Sample snapshot statistics:")
         for nt in node_types:
             if nt in sample.x_dict:
@@ -204,12 +259,6 @@ def train_hetgnn_on_snapshots(
         for et in all_edge_types:
             if et in sample.edge_index_dict:
                 logger.info(f"  {et}: {sample.edge_index_dict[et].shape[1]} edges")
-
-    # ── Train / val split ────────────────────────────────────────────────────
-    split_idx = int(len(snapshots) * (1 - VALIDATION_SPLIT))
-    train_snapshots = snapshots[:split_idx]
-    val_snapshots   = snapshots[split_idx:]
-    logger.info(f"Dataset split: {len(train_snapshots)} training, {len(val_snapshots)} validation snapshots")
 
     # ── Build model ──────────────────────────────────────────────────────────
     out_channels = hidden_channels  # autoencoder symmetric dims
@@ -288,13 +337,30 @@ def train_hetgnn_on_snapshots(
                 train_interface_tensors.append(loss_interface.detach())
             train_diversity_tensors.append(diversity_loss.detach())
 
-        train_loss = torch.stack(train_loss_tensors).mean().item()
+        # ── Re-evaluate training loss in eval mode (no dropout) for fair reporting
+        model.eval()
+        train_loss_tensors_eval = []
+        with torch.no_grad():
+            for snapshot in train_snapshots:
+                recon_dict, embeddings = model(snapshot.x_dict, snapshot.edge_index_dict)
+                loss_router = loss_interface = loss_bgp = 0
+                for node_type, recon_x in recon_dict.items():
+                    if node_type in snapshot.x_dict:
+                        node_loss = criterion(recon_x, snapshot.x_dict[node_type])
+                        if node_type == "router":       loss_router    += node_loss
+                        elif node_type == "interface":  loss_interface += node_loss
+                        elif node_type == "bgp_session": loss_bgp      += node_loss
+                diversity_loss = contrastive_diversity_loss(embeddings)
+                total_loss = (ALPHA * loss_router + GAMMA * loss_interface +
+                              BETA * loss_bgp + DIVERSITY_WEIGHT * diversity_loss)
+                train_loss_tensors_eval.append(total_loss.detach())
+
+        train_loss = torch.stack(train_loss_tensors_eval).mean().item()
         train_loss_router = torch.stack(train_router_tensors).mean().item() if train_router_tensors else 0.0
         train_loss_interface = torch.stack(train_interface_tensors).mean().item() if train_interface_tensors else 0.0
         train_loss_diversity = torch.stack(train_diversity_tensors).mean().item() if train_diversity_tensors else 0.0
 
         # ── Validation phase ──────────────────────────────────────────────────
-        model.eval()
         val_loss_tensors = []
         val_router_tensors = []
         val_interface_tensors = []

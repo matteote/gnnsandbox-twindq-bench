@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-04-14T19:46:50",
+  "timestamp": "2026-04-14T20:00:20",
   "nodes": [
     {
       "id": "router:ce1-hub",
@@ -7,7 +7,7 @@
       "hostname": "ce1-hub",
       "role": "CE",
       "state": 1.0,
-      "cpu": 0.7613333333333332,
+      "cpu": 0.6,
       "mem": 1.0,
       "ospf_num_routes": 10.0,
       "pfx_count_norm": 14.0
@@ -18,7 +18,7 @@
       "hostname": "ce1-spoke",
       "role": "CE",
       "state": 1.0,
-      "cpu": 0.7006666666666668,
+      "cpu": 0.37,
       "mem": 1.0,
       "ospf_num_routes": 7.0,
       "pfx_count_norm": 8.0
@@ -29,10 +29,10 @@
       "hostname": "ce2-spoke",
       "role": "CE",
       "state": 1.0,
-      "cpu": 0.7739999999999999,
+      "cpu": 0.66,
       "mem": 1.0,
-      "ospf_num_routes": 7.0,
-      "pfx_count_norm": 8.0
+      "ospf_num_routes": 5.5,
+      "pfx_count_norm": 5.0
     },
     {
       "id": "router:ce3-spoke",
@@ -40,7 +40,7 @@
       "hostname": "ce3-spoke",
       "role": "CE",
       "state": 1.0,
-      "cpu": 0.7699999999999999,
+      "cpu": 0.66,
       "mem": 1.0,
       "ospf_num_routes": 7.0,
       "pfx_count_norm": 8.0
@@ -51,7 +51,7 @@
       "hostname": "p1",
       "role": "P",
       "state": 1.0,
-      "cpu": 0.7026666666666667,
+      "cpu": 0.37,
       "mem": 1.0,
       "ospf_num_routes": 21.5,
       "pfx_count_norm": 0.0
@@ -62,7 +62,7 @@
       "hostname": "p2",
       "role": "P",
       "state": 1.0,
-      "cpu": 0.7026666666666667,
+      "cpu": 0.37,
       "mem": 1.0,
       "ospf_num_routes": 20.0,
       "pfx_count_norm": 0.0
@@ -73,7 +73,7 @@
       "hostname": "p3",
       "role": "P",
       "state": 1.0,
-      "cpu": 0.7699999999999999,
+      "cpu": 0.66,
       "mem": 1.0,
       "ospf_num_routes": 20.0,
       "pfx_count_norm": 0.0
@@ -84,7 +84,7 @@
       "hostname": "p4",
       "role": "P",
       "state": 1.0,
-      "cpu": 0.7206666666666666,
+      "cpu": 0.37,
       "mem": 1.0,
       "ospf_num_routes": 20.0,
       "pfx_count_norm": 0.0
@@ -94,8 +94,8 @@
       "type": "router",
       "hostname": "pe1",
       "role": "PE",
-      "state": 0.0,
-      "cpu": 0.7173333333333333,
+      "state": 1.0,
+      "cpu": 0.66,
       "mem": 1.0,
       "ospf_num_routes": 13.5,
       "pfx_count_norm": 4.4
@@ -106,7 +106,7 @@
       "hostname": "pe2",
       "role": "PE",
       "state": 1.0,
-      "cpu": 0.7026666666666667,
+      "cpu": 0.37,
       "mem": 1.0,
       "ospf_num_routes": 15.5,
       "pfx_count_norm": 6.0
@@ -116,19 +116,19 @@
       "type": "router",
       "hostname": "pe3",
       "role": "PE",
-      "state": 0.0,
-      "cpu": 0.7006666666666668,
+      "state": 1.0,
+      "cpu": 0.37,
       "mem": 1.0,
-      "ospf_num_routes": 13.5,
-      "pfx_count_norm": 4.4
+      "ospf_num_routes": 12.75,
+      "pfx_count_norm": 3.8
     },
     {
       "id": "router:pe4",
       "type": "router",
       "hostname": "pe4",
       "role": "PE",
-      "state": 0.0,
-      "cpu": 0.7206666666666666,
+      "state": 1.0,
+      "cpu": 0.4,
       "mem": 1.0,
       "ospf_num_routes": 13.5,
       "pfx_count_norm": 4.4
@@ -138,8 +138,8 @@
       "type": "router",
       "hostname": "rr1",
       "role": "P",
-      "state": 0.0,
-      "cpu": 0.7206666666666666,
+      "state": 1.0,
+      "cpu": 0.37,
       "mem": 1.0,
       "ospf_num_routes": 21.5,
       "pfx_count_norm": 14.5
@@ -149,8 +149,8 @@
       "type": "router",
       "hostname": "rr2",
       "role": "P",
-      "state": 0.0,
-      "cpu": 0.7173333333333333,
+      "state": 1.0,
+      "cpu": 0.66,
       "mem": 1.0,
       "ospf_num_routes": 21.5,
       "pfx_count_norm": 14.5
@@ -166,11 +166,11 @@
       "tx_drops": 0.0,
       "mtu_norm": 0.16666666666666666,
       "rx_errs_rate": 0.0,
-      "rx_bytes_rate": 105.26698666666634,
-      "tx_bytes_rate": 1222.377647407419,
+      "rx_bytes_rate": 104.0,
+      "tx_bytes_rate": 1249.5333333333333,
       "rx_err_gradient": 0.0,
-      "tx_util": 9.779021179259353e-06,
-      "rx_util": 8.421358933333307e-07
+      "tx_util": 9.996266666666666e-06,
+      "rx_util": 8.32e-07
     },
     {
       "id": "router:ce1-hub:interface:eth1",
@@ -183,11 +183,11 @@
       "tx_drops": 0.0,
       "mtu_norm": 0.16666666666666666,
       "rx_errs_rate": 0.0,
-      "rx_bytes_rate": 18668138.735490452,
-      "tx_bytes_rate": 180764.95677629576,
+      "rx_bytes_rate": 12989206.0,
+      "tx_bytes_rate": 118631.2,
       "rx_err_gradient": 0.0,
-      "tx_util": 0.001446119654210366,
-      "rx_util": 0.14934510988392363
+      "tx_util": 0.0009490496,
+      "rx_util": 0.103913648
     },
     {
       "id": "router:ce1-hub:interface:eth2",
@@ -200,11 +200,11 @@
       "tx_drops": 0.0,
       "mtu_norm": 0.16666666666666666,
       "rx_errs_rate": 0.0,
-      "rx_bytes_rate": 171961.48821333464,
-      "tx_bytes_rate": 19631649.093167458,
+      "rx_bytes_rate": 118631.2,
+      "tx_bytes_rate": 12989413.333333334,
       "rx_err_gradient": 0.0,
-      "tx_util": 0.15705319274533966,
-      "rx_util": 0.001375691905706677
+      "tx_util": 0.10391530666666667,
+      "rx_util": 0.0009490496
     },
     {
       "id": "router:ce1-hub:interface:lo",
@@ -234,11 +234,11 @@
       "tx_drops": 0.0,
       "mtu_norm": 0.16666666666666666,
       "rx_errs_rate": 0.0,
-      "rx_bytes_rate": 109.86666666666665,
-      "tx_bytes_rate": 1224.0420441481474,
+      "rx_bytes_rate": 112.8,
+      "tx_bytes_rate": 1269.021053333332,
       "rx_err_gradient": 0.0,
-      "tx_util": 9.79233635318518e-06,
-      "rx_util": 8.789333333333332e-07
+      "tx_util": 1.0152168426666657e-05,
+      "rx_util": 9.023999999999999e-07
     },
     {
       "id": "router:ce1-spoke:interface:eth1",
@@ -251,11 +251,11 @@
       "tx_drops": 0.0,
       "mtu_norm": 0.16666666666666666,
       "rx_errs_rate": 0.0,
-      "rx_bytes_rate": 61880.047728593076,
-      "tx_bytes_rate": 6538463.84083608,
+      "rx_bytes_rate": 59465.75519999663,
+      "tx_bytes_rate": 6507643.582657877,
       "rx_err_gradient": 0.0,
-      "tx_util": 0.05230771072668864,
-      "rx_util": 0.0004950403818287446
+      "tx_util": 0.05206114866126302,
+      "rx_util": 0.000475726041599973
     },
     {
       "id": "router:ce1-spoke:interface:eth2",
@@ -268,11 +268,11 @@
       "tx_drops": 0.0,
       "mtu_norm": 0.16666666666666666,
       "rx_errs_rate": 0.0,
-      "rx_bytes_rate": 6259442.490983073,
-      "tx_bytes_rate": 61878.58832711166,
+      "rx_bytes_rate": 6228925.329377746,
+      "tx_bytes_rate": 59463.944906671844,
       "rx_err_gradient": 0.0,
-      "tx_util": 0.0004950287066168933,
-      "rx_util": 0.05007553992786458
+      "tx_util": 0.00047571155925337476,
+      "rx_util": 0.04983140263502197
     },
     {
       "id": "router:ce1-spoke:interface:lo",
@@ -302,11 +302,11 @@
       "tx_drops": 0.0,
       "mtu_norm": 0.16666666666666666,
       "rx_errs_rate": 0.0,
-      "rx_bytes_rate": 112.21333333333331,
-      "tx_bytes_rate": 1226.0381724444362,
+      "rx_bytes_rate": 112.8,
+      "tx_bytes_rate": 1224.2,
       "rx_err_gradient": 0.0,
-      "tx_util": 9.80830537955549e-06,
-      "rx_util": 8.977066666666665e-07
+      "tx_util": 9.7936e-06,
+      "rx_util": 9.023999999999999e-07
     },
     {
       "id": "router:ce2-spoke:interface:eth1",
@@ -319,11 +319,11 @@
       "tx_drops": 0.0,
       "mtu_norm": 0.16666666666666666,
       "rx_errs_rate": 0.0,
-      "rx_bytes_rate": 60225.11350755587,
-      "tx_bytes_rate": 6536214.913888007,
+      "rx_bytes_rate": 0.0,
+      "tx_bytes_rate": 0.0,
       "rx_err_gradient": 0.0,
-      "tx_util": 0.05228971931110406,
-      "rx_util": 0.000481800908060447
+      "tx_util": 0.0,
+      "rx_util": 0.0
     },
     {
       "id": "router:ce2-spoke:interface:eth2",
@@ -336,11 +336,11 @@
       "tx_drops": 0.0,
       "mtu_norm": 0.16666666666666666,
       "rx_errs_rate": 0.0,
-      "rx_bytes_rate": 6257088.182602642,
-      "tx_bytes_rate": 60223.83872711182,
+      "rx_bytes_rate": 0.0,
+      "tx_bytes_rate": 0.0,
       "rx_err_gradient": 0.0,
-      "tx_util": 0.00048179070981689456,
-      "rx_util": 0.05005670546082114
+      "tx_util": 0.0,
+      "rx_util": 0.0
     },
     {
       "id": "router:ce2-spoke:interface:lo",
@@ -370,11 +370,11 @@
       "tx_drops": 0.0,
       "mtu_norm": 0.16666666666666666,
       "rx_errs_rate": 0.0,
-      "rx_bytes_rate": 110.11054399999995,
-      "tx_bytes_rate": 1225.1733952592808,
+      "rx_bytes_rate": 112.8,
+      "tx_bytes_rate": 1224.0,
       "rx_err_gradient": 0.0,
-      "tx_util": 9.801387162074247e-06,
-      "rx_util": 8.808843519999996e-07
+      "tx_util": 9.792e-06,
+      "rx_util": 9.023999999999999e-07
     },
     {
       "id": "router:ce3-spoke:interface:eth1",
@@ -387,11 +387,11 @@
       "tx_drops": 0.0,
       "mtu_norm": 0.16666666666666666,
       "rx_errs_rate": 0.0,
-      "rx_bytes_rate": 61726.41190933333,
-      "tx_bytes_rate": 6541107.91942576,
+      "rx_bytes_rate": 60438.4,
+      "tx_bytes_rate": 6582912.0,
       "rx_err_gradient": 0.0,
-      "tx_util": 0.05232886335540608,
-      "rx_util": 0.0004938112952746666
+      "tx_util": 0.052663296,
+      "rx_util": 0.0004835072
     },
     {
       "id": "router:ce3-spoke:interface:eth2",
@@ -404,11 +404,11 @@
       "tx_drops": 0.0,
       "mtu_norm": 0.16666666666666666,
       "rx_errs_rate": 0.0,
-      "rx_bytes_rate": 6261651.414264899,
-      "tx_bytes_rate": 61723.653687111,
+      "rx_bytes_rate": 6301096.4,
+      "tx_bytes_rate": 60438.4,
       "rx_err_gradient": 0.0,
-      "tx_util": 0.000493789229496888,
-      "rx_util": 0.05009321131411919
+      "tx_util": 0.0004835072,
+      "rx_util": 0.0504087712
     },
     {
       "id": "router:ce3-spoke:interface:lo",
@@ -438,11 +438,11 @@
       "tx_drops": 0.0,
       "mtu_norm": 0.16666666666666666,
       "rx_errs_rate": 0.0,
-      "rx_bytes_rate": 111.21721244444446,
-      "tx_bytes_rate": 1296.004376296285,
+      "rx_bytes_rate": 112.8,
+      "tx_bytes_rate": 1325.0,
       "rx_err_gradient": 0.0,
-      "tx_util": 1.036803501037028e-05,
-      "rx_util": 8.897376995555557e-07
+      "tx_util": 1.06e-05,
+      "rx_util": 9.023999999999999e-07
     },
     {
       "id": "router:p1:interface:eth1",
@@ -455,11 +455,11 @@
       "tx_drops": 0.0,
       "mtu_norm": 0.16666666666666666,
       "rx_errs_rate": 0.0,
-      "rx_bytes_rate": 6595246.351452467,
-      "tx_bytes_rate": 71073.33551999994,
+      "rx_bytes_rate": 6543777.6,
+      "tx_bytes_rate": 70716.53333333333,
       "rx_err_gradient": 0.0,
-      "tx_util": 0.0005685866841599995,
-      "rx_util": 0.052761970811619735
+      "tx_util": 0.0005657322666666666,
+      "rx_util": 0.0523502208
     },
     {
       "id": "router:p1:interface:eth2",
@@ -472,11 +472,11 @@
       "tx_drops": 0.0,
       "mtu_norm": 0.16666666666666666,
       "rx_errs_rate": 0.0,
-      "rx_bytes_rate": 30.638181333333357,
-      "tx_bytes_rate": 32.85512829629652,
+      "rx_bytes_rate": 46.733333333333334,
+      "tx_bytes_rate": 51.666666666666664,
       "rx_err_gradient": 0.0,
-      "tx_util": 2.6284102637037215e-07,
-      "rx_util": 2.451054506666669e-07
+      "tx_util": 4.1333333333333333e-07,
+      "rx_util": 3.738666666666667e-07
     },
     {
       "id": "router:p1:interface:eth3",
@@ -489,11 +489,11 @@
       "tx_drops": 0.0,
       "mtu_norm": 0.16666666666666666,
       "rx_errs_rate": 0.0,
-      "rx_bytes_rate": 6596423.3040331695,
-      "tx_bytes_rate": 67953.95760711087,
+      "rx_bytes_rate": 6543796.0,
+      "tx_bytes_rate": 66928.13333333333,
       "rx_err_gradient": 0.0,
-      "tx_util": 0.000543631660856887,
-      "rx_util": 0.05277138643226536
+      "tx_util": 0.0005354250666666666,
+      "rx_util": 0.052350368
     },
     {
       "id": "router:p1:interface:eth4",
@@ -506,11 +506,11 @@
       "tx_drops": 0.0,
       "mtu_norm": 0.16666666666666666,
       "rx_errs_rate": 0.0,
-      "rx_bytes_rate": 36.62484800000002,
-      "tx_bytes_rate": 34.76485748148161,
+      "rx_bytes_rate": 39.53333333333333,
+      "tx_bytes_rate": 47.8,
       "rx_err_gradient": 0.0,
-      "tx_util": 2.781188598518529e-07,
-      "rx_util": 2.929987840000002e-07
+      "tx_util": 3.824e-07,
+      "rx_util": 3.1626666666666664e-07
     },
     {
       "id": "router:p1:interface:eth5",
@@ -523,11 +523,11 @@
       "tx_drops": 0.0,
       "mtu_norm": 0.16666666666666666,
       "rx_errs_rate": 0.0,
-      "rx_bytes_rate": 142666.48843733364,
-      "tx_bytes_rate": 13156522.987090994,
+      "rx_bytes_rate": 141202.13333333333,
+      "tx_bytes_rate": 13052673.333333334,
       "rx_err_gradient": 0.0,
-      "tx_util": 0.10525218389672795,
-      "rx_util": 0.001141331907498669
+      "tx_util": 0.10442138666666667,
+      "rx_util": 0.0011296170666666666
     },
     {
       "id": "router:p1:interface:lo",
@@ -557,11 +557,11 @@
       "tx_drops": 0.0,
       "mtu_norm": 0.16666666666666666,
       "rx_errs_rate": 0.0,
-      "rx_bytes_rate": 109.60344888888815,
-      "tx_bytes_rate": 1269.4160918518735,
+      "rx_bytes_rate": 104.0,
+      "tx_bytes_rate": 1270.7333333333333,
       "rx_err_gradient": 0.0,
-      "tx_util": 1.0155328734814987e-05,
-      "rx_util": 8.768275911111053e-07
+      "tx_util": 1.0165866666666667e-05,
+      "rx_util": 8.32e-07
     },
     {
       "id": "router:p2:interface:eth1",
@@ -574,11 +574,11 @@
       "tx_drops": 0.0,
       "mtu_norm": 0.16666666666666666,
       "rx_errs_rate": 0.0,
-      "rx_bytes_rate": 71021.54966518508,
-      "tx_bytes_rate": 6590254.674500732,
+      "rx_bytes_rate": 71688.93333333333,
+      "tx_bytes_rate": 6635942.933333334,
       "rx_err_gradient": 0.0,
-      "tx_util": 0.05272203739600585,
-      "rx_util": 0.0005681723973214807
+      "tx_util": 0.05308754346666667,
+      "rx_util": 0.0005735114666666666
     },
     {
       "id": "router:p2:interface:eth2",
@@ -591,11 +591,11 @@
       "tx_drops": 0.0,
       "mtu_norm": 0.16666666666666666,
       "rx_errs_rate": 0.0,
-      "rx_bytes_rate": 35.06613925925922,
-      "tx_bytes_rate": 32.93645629629648,
+      "rx_bytes_rate": 35.06666666666666,
+      "tx_bytes_rate": 40.53333333333333,
       "rx_err_gradient": 0.0,
-      "tx_util": 2.634916503703718e-07,
-      "rx_util": 2.805291140740737e-07
+      "tx_util": 3.2426666666666666e-07,
+      "rx_util": 2.805333333333333e-07
     },
     {
       "id": "router:p2:interface:eth3",
@@ -608,11 +608,11 @@
       "tx_drops": 0.0,
       "mtu_norm": 0.16666666666666666,
       "rx_errs_rate": 0.0,
-      "rx_bytes_rate": 35.13960296296307,
-      "tx_bytes_rate": 35.17626074074043,
+      "rx_bytes_rate": 40.53333333333333,
+      "tx_bytes_rate": 40.53333333333333,
       "rx_err_gradient": 0.0,
-      "tx_util": 2.8141008592592345e-07,
-      "rx_util": 2.811168237037045e-07
+      "tx_util": 3.2426666666666666e-07,
+      "rx_util": 3.2426666666666666e-07
     },
     {
       "id": "router:p2:interface:eth4",
@@ -625,11 +625,11 @@
       "tx_drops": 0.0,
       "mtu_norm": 0.16666666666666666,
       "rx_errs_rate": 0.0,
-      "rx_bytes_rate": 6590257.190287408,
-      "tx_bytes_rate": 67384.77715555562,
+      "rx_bytes_rate": 6635944.533333333,
+      "tx_bytes_rate": 68012.0,
       "rx_err_gradient": 0.0,
-      "tx_util": 0.000539078217244445,
-      "rx_util": 0.05272205752229927
+      "tx_util": 0.000544096,
+      "rx_util": 0.05308755626666667
     },
     {
       "id": "router:p2:interface:lo",
@@ -659,11 +659,11 @@
       "tx_drops": 0.0,
       "mtu_norm": 0.16666666666666666,
       "rx_errs_rate": 0.0,
-      "rx_bytes_rate": 109.5128284444453,
-      "tx_bytes_rate": 1270.4772242962981,
+      "rx_bytes_rate": 104.0,
+      "tx_bytes_rate": 1322.8666666666666,
       "rx_err_gradient": 0.0,
-      "tx_util": 1.0163817794370385e-05,
-      "rx_util": 8.761026275555624e-07
+      "tx_util": 1.0582933333333332e-05,
+      "rx_util": 8.32e-07
     },
     {
       "id": "router:p3:interface:eth1",
@@ -676,11 +676,11 @@
       "tx_drops": 0.0,
       "mtu_norm": 0.16666666666666666,
       "rx_errs_rate": 0.0,
-      "rx_bytes_rate": 71307.31454814857,
-      "tx_bytes_rate": 6566742.827425774,
+      "rx_bytes_rate": 43.333333333333336,
+      "tx_bytes_rate": 38.93333333333333,
       "rx_err_gradient": 0.0,
-      "tx_util": 0.05253394261940619,
-      "rx_util": 0.0005704585163851885
+      "tx_util": 3.1146666666666665e-07,
+      "rx_util": 3.466666666666667e-07
     },
     {
       "id": "router:p3:interface:eth2",
@@ -693,11 +693,11 @@
       "tx_drops": 0.0,
       "mtu_norm": 0.16666666666666666,
       "rx_errs_rate": 0.0,
-      "rx_bytes_rate": 30.086260148148412,
-      "tx_bytes_rate": 28.78810192592623,
+      "rx_bytes_rate": 46.2,
+      "tx_bytes_rate": 46.733333333333334,
       "rx_err_gradient": 0.0,
-      "tx_util": 2.3030481540740984e-07,
-      "rx_util": 2.406900811851873e-07
+      "tx_util": 3.738666666666667e-07,
+      "rx_util": 3.6960000000000003e-07
     },
     {
       "id": "router:p3:interface:eth3",
@@ -710,11 +710,11 @@
       "tx_drops": 0.0,
       "mtu_norm": 0.16666666666666666,
       "rx_errs_rate": 0.0,
-      "rx_bytes_rate": 6584266.6388563365,
-      "tx_bytes_rate": 71304.48051259252,
+      "rx_bytes_rate": 40.53333333333333,
+      "tx_bytes_rate": 40.53333333333333,
       "rx_err_gradient": 0.0,
-      "tx_util": 0.0005704358441007401,
-      "rx_util": 0.052674133110850695
+      "tx_util": 3.2426666666666666e-07,
+      "rx_util": 3.2426666666666666e-07
     },
     {
       "id": "router:p3:interface:eth4",
@@ -727,11 +727,11 @@
       "tx_drops": 0.0,
       "mtu_norm": 0.16666666666666666,
       "rx_errs_rate": 0.0,
-      "rx_bytes_rate": 33.27294518518521,
-      "tx_bytes_rate": 33.288866962962786,
+      "rx_bytes_rate": 41.266666666666666,
+      "tx_bytes_rate": 50.6,
       "rx_err_gradient": 0.0,
-      "tx_util": 2.663109357037023e-07,
-      "rx_util": 2.6618356148148166e-07
+      "tx_util": 4.048e-07,
+      "rx_util": 3.301333333333333e-07
     },
     {
       "id": "router:p3:interface:lo",
@@ -761,11 +761,11 @@
       "tx_drops": 0.0,
       "mtu_norm": 0.16666666666666666,
       "rx_errs_rate": 0.0,
-      "rx_bytes_rate": 106.65156088888851,
-      "tx_bytes_rate": 1267.450275555551,
+      "rx_bytes_rate": 112.8,
+      "tx_bytes_rate": 1317.1598444444437,
       "rx_err_gradient": 0.0,
-      "tx_util": 1.0139602204444408e-05,
-      "rx_util": 8.532124871111081e-07
+      "tx_util": 1.053727875555555e-05,
+      "rx_util": 9.023999999999999e-07
     },
     {
       "id": "router:p4:interface:eth1",
@@ -778,11 +778,11 @@
       "tx_drops": 0.0,
       "mtu_norm": 0.16666666666666666,
       "rx_errs_rate": 0.0,
-      "rx_bytes_rate": 30.06959644444494,
-      "tx_bytes_rate": 30.322387555555125,
+      "rx_bytes_rate": 28.536568888889935,
+      "tx_bytes_rate": 23.93655111110614,
       "rx_err_gradient": 0.0,
-      "tx_util": 2.42579100444441e-07,
-      "rx_util": 2.405567715555595e-07
+      "tx_util": 1.9149240888884911e-07,
+      "rx_util": 2.2829255111111948e-07
     },
     {
       "id": "router:p4:interface:eth2",
@@ -795,11 +795,11 @@
       "tx_drops": 0.0,
       "mtu_norm": 0.16666666666666666,
       "rx_errs_rate": 0.0,
-      "rx_bytes_rate": 28.426005925926795,
-      "tx_bytes_rate": 29.857092148147316,
+      "rx_bytes_rate": 28.314622222220834,
+      "tx_bytes_rate": 23.71460444443704,
       "rx_err_gradient": 0.0,
-      "tx_util": 2.3885673718517853e-07,
-      "rx_util": 2.2740804740741436e-07
+      "tx_util": 1.8971683555549632e-07,
+      "rx_util": 2.2651697777776668e-07
     },
     {
       "id": "router:p4:interface:eth3",
@@ -812,11 +812,11 @@
       "tx_drops": 0.0,
       "mtu_norm": 0.16666666666666666,
       "rx_errs_rate": 0.0,
-      "rx_bytes_rate": 67299.92601303683,
-      "tx_bytes_rate": 6594897.805808615,
+      "rx_bytes_rate": 28.314622219403585,
+      "tx_bytes_rate": 23.71460418701172,
       "rx_err_gradient": 0.0,
-      "tx_util": 0.05275918244646892,
-      "rx_util": 0.0005383994081042947
+      "tx_util": 1.8971683349609376e-07,
+      "rx_util": 2.2651697775522867e-07
     },
     {
       "id": "router:p4:interface:eth4",
@@ -829,11 +829,11 @@
       "tx_drops": 0.0,
       "mtu_norm": 0.16666666666666666,
       "rx_errs_rate": 0.0,
-      "rx_bytes_rate": 6251394.807775439,
-      "tx_bytes_rate": 67344.28736829599,
+      "rx_bytes_rate": 28.18779602050781,
+      "tx_bytes_rate": 23.936551109949747,
       "rx_err_gradient": 0.0,
-      "tx_util": 0.0005387542989463679,
-      "rx_util": 0.05001115846220351
+      "tx_util": 1.9149240887959798e-07,
+      "rx_util": 2.255023681640625e-07
     },
     {
       "id": "router:p4:interface:lo",
@@ -863,11 +863,11 @@
       "tx_drops": 0.0,
       "mtu_norm": 0.16666666666666666,
       "rx_errs_rate": 0.0,
-      "rx_bytes_rate": 110.16,
-      "tx_bytes_rate": 1288.5289268148276,
+      "rx_bytes_rate": 112.8,
+      "tx_bytes_rate": 1290.2,
       "rx_err_gradient": 0.0,
-      "tx_util": 1.0308231414518621e-05,
-      "rx_util": 8.8128e-07
+      "tx_util": 1.03216e-05,
+      "rx_util": 9.023999999999999e-07
     },
     {
       "id": "router:pe1:interface:eth1",
@@ -880,11 +880,11 @@
       "tx_drops": 0.0,
       "mtu_norm": 0.16666666666666666,
       "rx_errs_rate": 0.0,
-      "rx_bytes_rate": 67935.2983608887,
-      "tx_bytes_rate": 6604085.210036146,
+      "rx_bytes_rate": 66863.46666666666,
+      "tx_bytes_rate": 6543796.0,
       "rx_err_gradient": 0.0,
-      "tx_util": 0.05283268168028917,
-      "rx_util": 0.0005434823868871096
+      "tx_util": 0.052350368,
+      "rx_util": 0.0005349077333333332
     },
     {
       "id": "router:pe1:interface:eth2",
@@ -897,11 +897,11 @@
       "tx_drops": 0.0,
       "mtu_norm": 0.16666666666666666,
       "rx_errs_rate": 0.0,
-      "rx_bytes_rate": 6551234.561808607,
-      "tx_bytes_rate": 60609.402631111145,
+      "rx_bytes_rate": 6491482.666666667,
+      "tx_bytes_rate": 59593.6,
       "rx_err_gradient": 0.0,
-      "tx_util": 0.00048487522104888916,
-      "rx_util": 0.052409876494468856
+      "tx_util": 0.0004767488,
+      "rx_util": 0.051931861333333336
     },
     {
       "id": "router:pe1:interface:lo",
@@ -931,11 +931,11 @@
       "tx_drops": 0.0,
       "mtu_norm": 0.16666666666666666,
       "rx_errs_rate": 0.0,
-      "rx_bytes_rate": 113.13244444444466,
-      "tx_bytes_rate": 1320.0450542222127,
+      "rx_bytes_rate": 108.39999999999999,
+      "tx_bytes_rate": 1318.8,
       "rx_err_gradient": 0.0,
-      "tx_util": 1.0560360433777702e-05,
-      "rx_util": 9.050595555555572e-07
+      "tx_util": 1.05504e-05,
+      "rx_util": 8.671999999999999e-07
     },
     {
       "id": "router:pe2:interface:eth1",
@@ -948,11 +948,11 @@
       "tx_drops": 0.0,
       "mtu_norm": 0.16666666666666666,
       "rx_errs_rate": 0.0,
-      "rx_bytes_rate": 13162475.266284991,
-      "tx_bytes_rate": 142740.54530192586,
+      "rx_bytes_rate": 13052673.333333334,
+      "tx_bytes_rate": 141176.13333333333,
       "rx_err_gradient": 0.0,
-      "tx_util": 0.0011419243624154068,
-      "rx_util": 0.10529980213027992
+      "tx_util": 0.0011294090666666666,
+      "rx_util": 0.10442138666666667
     },
     {
       "id": "router:pe2:interface:eth2",
@@ -965,11 +965,11 @@
       "tx_drops": 0.0,
       "mtu_norm": 0.16666666666666666,
       "rx_errs_rate": 0.0,
-      "rx_bytes_rate": 6572368.4657784,
-      "tx_bytes_rate": 71304.5625890366,
+      "rx_bytes_rate": 38.93333333333333,
+      "tx_bytes_rate": 43.333333333333336,
       "rx_err_gradient": 0.0,
-      "tx_util": 0.0005704365007122928,
-      "rx_util": 0.052578947726227204
+      "tx_util": 3.466666666666667e-07,
+      "rx_util": 3.1146666666666665e-07
     },
     {
       "id": "router:pe2:interface:eth3",
@@ -982,11 +982,11 @@
       "tx_drops": 0.0,
       "mtu_norm": 0.16666666666666666,
       "rx_errs_rate": 0.0,
-      "rx_bytes_rate": 181065.0846548144,
-      "tx_bytes_rate": 19629436.322355554,
+      "rx_bytes_rate": 119424.8,
+      "tx_bytes_rate": 12982965.333333334,
       "rx_err_gradient": 0.0,
-      "tx_util": 0.15703549057884442,
-      "rx_util": 0.001448520677238515
+      "tx_util": 0.10386372266666667,
+      "rx_util": 0.0009553984
     },
     {
       "id": "router:pe2:interface:lo",
@@ -1016,11 +1016,11 @@
       "tx_drops": 0.0,
       "mtu_norm": 0.16666666666666666,
       "rx_errs_rate": 0.0,
-      "rx_bytes_rate": 110.24330666666643,
-      "tx_bytes_rate": 1286.9337896296215,
+      "rx_bytes_rate": 112.8,
+      "tx_bytes_rate": 1334.2215777777135,
       "rx_err_gradient": 0.0,
-      "tx_util": 1.0295470317036973e-05,
-      "rx_util": 8.819464533333314e-07
+      "tx_util": 1.0673772622221709e-05,
+      "rx_util": 9.023999999999999e-07
     },
     {
       "id": "router:pe3:interface:eth1",
@@ -1033,11 +1033,11 @@
       "tx_drops": 0.0,
       "mtu_norm": 0.16666666666666666,
       "rx_errs_rate": 0.0,
-      "rx_bytes_rate": 67306.070574815,
-      "tx_bytes_rate": 6589269.678118492,
+      "rx_bytes_rate": 25.166844447453816,
+      "tx_bytes_rate": 28.52262217203776,
       "rx_err_gradient": 0.0,
-      "tx_util": 0.052714157424947936,
-      "rx_util": 0.00053844856459852
+      "tx_util": 2.2818097737630208e-07,
+      "rx_util": 2.0133475557963053e-07
     },
     {
       "id": "router:pe3:interface:eth2",
@@ -1050,11 +1050,11 @@
       "tx_drops": 0.0,
       "mtu_norm": 0.16666666666666666,
       "rx_errs_rate": 0.0,
-      "rx_bytes_rate": 6540660.399385207,
-      "tx_bytes_rate": 61579.87624444432,
+      "rx_bytes_rate": 0.0,
+      "tx_bytes_rate": 0.0,
       "rx_err_gradient": 0.0,
-      "tx_util": 0.0004926390099555545,
-      "rx_util": 0.05232528319508166
+      "tx_util": 0.0,
+      "rx_util": 0.0
     },
     {
       "id": "router:pe3:interface:lo",
@@ -1084,11 +1084,11 @@
       "tx_drops": 0.0,
       "mtu_norm": 0.16666666666666666,
       "rx_errs_rate": 0.0,
-      "rx_bytes_rate": 110.16031288888925,
-      "tx_bytes_rate": 1288.5862731851805,
+      "rx_bytes_rate": 108.69802666666607,
+      "tx_bytes_rate": 1338.5920711110036,
       "rx_err_gradient": 0.0,
-      "tx_util": 1.0308690185481445e-05,
-      "rx_util": 8.81282503111114e-07
+      "tx_util": 1.0708736568888029e-05,
+      "rx_util": 8.695842133333286e-07
     },
     {
       "id": "router:pe4:interface:eth1",
@@ -1101,11 +1101,11 @@
       "tx_drops": 0.0,
       "mtu_norm": 0.16666666666666666,
       "rx_errs_rate": 0.0,
-      "rx_bytes_rate": 67388.72370725949,
-      "tx_bytes_rate": 6587641.6250311965,
+      "rx_bytes_rate": 67554.57322666646,
+      "tx_bytes_rate": 6629689.564800008,
       "rx_err_gradient": 0.0,
-      "tx_util": 0.052701133000249575,
-      "rx_util": 0.0005391097896580759
+      "tx_util": 0.053037516518400066,
+      "rx_util": 0.0005404365858133317
     },
     {
       "id": "router:pe4:interface:eth2",
@@ -1118,11 +1118,11 @@
       "tx_drops": 0.0,
       "mtu_norm": 0.16666666666666666,
       "rx_errs_rate": 0.0,
-      "rx_bytes_rate": 6534823.4563484695,
-      "tx_bytes_rate": 60080.610301629706,
+      "rx_bytes_rate": 6576719.186488851,
+      "tx_bytes_rate": 60226.19797333876,
       "rx_err_gradient": 0.0,
-      "tx_util": 0.0004806448824130376,
-      "rx_util": 0.05227858765078776
+      "tx_util": 0.0004818095837867101,
+      "rx_util": 0.05261375349191081
     },
     {
       "id": "router:pe4:interface:lo",
@@ -1152,11 +1152,11 @@
       "tx_drops": 0.0,
       "mtu_norm": 0.16666666666666666,
       "rx_errs_rate": 0.0,
-      "rx_bytes_rate": 111.12787911111074,
-      "tx_bytes_rate": 1261.1675828148093,
+      "rx_bytes_rate": 111.73461333333204,
+      "tx_bytes_rate": 1308.858524444451,
       "rx_err_gradient": 0.0,
-      "tx_util": 1.0089340662518474e-05,
-      "rx_util": 8.89023032888886e-07
+      "tx_util": 1.0470868195555607e-05,
+      "rx_util": 8.938769066666562e-07
     },
     {
       "id": "router:rr1:interface:eth1",
@@ -1169,11 +1169,11 @@
       "tx_drops": 0.0,
       "mtu_norm": 0.16666666666666666,
       "rx_errs_rate": 0.0,
-      "rx_bytes_rate": 31.44256474074131,
-      "tx_bytes_rate": 30.024974222222035,
+      "rx_bytes_rate": 30.743182222219183,
+      "tx_bytes_rate": 26.600177777775873,
       "rx_err_gradient": 0.0,
-      "tx_util": 2.401997937777763e-07,
-      "rx_util": 2.515405179259305e-07
+      "tx_util": 2.12801422222207e-07,
+      "rx_util": 2.459454577777535e-07
     },
     {
       "id": "router:rr1:interface:eth2",
@@ -1186,11 +1186,11 @@
       "tx_drops": 0.0,
       "mtu_norm": 0.16666666666666666,
       "rx_errs_rate": 0.0,
-      "rx_bytes_rate": 33.77648829629645,
-      "tx_bytes_rate": 35.625377185185336,
+      "rx_bytes_rate": 30.33852444444783,
+      "tx_bytes_rate": 34.14254222221983,
       "rx_err_gradient": 0.0,
-      "tx_util": 2.850030174814827e-07,
-      "rx_util": 2.702119063703716e-07
+      "tx_util": 2.7314033777775865e-07,
+      "rx_util": 2.4270819555558267e-07
     },
     {
       "id": "router:rr1:interface:lo",
@@ -1220,11 +1220,11 @@
       "tx_drops": 0.0,
       "mtu_norm": 0.16666666666666666,
       "rx_errs_rate": 0.0,
-      "rx_bytes_rate": 110.14419911111187,
-      "tx_bytes_rate": 1261.3073943703703,
+      "rx_bytes_rate": 112.8,
+      "tx_bytes_rate": 1262.0666666666666,
       "rx_err_gradient": 0.0,
-      "tx_util": 1.0090459154962962e-05,
-      "rx_util": 8.81153592888895e-07
+      "tx_util": 1.0096533333333332e-05,
+      "rx_util": 9.023999999999999e-07
     },
     {
       "id": "router:rr2:interface:eth1",
@@ -1237,11 +1237,11 @@
       "tx_drops": 0.0,
       "mtu_norm": 0.16666666666666666,
       "rx_errs_rate": 0.0,
-      "rx_bytes_rate": 34.564475259259865,
-      "tx_bytes_rate": 38.97926162962854,
+      "rx_bytes_rate": 37.86666666666667,
+      "tx_bytes_rate": 43.333333333333336,
       "rx_err_gradient": 0.0,
-      "tx_util": 3.118340930370283e-07,
-      "rx_util": 2.765158020740789e-07
+      "tx_util": 3.466666666666667e-07,
+      "rx_util": 3.0293333333333335e-07
     },
     {
       "id": "router:rr2:interface:eth2",
@@ -1254,11 +1254,11 @@
       "tx_drops": 0.0,
       "mtu_norm": 0.16666666666666666,
       "rx_errs_rate": 0.0,
-      "rx_bytes_rate": 35.71433125925819,
-      "tx_bytes_rate": 36.00953007407383,
+      "rx_bytes_rate": 50.6,
+      "tx_bytes_rate": 46.733333333333334,
       "rx_err_gradient": 0.0,
-      "tx_util": 2.8807624059259064e-07,
-      "rx_util": 2.8571465007406553e-07
+      "tx_util": 3.738666666666667e-07,
+      "rx_util": 4.048e-07
     },
     {
       "id": "router:rr2:interface:lo",

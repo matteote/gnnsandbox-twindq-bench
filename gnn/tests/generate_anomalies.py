@@ -37,7 +37,7 @@ def generate_anomalies():
         instance_id=INSTANCE_ID,
         database_id=DATABASE_ID,
         num_snapshots=5,
-        interval_minutes=5,
+        interval_minutes=0.5,  # 30-second cadence — matches training data
         project_id=PROJECT_ID
     )
 
@@ -71,11 +71,11 @@ def generate_anomalies():
         
     if target_router:
         logger.info(f"Injecting CPU Spike on Router: {target_router['id']} ({target_router['hostname']})")
-        target_router['cpu'] = 0.98 
-        target_router['mem'] = 0.05
+        target_router['cpu'] = 8.0   # far outside training range (0.07–1.18)
+        target_router['mem'] = 0.05  # far below baseline (always 1.0)
 
     # 4. Compute temporal features to "solidify" the anomalies (e.g. compute the gradient)
-    SpannerDataset.compute_temporal_features(snapshots, interval_seconds=300.0)
+    SpannerDataset.compute_temporal_features(snapshots, interval_seconds=30.0)
     
     # Verify the gradient was captured
     if target_iface:
