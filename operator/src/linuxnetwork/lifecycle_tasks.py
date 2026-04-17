@@ -88,7 +88,8 @@ async def get_detailed_network_status(ip_address: str, network_name: str) -> Dic
         'network_name': network_name
     }
     
-    result = await _run_ansible_playbook(ip_address, 'detailed_status_network.yaml', extravars)
+    result = await _run_ansible_playbook(ip_address, 'detailed_status_network.yaml', 
+                                         extravars, is_monitoring=True)
     
     # Extract detailed bridge state from ansible_facts
     return {
@@ -106,12 +107,12 @@ async def get_detailed_network_status(ip_address: str, network_name: str) -> Dic
 # Ansible Execution Helper
 #########################################################################
     
-async def _run_ansible_playbook(ip_address:str, playbook: str, extravars: Dict[str, Any]) -> Dict[str, Any]:
+async def _run_ansible_playbook(ip_address:str, playbook: str, extravars: Dict[str, Any], is_monitoring: bool = False) -> Dict[str, Any]:
     """Run an Ansible playbook with the given extra variables"""
     
-    # Get the Ansible semaphore for throttling
-    from utils.ansible import get_ansible_semaphore
-    semaphore = get_ansible_semaphore()
+    # Get the appropriate Ansible semaphore for throttling
+    from utils.ansible import get_ansible_operational_semaphore, get_ansible_monitor_semaphore
+    semaphore = get_ansible_monitor_semaphore() if is_monitoring else get_ansible_operational_semaphore()
     
     # Prepare host inventory
     hosts = {

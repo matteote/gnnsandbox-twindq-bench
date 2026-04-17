@@ -11,6 +11,8 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import asyncio
+import hashlib
 import kopf
 import logging
 import kubernetes
@@ -131,15 +133,50 @@ async def resume_linuxnetwork(body, spec, name, namespace, logger, **kwargs):
         )
 
 @kopf.timer('google.dev', 'v1', 'linuxnetwork', interval=300.0)
-async def monitor_linuxnetwork(body, spec, name, namespace, uid, logger, **kwargs):
+async def monitor_linuxnetwork(body, spec, name, namespace, uid, logger, memo, **kwargs):
     """Monitor LinuxNetwork status with detailed state tracking"""
 
-    # Do not monitor until after first successful install
+    # ── Thundering-herd protection ────────────────────────────────────────────
+    # On operator restart all N LinuxNetwork timers fire at t=0 simultaneously.
+    # We compute a deterministic, per-resource jitter (0-89 s) from the
+    # resource name hash so monitors spread themselves out automatically.
+    # memo is in-memory and resets at every pod restart, so the jitter only applies
+    # on the very first call after (re)start — subsequent 300-s ticks are unaffected.
+    # Increase max jitter value with the number of items in linux network but keep it under 
+    # interval
+    max_jitter = 90
+    if not memo.get('monitor_jitter_done'):
+        jitter_s = int(hashlib.md5(name.encode()).hexdigest(), 16) % max_jitter
+        if jitter_s > 0:
+            logger.info(f"Staggering LinuxNetwork {name} monitor startup by {jitter_s}s")
+            await asyncio.sleep(jitter_s)
+        memo['monitor_jitter_done'] = True
+    # ─────────────────────────────────────────────────────────────────────────
+
+
+    # Do not monitor until after first successful install and kopf
+    # handlers are still working on it
     status_dict = body.get('status', {})
+
+    # Skip if the network has never been created
     if not status_dict or status_dict.get('phase') in ["Pending", "Creating", None]:
         logger.debug(f"Skipping monitor for {name}, network not fully created yet")
         return
 
+    # Skip if a kopf handler (create / delete) is currently in-flight for this resource.
+    # An in-flight handler has success=False AND failure=False in kopf's progress state.
+    # Running an Ansible status check while a create/delete Ansible playbook is already
+    # active on the same network would compete for semaphore slots unnecessarily.
+    kopf_progress = body.get('status', {}).get('kopf', {}).get('progress', {})
+    active_handlers = {k: v for k, v in kopf_progress.items()
+                    if not v.get('success') and not v.get('failure')}
+    if active_handlers:
+        logger.info(
+            f"Skipping monitor for {name}, kopf handlers in-flight: {list(active_handlers.keys())}"
+        )
+        return
+
+    # get networkvm IP address
     ip_address = await get_ip("automation", "networkvm")
     if ip_address is None:
         logger.warning("No ip address found on Network VM yet, skipping monitoring check")

@@ -19,16 +19,34 @@ logger = logging.getLogger(__name__)
 
 ########################################################
 # Concurrency management in ansible
+# Two separate semaphores so monitoring playbooks can
+# never starve create/delete/configure operations.
+#   - Operational: create / delete / configure  (7 slots)
+#   - Monitor:     status checks                (3 slots)
+# Total = 10, same as before — but now guaranteed split.
 ########################################################
-ANSIBLE_CONCURRENCY_LIMIT = 10
-ansible_semaphore = asyncio.Semaphore(ANSIBLE_CONCURRENCY_LIMIT)
+ANSIBLE_OPERATIONAL_LIMIT = 7
+ANSIBLE_MONITOR_LIMIT     = 3
 
-# Max number of concurrent workers for handling requests
+ansible_operational_semaphore = asyncio.Semaphore(ANSIBLE_OPERATIONAL_LIMIT)
+ansible_monitor_semaphore     = asyncio.Semaphore(ANSIBLE_MONITOR_LIMIT)
+
+# Keep the old name as an alias so callers that haven't been
+# updated yet continue to get the operational semaphore.
+ansible_semaphore = ansible_operational_semaphore
 MAX_WORKERS = 10
 
 def get_ansible_semaphore():
-    """Get the global semaphore for throttling ansible operations"""
-    return ansible_semaphore
+    """Backward-compat: returns the operational semaphore."""
+    return ansible_operational_semaphore
+
+def get_ansible_operational_semaphore():
+    """For create / delete / configure playbooks (7 slots)."""
+    return ansible_operational_semaphore
+
+def get_ansible_monitor_semaphore():
+    """For status / monitoring playbooks (3 slots)."""
+    return ansible_monitor_semaphore
 
 ########################################################
 # Ansible event handler
