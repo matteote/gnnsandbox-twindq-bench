@@ -118,21 +118,18 @@ def fetch_all_metrics():
 
 def clear_network_metrics():
   """
-  Clears all records from the NetworkMetrics table.
+  Clears all records from the NetworkMetrics table using Partitioned DML,
+  which bypasses the 20,000 mutation-per-transaction limit and is safe for
+  tables with large numbers of rows.
   
   Returns:
     bool: True if the operation was successful, False otherwise.
   """
   try:
-    def delete_all(transaction):
-      row_count = transaction.execute_update(
-        "DELETE FROM NetworkMetrics WHERE 1=1"
-      )
-      logger.info(f"Deleted {row_count} records from NetworkMetrics table")
-      return row_count
-      
-    row_count = database.run_in_transaction(delete_all)
-    logger.info(f"Successfully cleared {row_count} records from NetworkMetrics table")
+    row_count = database.execute_partitioned_dml(
+      "DELETE FROM NetworkMetrics WHERE TRUE"
+    )
+    logger.info(f"Successfully cleared ~{row_count} records from NetworkMetrics table")
     return True
   except Exception as e:
     logger.error(f"Failed to clear NetworkMetrics table: {e}")

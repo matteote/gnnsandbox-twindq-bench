@@ -2,12 +2,11 @@ import kopf
 import logging
 import kubernetes
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Optional, Dict, Any
 from traffictest.lifecycle_tasks import (
     create_traffic_test,
     delete_traffic_test,
-    get_traffic_test_status,
 )
 from utils.compute import get_ip
 from traffictest.port_allocator import PortAllocator
@@ -22,38 +21,151 @@ port_allocator = PortAllocator()
 #########################################################################
 
 async def initial_setup(logger):
-    """Scan existing TrafficTest resources and re-populate PortAllocator. This is
-    an anti-entropy machanism when the network operator is redeployed and we need to
-    realign the port allocator with the currently running traffic tests"""
-    
-    logger.info("Operator starting up, re-populating PortAllocator from existing TrafficTests")
-    
+    """Scan existing TrafficTest resources and re-populate PortAllocator.
+
+    This is an anti-entropy mechanism when the network operator is redeployed
+    and we need to re-align the port allocator with the currently running
+    traffic tests.
+
+    In addition to port re-allocation, this pass reconciles any TrafficTest
+    whose ``status.phase`` is missing (empty status dict) — a situation that
+    arises when the operator was restarted before it could write the initial
+    status, or when tests were created against an older operator version.
+
+    Reconciliation heuristics (applied only when ``status.phase`` is absent):
+
+    * **Has ``allocated_ports``** → the create handler ran far enough to assign
+      ports and (presumably) start the agents.  We infer the phase from
+      ``metadata.creationTimestamp + spec.duration``:
+
+      - ``now  < creation + duration`` → **Running**
+      - ``now >= creation + duration`` → **Completed**
+
+    * **No ``allocated_ports`` and no ``phase``** → the create handler never
+      finished (operator was down).  Kopf will re-trigger ``on.create`` for
+      any resource it has not yet annotated; for resources Kopf considers
+      "done" (its handler annotation is present) we mark **Failed** so the
+      user has clear feedback.
+    """
+    logger.info("Operator starting up — synchronizing PortAllocator and reconciling TrafficTest phases")
+
     client = kubernetes.dynamic.DynamicClient(kubernetes.client.ApiClient())
     api = client.resources.get(api_version='google.dev/v1', kind='TrafficTest')
-    
+
     try:
-        # List all TrafficTest resources
         resources = api.get()
-        
-        count = 0
+        now = datetime.now(timezone.utc)
+
+        port_count = 0
+        reconcile_count = 0
+
         for tt in resources.items:
             tt_dict = tt.to_dict()
-            name = tt_dict['metadata']['name']
-            status = tt_dict.get('status', {})
-            
-            # Check for allocated_ports (list)
+            name      = tt_dict['metadata']['name']
+            namespace = tt_dict['metadata'].get('namespace', 'default')
+            spec      = tt_dict.get('spec',   {}) or {}
+            status    = tt_dict.get('status', {}) or {}
+            meta      = tt_dict.get('metadata', {})
+
+            # ── 1. Re-populate PortAllocator ─────────────────────────────────
             ports = status.get('allocated_ports')
-            
             if ports:
-                # Reserve in allocator
                 port_allocator.mark_busy(ports)
                 logger.info(f"Re-allocated ports {ports} for TrafficTest {name}")
-                count += 1
-        
-        logger.info(f"PortAllocator synchronization complete. Re-marked {count} TrafficTests.")
-        
+                port_count += 1
+
+            # ── 2. Reconcile missing phase ────────────────────────────────────
+            if status.get('phase'):
+                # Phase already set — nothing to reconcile.
+                continue
+
+            logger.info(f"TrafficTest {name} has no status.phase — reconciling")
+
+            if ports:
+                # Ports were allocated; infer phase from age vs duration.
+                duration_sec = int(spec.get('duration', 60))
+                source_count = len(spec.get('source_devices', []))
+
+                creation_str = meta.get('creationTimestamp')  # ISO-8601 UTC
+                try:
+                    creation_ts = datetime.fromisoformat(
+                        creation_str.replace('Z', '+00:00')
+                    )
+                except Exception:
+                    creation_ts = now  # fallback: assume just created
+
+                expected_end = creation_ts + timedelta(seconds=duration_sec)
+
+                if now < expected_end:
+                    # Agents should still be running.
+                    remaining = int((expected_end - now).total_seconds())
+                    phase   = "Running"
+                    message = (
+                        f"Reconciled on operator restart — estimated {remaining}s remaining"
+                    )
+                    additional = {
+                        'start_time':  creation_ts.isoformat(),
+                        'source_count': source_count,
+                        'allocated_ports': ports,
+                    }
+                    logger.info(
+                        f"TrafficTest {name}: marking Running (~{remaining}s left)"
+                    )
+                    # Re-arm the completion marker so we still transition to Completed.
+                    asyncio.create_task(
+                        mark_completed_after(name, namespace, remaining)
+                    )
+                else:
+                    # Duration already elapsed — test is done.
+                    phase   = "Completed"
+                    message = "Reconciled on operator restart — duration had already elapsed"
+                    additional = {
+                        'start_time': creation_ts.isoformat(),
+                        'end_time':   expected_end.isoformat(),
+                        'source_count': source_count,
+                        'allocated_ports': ports,
+                    }
+                    # Ports no longer needed — free them so the space is re-usable.
+                    port_allocator.free(ports)
+                    logger.info(f"TrafficTest {name}: marking Completed (duration elapsed)")
+
+                await update_status(name, namespace, phase, message,
+                                    additional_data=additional)
+                reconcile_count += 1
+
+            else:
+                # No ports, no phase.  The create handler never ran (or failed
+                # before port allocation).  Check whether Kopf has annotated this
+                # resource; if so it considers the handler "done" and will not
+                # retry — mark Failed so the user gets clear feedback.
+                annotations = meta.get('annotations', {}) or {}
+                kopf_handled = any(
+                    k.startswith('kopf.zalando.org/') for k in annotations
+                )
+                if kopf_handled:
+                    await update_status(
+                        name, namespace, "Failed",
+                        "Operator restarted before this TrafficTest could be provisioned — "
+                        "please delete and re-create the resource to retry",
+                    )
+                    logger.warning(
+                        f"TrafficTest {name}: marked Failed (no ports, kopf-annotated, operator restart)"
+                    )
+                    reconcile_count += 1
+                else:
+                    # Kopf will re-trigger on.create automatically.
+                    logger.info(
+                        f"TrafficTest {name}: no ports and no kopf annotation — "
+                        "Kopf will re-trigger on.create"
+                    )
+
+        logger.info(
+            f"Startup sync complete: {port_count} port block(s) re-marked, "
+            f"{reconcile_count} TrafficTest phase(s) reconciled"
+        )
+
     except Exception as e:
-        logger.error(f"Failed to synchronize PortAllocator: {e}")
+        logger.error(f"Failed to synchronize PortAllocator / reconcile phases: {e}")
 
 #########################################################################
 # TrafficTest Lifecycle Management
@@ -71,6 +183,14 @@ async def create_traffic_test_handler(body, spec, name, namespace, uid, logger, 
     logger.info(f"network vm address = {ip_address}")
 
     try:
+        # Check that the referenced VyOSL3VPN is Ready before proceeding.
+        vpn_ref = spec.get('vpnRef')
+        if not await check_vpn_ready(vpn_ref, namespace):
+            await update_status(name, namespace, "Pending",
+                                f"Waiting for VyOSL3VPN '{vpn_ref}' to be Ready")
+            raise kopf.TemporaryError(
+                f"Waiting for VyOSL3VPN '{vpn_ref}' to be Ready", delay=30)
+
         # Validate required Devices exist and are ready
         source_devices = spec.get('source_devices', [])
         destination_device = spec.get('destination_device')
@@ -81,14 +201,17 @@ async def create_traffic_test_handler(body, spec, name, namespace, uid, logger, 
             await update_status(name, namespace, "Failed", error_msg)
             raise kopf.PermanentError(error_msg)
         
-        # Port assignment using global PortAllocator
+        # Port assignment using global PortAllocator.
+        # Bidirectional tests need 2 ports per source (one forward, one reverse).
         num_sources = len(source_devices)
+        bidirectional = bool(spec.get('bidirectional', False))
+        ports_needed = num_sources * 2 if bidirectional else num_sources
         port_mode = spec.get('port_mode', 'auto')
         
         if port_mode == 'manual':
             # Skip validation already done
             requested_port = spec.get('port')
-            allocated_ports = port_allocator.alloc(num_sources, requested_port)
+            allocated_ports = port_allocator.alloc(ports_needed, requested_port)
             if not allocated_ports:
                 error_msg = f"Manual port {requested_port} is already in use"
                 logger.error(f"TrafficTest {name}: {error_msg}")
@@ -98,7 +221,7 @@ async def create_traffic_test_handler(body, spec, name, namespace, uid, logger, 
                 logger.info(f"Using manual port {allocated_ports[0]} from spec")
         else:
             # Automatic allocation
-            allocated_ports = port_allocator.alloc(num_sources)
+            allocated_ports = port_allocator.alloc(ports_needed)
 
         if allocated_ports is None:
             raise kopf.PermanentError("No free port blocks available for TrafficTest")
@@ -112,23 +235,28 @@ async def create_traffic_test_handler(body, spec, name, namespace, uid, logger, 
         
         # Check if all source devices are ready
         for index, source_device in enumerate(source_devices):
-            ready, device_ip = await check_device_ready(source_device, namespace)
+            ready, device_ip, device_mgmt_ip = await check_device_ready(source_device, namespace)
             if not ready:
                 all_sources_ready = False
                 not_ready_devices.append(source_device)
 
-            devices_info[source_device]= {
-                'ready': ready,
-                'ip': device_ip,
-                'port': allocated_ports[index]
+            devices_info[source_device] = {
+                'ready':   ready,
+                'ip':      device_ip,
+                'mgmt_ip': device_mgmt_ip,
+                'port':    allocated_ports[index],
             }
+            # For bidirectional tests the second half of allocated_ports are the
+            # reverse-direction ports (destination→source), one per source device.
+            if bidirectional:
+                devices_info[source_device]['reverse_port'] = allocated_ports[num_sources + index]
 
-                
         # Check if destination device is ready
-        dest_ready, dest_ip = await check_device_ready(destination_device, namespace)
+        dest_ready, dest_ip, dest_mgmt_ip = await check_device_ready(destination_device, namespace)
         devices_info[destination_device] = {
-            'ready': dest_ready,
-            'ip': dest_ip
+            'ready':   dest_ready,
+            'ip':      dest_ip,
+            'mgmt_ip': dest_mgmt_ip,
         }
         if not all_sources_ready or not dest_ready:
             not_ready_list = not_ready_devices + ([destination_device] if not dest_ready else [])
@@ -155,7 +283,6 @@ async def create_traffic_test_handler(body, spec, name, namespace, uid, logger, 
                 source_statuses[source_device] = {
                     'phase': 'Running',
                     'message': 'Traffic generator started',
-                    'metrics': {}
                 }
             # Update status to running
             await update_status(
@@ -165,21 +292,14 @@ async def create_traffic_test_handler(body, spec, name, namespace, uid, logger, 
                     'start_time': result.get('start_time'),
                     'source_count': len(source_devices),
                     'source_status': source_statuses,
-                    'aggregate_metrics': {
-                        'total_throughput_bps': 0,
-                        'avg_latency_ms': 0,
-                        'avg_packet_loss_pct': 0,
-                        'total_connections': 0
-                    },
                     'allocated_ports': allocated_ports
                 }
             )
             logger.info(f"Successfully started TrafficTest {name} with {len(source_devices)} source device(s)")
             
-            status = body.get('status', {})
-            # Start background task to monitor the test
+            # Start background task to mark Completed after duration elapses
             asyncio.create_task(
-                monitor_traffic_test(name, namespace, spec, allocated_ports, ip_address)
+                mark_completed_after(name, namespace, spec.get('duration', 60))
             )
             
         else:
@@ -222,18 +342,24 @@ async def delete_traffic_test_handler(body, spec, name, namespace, logger, **kwa
     allocated_ports = status.get('allocated_ports')
     devices_info = {}
 
-    dest_ready, dest_ip = await check_device_ready(destination_device, namespace)
-    devices_info[destination_device] = {
-        'ready': dest_ready,
-        'ip': dest_ip
-    }
-
     if allocated_ports and source_devices:
-        # Add source device infos
+        # Look up mgmt_ip for destination
+        try:
+            _, dest_ip, dest_mgmt_ip = await check_device_ready(destination_device, namespace)
+        except Exception:
+            dest_ip, dest_mgmt_ip = None, None
+        devices_info[destination_device] = {'ip': dest_ip, 'mgmt_ip': dest_mgmt_ip}
+
+        # Add source device infos with mgmt_ip
         for index, source_device in enumerate(source_devices):
             if index < len(allocated_ports):
-                devices_info[source_device]= {
-                    'port': allocated_ports[index]
+                try:
+                    _, _, src_mgmt_ip = await check_device_ready(source_device, namespace)
+                except Exception:
+                    src_mgmt_ip = None
+                devices_info[source_device] = {
+                    'port':    allocated_ports[index],
+                    'mgmt_ip': src_mgmt_ip,
                 }
 
         result = await delete_traffic_test(name, ip_address, spec, devices_info)
@@ -255,113 +381,83 @@ async def delete_traffic_test_handler(body, spec, name, namespace, logger, **kwa
         # Don't raise error on delete failure
 
 #########################################################################
-# Background Monitoring
+# Background Completion Marker
 #########################################################################
 
-async def monitor_traffic_test(name: str, namespace: str, spec: dict, ports: list, ip_address: str):
-    """Monitor a running traffic test and update status"""
-    logger.info(f"Starting monitoring for TrafficTest {name}")
-    
-    duration = spec.get('duration', 60)
-    metrics_interval = spec.get('metrics_interval', 5)
-    source_devices = spec.get('source_devices')
-    allocated_ports = status.get('allocated_ports')
+async def mark_completed_after(name: str, namespace: str, duration: int):
+    """Wait for the test duration to elapse, then mark the TrafficTest Completed.
 
-    if allocated_ports and source_devices:
-        # Build device infos
-        devices_info = {}
-        for index, source_device in enumerate(source_devices):
-            if index < len(allocated_ports):
-                devices_info[source_device]= {
-                    'port': allocated_ports[index]
-                }
-    else:
-        logger.warning(f"monitor_traffic_test called for {name} without devices or ports!")
-    return
+    Traffic agents self-terminate after duration_sec; actual metrics are
+    collected by the Ops Agent and written to Cloud Monitoring — no polling
+    of the agents is needed here.
+    """
+    logger.info(f"TrafficTest {name}: will mark Completed in {duration}s")
+    await asyncio.sleep(duration)
+    logger.info(f"TrafficTest {name}: duration elapsed, marking Completed")
+    await update_status(
+        name, namespace, "Completed",
+        f"Traffic test completed after {duration}s",
+        additional_data={'end_time': datetime.now(timezone.utc).isoformat()}
+    )
 
-    # Monitor for the duration of the test
-    start_time = datetime.now(timezone.utc)
-    
+#########################################################################
+# VPN Validation
+#########################################################################
+
+async def check_vpn_ready(vpn_name: str, namespace: str) -> bool:
+    """
+    Check if the specified VyOSL3VPN exists and has status 'Ready'.
+
+    Args:
+        vpn_name:  Name of the VyOSL3VPN resource
+        namespace: Kubernetes namespace
+
+    Returns:
+        True if the VPN is Ready, False if it exists but is not yet Ready.
+
+    Raises:
+        kopf.PermanentError: if the VPN resource is not found (404).
+    """
+    client = kubernetes.dynamic.DynamicClient(kubernetes.client.ApiClient())
+    api = client.resources.get(api_version='google.dev/v1', kind='VyOSL3VPN')
+
     try:
+        vpn = api.get(name=vpn_name, namespace=namespace)
+        vpn_dict = vpn.to_dict()
+        phase = vpn_dict.get('status', {}).get('phase', 'Unknown')
 
-        # Get Network VM IP address
-        ip_address = await get_ip("automation", "networkvm")
-        if ip_address is None:
-            logger.warning("No IP address found on Network VM, skipping traffic test deletion")
-            return
+        if phase == 'Ready':
+            logger.info(f"VyOSL3VPN '{vpn_name}' is Ready")
+            return True
+        else:
+            logger.info(f"Waiting for VyOSL3VPN '{vpn_name}' to be Ready (current: {phase})")
+            return False
 
-        while True:
-            elapsed = (datetime.now(timezone.utc) - start_time).total_seconds()
-            
-            if elapsed >= duration:
-                # Test should be completed
-                logger.info(f"TrafficTest {name} duration reached, checking final status")
-                
-                # Get final status
-                status_result = await get_traffic_test_status(name, ip_address, spec, devices_info)
-                
-                if status_result['success']:
-                    await update_status(
-                        name, namespace, "Completed",
-                        f"Traffic test completed successfully after {duration}s",
-                        additional_data={
-                            'end_time': datetime.now(timezone.utc).isoformat(),
-                            'current_metrics': status_result.get('current_metrics', {})
-                        }
-                    )
-                else:
-                    await update_status(
-                        name, namespace, "Failed",
-                        f"Traffic test failed: {status_result.get('error', 'Unknown error')}"
-                    )
-                break
-            
-            # Get current status and metrics
-            try:
-                status_result = await get_traffic_test_status(name, ip_address, spec, devices_info)
-                
-                if status_result['success']:
-                    current_metrics = status_result.get('current_metrics', {})
-                    
-                    await update_status(
-                        name, namespace, "Running",
-                        f"Traffic test running ({elapsed:.0f}s/{duration}s)",
-                        additional_data={
-                            'current_metrics': current_metrics
-                        }
-                    )
-                else:
-                    logger.warning(f"Failed to get status for TrafficTest {name}: {status_result.get('error')}")
-                    
-            except Exception as e:
-                logger.error(f"Error monitoring TrafficTest {name}: {e}")
-                logger.error(f"{e.backtrace.join("\n")}")            
-            # Wait for next check
-            await asyncio.sleep(min(metrics_interval, 30))  # Check at least every 30s
-            
-    except Exception as e:
-        logger.error(f"Error in TrafficTest monitoring {name}: {e}")
-        await update_status(name, namespace, "Failed", f"Monitoring failed: {str(e)}")
+    except kubernetes.client.rest.ApiException as e:
+        if e.status == 404:
+            raise kopf.PermanentError(f"VyOSL3VPN '{vpn_name}' not found")
+        else:
+            logger.error(f"Error checking VyOSL3VPN '{vpn_name}': {e}")
+            raise
 
 #########################################################################
 # Device Validation
 #########################################################################
 
-async def check_device_ready(device_name: str, namespace: str) -> bool:
+async def check_device_ready(device_name: str, namespace: str):
     """
     Check if the specified Device exists and has status 'Ready'.
-    
+
     Args:
         device_name: Name of the Device resource
-        namespace: Kubernetes namespace
-    
+        namespace:   Kubernetes namespace
+
     Returns:
-        bool: True if Device is ready, False otherwise
-        device_ip: IP address of the Device
+        Tuple (ready: bool, data_ip: str|None, mgmt_ip: str|None)
     """
     if not device_name:
         logger.warning("No device_name provided for Device check")
-        return False, None
+        return False, None, None
 
     client = kubernetes.dynamic.DynamicClient(kubernetes.client.ApiClient())
     api = client.resources.get(api_version='google.dev/v1', kind='Device')
@@ -375,21 +471,23 @@ async def check_device_ready(device_name: str, namespace: str) -> bool:
         
         if phase != 'Ready':
             logger.warning(f"Device '{device_name}' is in phase '{phase}', not Ready")
-            return False, None
+            return False, None, None
         else:
             logger.info(f"Device '{device_name}' is Ready")
-            return True, device_dict.get('spec', {}).get('ip_address', None)
+            data_ip  = device_dict.get('spec',   {}).get('ip_address')
+            mgmt_ip  = device_dict.get('status', {}).get('mgmt_ip')
+            return True, data_ip, mgmt_ip
 
     except kubernetes.client.rest.ApiException as e:
         if e.status == 404:
             logger.warning(f"Device '{device_name}' not found")
-            return False, None
+            return False, None, None
         else:
             logger.error(f"Error checking Device '{device_name}': {e}")
-            return False, None
+            return False, None, None
     except Exception as e:
         logger.error(f"Unexpected error checking Device '{device_name}': {e}")
-        return False, None
+        return False, None, None
 
 #########################################################################
 # Status Management
@@ -440,7 +538,9 @@ async def update_status(name: str, namespace: str, phase: str, message: str,
         logger.debug(f"Updated status for TrafficTest {name}: {phase} - {message}")
         
     except kubernetes.client.rest.ApiException as e:
-        if e.status == 422 and "status" in str(e):
+        if e.status == 404:
+            logger.debug(f"TrafficTest {name} not found (likely deleted), skipping status update.")
+        elif e.status == 422 and "status" in str(e):
             logger.warning(f"Status subresource not enabled for TrafficTest {name}, skipping status update.")
         else:
             logger.error(f"Failed to update status for TrafficTest {name}: {e}")

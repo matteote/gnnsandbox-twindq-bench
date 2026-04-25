@@ -41,6 +41,22 @@ gnnsandbox/
 │   ├── faultservice/           # Fault detection service
 │   ├── logcollector/           # Log collection
 │   └── metricscollector/       # Metrics collection
+├── traffic-agent/          # Network traffic generator & receiver (Go)
+│   ├── cmd/agent/              # Binary entrypoint (daemon / run / serve modes)
+│   ├── internal/
+│   │   ├── api/                # HTTP/JSON REST control API (daemon mode)
+│   │   ├── flowmanager/        # Flow lifecycle registry (start/stop/status)
+│   │   ├── session/            # Concurrent TCP/UDP send-session pool
+│   │   ├── server/             # TCP & UDP traffic receivers
+│   │   ├── patterns/           # Traffic patterns (constant, burst, multisine, poisson, schedule)
+│   │   ├── metrics/            # Thread-safe metrics collection & Snapshot
+│   │   ├── bandwidth/          # Bandwidth string parser (e.g. "10Mbps")
+│   │   ├── ratelimit/          # Token-bucket rate limiter + pattern controller
+│   │   └── config/             # OneShotConfig & FlowRequest JSON schemas
+│   ├── proto/agent.proto       # gRPC API definition (Phase 2)
+│   └── tests/                  # Local integration tests
+│       ├── test_local.sh           # Bash integration test runner (serve/run + daemon REST)
+│       └── configs/                # One-shot JSON config fixtures
 ├── lib/                    # Shared Python library (agent_library)
 │   └── src/agent_library/
 ├── ui/dashboard/           # Web dashboard (Flutter/Dart)
@@ -59,6 +75,7 @@ gnnsandbox/
 | Layer | Technology |
 |-------|-----------|
 | Language (backend) | Python 3.13 |
+| Language (traffic agent) | Go 1.22+ |
 | Language (frontend) | Flutter / Dart |
 | Cloud Platform | Google Cloud Platform (GCP) |
 | Container Orchestration | GKE (Google Kubernetes Engine) |
@@ -113,6 +130,55 @@ source ./setenv.sh
 ./install.sh -d    # Delete environment config
 ./install.sh -k; ./install.sh -d   # Full cleanup
 ```
+
+### traffic-agent (Go) — Local Development
+
+```bash
+cd traffic-agent
+
+# Build for the current OS/arch (required before running tests)
+make build-local
+
+# Run the full integration test suite (build + test)
+./tests/test_local.sh
+
+# Skip rebuild if binary is already up to date
+SKIP_BUILD=1 ./tests/test_local.sh
+
+# Run Go unit tests
+make test
+
+# One-shot server mode (replaces iperf3 -s)
+./traffic-agent serve --port 5201 --protocol TCP --duration 60
+
+# One-shot client mode (replaces traffic_generator.py)
+./traffic-agent run --config path/to/config.json
+
+# Daemon mode (long-lived HTTP agent on :9090)
+./traffic-agent daemon --control-port 9090
+
+# Daemon REST API examples
+curl http://localhost:9090/v1/health
+curl -X POST http://localhost:9090/v1/flows \
+  -H 'Content-Type: application/json' \
+  -d '{"flow_id":"f1","role":"destination","port":5201,"protocol":"TCP","duration_sec":30}'
+curl http://localhost:9090/v1/flows/f1
+curl -X DELETE http://localhost:9090/v1/flows/f1
+```
+
+**traffic-agent modes:**
+
+| Mode | Description | Equivalent |
+|------|-------------|------------|
+| `daemon` | Long-lived HTTP agent; operator POSTs flows via REST | Phase 2 container mode |
+| `run` | One-shot source; reads JSON config, sends traffic, outputs JSON result | Replaces `traffic_generator.py` |
+| `serve` | One-shot receiver; listens for traffic then exits | Replaces `iperf3 -s` |
+
+**Key packages:**
+- `internal/flowmanager` — thread-safe flow registry; each flow runs as a goroutine in `source` or `destination` role
+- `internal/patterns` — pluggable traffic shape: `constant`, `burst`, `multisine`, `periodic`, `poisson`, `schedule`
+- `internal/metrics` — atomic counters → `Snapshot` (snake_case JSON tags, consistent across REST and one-shot output)
+- `internal/session` — manages pools of concurrent TCP/UDP connections with shared token-bucket rate limiter
 
 ## Development Conventions
 

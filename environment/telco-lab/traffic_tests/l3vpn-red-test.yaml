@@ -1,0 +1,246 @@
+# L3VPN traffic tests — RED any-to-any mesh
+#
+# RED VPN  (d1-red, d2-red, d3-red, d4-red)                — any-to-any mesh tests.
+#
+# RED MESH tests:
+#
+#   d1-red-to-d2-red-tcp  — TCP, multi_sine (unidirectional). Simulates branch
+#                           uploads between two mesh sites.
+#
+#   d3-red-to-d4-red-udp  — UDP, schedule (unidirectional). Business-hours
+#                           quality probe between a second pair of mesh sites.
+#
+#   d1-red-d3-red-bidir   — Bidirectional TCP between diagonal mesh sites.
+#                           Forward (d1→d3): multi_sine upload.
+#                           Reverse (d3→d1): heavier download response.
+#
+#   d2-red-d4-red-bidir   — Bidirectional UDP between a second diagonal pair.
+#                           Forward: business-hours schedule uplink.
+#                           Reverse: steady low-rate monitoring push.
+#
+# All flow metrics (throughput_bps, latency_ms, jitter_ms, packet_loss_pct,
+# active_sessions) are exported on port 9091 by the traffic-agent and scraped
+# automatically by the Ops Agent into Cloud Monitoring — no metrics_enabled /
+# metrics_interval fields are needed in the spec.
+#
+# Bidirectional flows produce Prometheus metrics with two flow_id series per device:
+#   flow_id="d1-red-d3-red-bidir_d1-red"      role=source      (d1 uploads to d3)
+#   flow_id="d1-red-d3-red-bidir_d1-red_rev"  role=destination (d1 receives from d3)
+#   (and mirror series with role swapped on d3-red)
+
+# ════════════════════════════════════════════════════════════════════════════
+# RED VPN — any-to-any mesh traffic tests
+# ════════════════════════════════════════════════════════════════════════════
+---
+# ── d1-red → d2-red : TCP throughput, multi_sine ────────────────────────────
+apiVersion: google.dev/v1
+kind: TrafficTest
+metadata:
+  name: d1-red-to-d2-red-tcp
+  namespace: default
+  labels:
+    scenario: l3vpn-red-mesh
+    vpn: red-mesh
+    source: d1-red
+    pattern: multi_sine
+spec:
+  vpnRef: l3vpn-red-service
+  source_devices:
+    - d1-red
+  destination_device: d2-red
+  protocol: TCP
+
+  duration: 604800  # 7 days
+
+  # Composite waveform — same shape as the blue spoke tests for easy comparison.
+  # bw(t) = 25Mbps + 20Mbps × sin(daily) + 8Mbps × sin(weekly)
+  # Result: ~5 Mbps overnight, ~45 Mbps weekday peak.
+  bandwidth: 50Mbps
+  pattern_type: multi_sine
+  pattern_config:
+    time_reference: wall_clock
+    base_rate: 25Mbps
+    components:
+      - period: 86400
+        amplitude: 20Mbps
+        phase_offset: -28800      # peak at 14:00 UTC
+      - period: 604800
+        amplitude: 8Mbps
+        phase_offset: 0
+    noise_stddev_pct: 3.0
+    min_rate: 3Mbps
+    max_rate: 100Mbps
+
+  concurrent_users: 10
+
+---
+# ── d3-red → d4-red : UDP quality, business-hours schedule ──────────────────
+apiVersion: google.dev/v1
+kind: TrafficTest
+metadata:
+  name: d3-red-to-d4-red-udp
+  namespace: default
+  labels:
+    scenario: l3vpn-red-mesh
+    vpn: red-mesh
+    source: d3-red
+    pattern: schedule
+spec:
+  vpnRef: l3vpn-red-service
+  source_devices:
+    - d3-red
+  destination_device: d4-red
+  protocol: UDP
+
+  duration: 604800  # 7 days
+
+  bandwidth: 50Mbps
+  pattern_type: schedule
+  pattern_config:
+    time_reference: wall_clock
+    interpolation: linear
+    repeat: daily
+    waypoints:
+      - time: "00:00"
+        rate: "2Mbps"
+      - time: "07:30"
+        rate: "15Mbps"
+      - time: "09:00"
+        rate: "40Mbps"
+      - time: "12:00"
+        rate: "30Mbps"
+      - time: "13:30"
+        rate: "45Mbps"
+      - time: "17:00"
+        rate: "25Mbps"
+      - time: "19:00"
+        rate: "10Mbps"
+      - time: "22:00"
+        rate: "4Mbps"
+
+  concurrent_users: 10
+
+---
+# ── d1-red ↔ d3-red : TCP bidirectional, multi_sine ─────────────────────────
+#
+# Exercises a diagonal mesh path (site 1 ↔ site 3 across two different PEs).
+#
+#   d1-red → d3-red (forward):  site uploads — multi_sine, base 25 Mbps.
+#   d3-red → d1-red (reverse):  content response — heavier, base 40 Mbps.
+#
+# Prometheus flow IDs:
+#   d1-red-d3-red-bidir_d1-red      role=source
+#   d1-red-d3-red-bidir_d1-red_rev  role=destination
+apiVersion: google.dev/v1
+kind: TrafficTest
+metadata:
+  name: d1-red-d3-red-bidir
+  namespace: default
+  labels:
+    scenario: l3vpn-red-mesh
+    vpn: red-mesh
+    source: d1-red
+    pattern: multi_sine
+    direction: bidirectional
+spec:
+  vpnRef: l3vpn-red-service
+  source_devices:
+    - d1-red
+  destination_device: d3-red
+  protocol: TCP
+  duration: 604800  # 7 days
+
+  bandwidth: 50Mbps
+  pattern_type: multi_sine
+  pattern_config:
+    time_reference: wall_clock
+    base_rate: 25Mbps
+    components:
+      - period: 86400
+        amplitude: 20Mbps
+        phase_offset: -28800
+      - period: 604800
+        amplitude: 8Mbps
+        phase_offset: 0
+    noise_stddev_pct: 3.0
+    min_rate: 3Mbps
+    max_rate: 100Mbps
+
+  bidirectional: true
+  reverse_bandwidth: 80Mbps
+  reverse_pattern_type: multi_sine
+  reverse_pattern_config:
+    time_reference: wall_clock
+    base_rate: 40Mbps
+    components:
+      - period: 86400
+        amplitude: 30Mbps
+        phase_offset: -28800
+      - period: 604800
+        amplitude: 10Mbps
+        phase_offset: 0
+    noise_stddev_pct: 3.0
+    min_rate: 5Mbps
+    max_rate: 100Mbps
+
+  concurrent_users: 10
+
+---
+# ── d2-red ↔ d4-red : UDP bidirectional, schedule + constant ─────────────────
+#
+# Exercises a second diagonal mesh path (site 2 ↔ site 4).
+#
+#   d2-red → d4-red (forward):  business-hours UDP uplink (schedule).
+#   d4-red → d2-red (reverse):  steady monitoring / control push (constant 8 Mbps).
+#
+# Prometheus flow IDs:
+#   d2-red-d4-red-bidir_d2-red      role=source
+#   d2-red-d4-red-bidir_d2-red_rev  role=destination
+apiVersion: google.dev/v1
+kind: TrafficTest
+metadata:
+  name: d2-red-d4-red-bidir
+  namespace: default
+  labels:
+    scenario: l3vpn-red-mesh
+    vpn: red-mesh
+    source: d2-red
+    pattern: schedule
+    direction: bidirectional
+spec:
+  vpnRef: l3vpn-red-service
+  source_devices:
+    - d2-red
+  destination_device: d4-red
+  protocol: UDP
+  duration: 604800  # 7 days
+
+  bandwidth: 50Mbps
+  pattern_type: schedule
+  pattern_config:
+    time_reference: wall_clock
+    interpolation: linear
+    repeat: daily
+    waypoints:
+      - time: "00:00"
+        rate: "2Mbps"
+      - time: "07:30"
+        rate: "15Mbps"
+      - time: "09:00"
+        rate: "40Mbps"
+      - time: "12:00"
+        rate: "30Mbps"
+      - time: "13:30"
+        rate: "45Mbps"
+      - time: "17:00"
+        rate: "25Mbps"
+      - time: "19:00"
+        rate: "10Mbps"
+      - time: "22:00"
+        rate: "4Mbps"
+
+  bidirectional: true
+  reverse_bandwidth: 8Mbps
+  reverse_pattern_type: constant
+
+  concurrent_users: 10

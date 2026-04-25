@@ -1,6 +1,6 @@
 # VyOS Metrics: Collection and Processing
 
-This document summarises the raw metrics scraped from VyOS routers and the subset that the metrics collector selects and writes to Cloud Spanner.
+This document summarises the raw metrics scraped from VyOS routers and device containers (traffic-agent), and the metrics that the metrics collector selects and writes to Cloud Spanner.
 
 ---
 
@@ -111,10 +111,10 @@ Metrics are written to the `NetworkMetrics` table with the following columns:
 | `node_name` | Router name (from `router_name` label) |
 | `metric_name` | Raw metric name (e.g. `node_network_up`) |
 | `metric_type` | Prometheus type: `gauge` or `counter` |
-| `kind` | Category: `SYSTEM` (node_ prefix) or `ROUTING` (frr_ prefix) |
+| `kind` | Category: `SYSTEM` (node_ prefix), `ROUTING` (frr_ prefix), or `TRAFFIC` (traffic_agent_ prefix) |
 | `value` | Numeric metric value (float) |
-| `labels` | Full label set as JSON (includes device/interface, VRF, AFI, etc.) |
-| `interface` | Value of the `device` label if present, else null |
+| `labels` | Full label set as JSON. For SYSTEM/ROUTING: includes device/interface, VRF, AFI, etc. For TRAFFIC: `{"flow_id": ..., "role": ..., "protocol": ...}` |
+| `interface` | For SYSTEM/ROUTING: value of the `device` label if present, else null. For TRAFFIC: the `flow_id` string. |
 
 ### 2.2 Selected System Metrics
 
@@ -157,6 +157,26 @@ These are derived from **frr_exporter** and categorised as `kind = ROUTING`:
 | `process_network_receive_bytes_total` | counter | — | Bytes received by the FRR exporter process |
 | `process_network_transmit_bytes_total` | counter | — | Bytes transmitted by the FRR exporter process |
 
+
+## 2.4. Traffic-Agent Metrics (Device Containers, port 9091)
+
+Traffic-agent metrics are written to Cloud Spanner by the `metricscollector` with `kind="TRAFFIC"` and `interface=flow_id`. The `node_name` column is set to the source device name extracted from the `flow_id` (e.g. `"dev1-to-hub-tcp_dev1"` → `node_name="dev1"`). For bidirectional reverse flows (`*_rev` suffix) the `_rev` is stripped before extraction so the correct device name is stored.
+
+| Metric | Type | Populated on | Description |
+|---|---|---|---|
+| `traffic_agent_bytes_sent_total` | Counter | `role=source` only | Total bytes sent by this flow (0 on destination side) |
+| `traffic_agent_bytes_received_total` | Counter | `role=destination` only | Total bytes received by this flow (0 on source side) |
+| `traffic_agent_throughput_bps` | Gauge | Both | Instantaneous throughput in bits/sec — delta-based (see note below) |
+| `traffic_agent_latency_ms` | Gauge | `role=source`, UDP only | Mean one-way latency in milliseconds |
+| `traffic_agent_jitter_ms` | Gauge | `role=source`, UDP only | Mean inter-packet jitter in milliseconds |
+| `traffic_agent_packet_loss_pct` | Gauge | `role=source`, UDP only | Packet loss percentage |
+| `traffic_agent_active_sessions` | Gauge | `role=source` only | Number of concurrent sessions within this flow |
+| `traffic_agent_flow_running` | Gauge | Both | `1` if flow phase is `running`, `0` for all other phases |
+
+**`throughput_bps` calculation:** On each scrape the agent computes `(bytes sent + received since last scrape) × 8 ÷ elapsed_seconds`. This is a delta-based gauge, not a counter derivative — do **not** apply `rate()` to it; query it directly.
+
+**Latency, jitter, packet loss** are computed from UDP sequence-number timestamps embedded in each packet. They are not available for TCP flows.
+
 ### 2.4 Aggregation
 
 Before storage, metrics are aligned over the poll window (20 seconds):
@@ -168,15 +188,38 @@ Before storage, metrics are aligned over the poll window (20 seconds):
 
 A background thread runs every 20 minutes and deletes rows from `NetworkMetrics` older than **3 hours**, keeping the Spanner table compact and relevant for near-real-time analysis.
 
+
+### 3.3 Example Prometheus Queries
+
+```promql
+# Forward throughput (source → destination)
+traffic_agent_throughput_bps{flow_id="dev1-to-hub-tcp_dev1", role="source"}
+
+# Received throughput on the hub for the same flow
+traffic_agent_throughput_bps{flow_id="dev1-to-hub-tcp_dev1", role="destination"}
+
+# All flows currently running (either direction)
+traffic_agent_flow_running == 1
+
+# UDP packet loss on any active spoke→hub flow
+traffic_agent_packet_loss_pct{flow_id=~".*_dev.*", role="source"}
+
+# Reverse flow (bidirectional) throughput from hub back to dev1
+traffic_agent_throughput_bps{flow_id="dev1-hub-tcp-bidir_dev1_rev", role="source"}
+```
+
 ---
 
-## 3. Data Flow Summary
+## 4. Data Flow Summary
 
 ```
 VyOS Router
   ├── node_exporter  :9100  ──┐
   └── frr_exporter   :9101  ──┤
-                              │  (Prometheus scrape)
+                              │  (Prometheus scrape, job=vyos-lab)
+Device Container (per device)
+  └── traffic-agent  :9091  ──┤
+                              │  (Prometheus scrape, job=device)
                     GCP Ops Agent
                               │
                     Cloud Monitoring
@@ -184,10 +227,11 @@ VyOS Router
                               │
                     metricscollector (Cloud Run)
                     - Polls every 20s
-                    - Selects 27 specific metrics
-                    - Filters to job="vyos-lab"
+                    - 27 VyOS metrics  (job=vyos-lab)  → kind=SYSTEM/ROUTING
+                    - 8 traffic-agent metrics (job=traffic-agents) → kind=TRAFFIC
                     - Aggregates (rate or mean)
                               │
                     Cloud Spanner
                     NetworkMetrics table
+                    (SYSTEM + ROUTING + TRAFFIC rows)
 ```

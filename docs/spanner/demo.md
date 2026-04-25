@@ -236,10 +236,10 @@ RETURN
     router.name AS router_name,
     router.role AS router_role,
     router.location_city AS city,
-    emb.anomaly_score AS anomaly_score,
+    emb.hetgnn_score AS hetgnn_score,
     emb.anomaly_explanation AS explanation,
     emb.timestamp AS embedding_time
-ORDER BY emb.anomaly_score DESC
+ORDER BY emb.hetgnn_score DESC
 ```
 
 **Expected Result**: All PE/P/CE routers with their anomaly scores.
@@ -261,9 +261,9 @@ RETURN
     router.name AS router_name,
     intf.name AS interface_name,
     intf.status AS interface_status,
-    emb.anomaly_score AS anomaly_score,
+    emb.hetgnn_score AS hetgnn_score,
     emb.anomaly_explanation AS explanation
-ORDER BY emb.anomaly_score DESC
+ORDER BY emb.hetgnn_score DESC
 LIMIT 50
 ```
 
@@ -279,14 +279,14 @@ Quickly find nodes with anomalies using SQL for fast filtering.
 SELECT 
     ne.node_id,
     ne.node_type,
-    ne.anomaly_score,
+    ne.hetgnn_score,
     JSON_VALUE(ne.anomaly_explanation, '$.primary_feature') AS primary_issue,
     JSON_VALUE(ne.anomaly_explanation, '$.error_value') AS error_value,
     ne.timestamp
 FROM NodeEmbedding ne
 WHERE ne.timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 30 MINUTE)
-  AND ne.anomaly_score > 0.1
-ORDER BY ne.anomaly_score DESC, ne.timestamp DESC
+  AND ne.hetgnn_score > 0.1
+ORDER BY ne.hetgnn_score DESC, ne.timestamp DESC
 LIMIT 20;
 ```
 
@@ -302,8 +302,8 @@ Extract embedding vectors for visualization tools.
 SELECT 
     node_id,
     node_type,
-    anomaly_score,
-    embedding,
+    hetgnn_score,
+    hetgnn_embedding,
     timestamp
 FROM NodeEmbedding
 WHERE timestamp = (
@@ -387,8 +387,8 @@ WITH baseline AS (
     SELECT 
         node_id,
         node_type,
-        anomaly_score AS baseline_score,
-        embedding AS baseline_embedding,
+        hetgnn_score AS baseline_score,
+        hetgnn_embedding AS baseline_embedding,
         timestamp AS baseline_time
     FROM NodeEmbedding
     WHERE timestamp < TIMESTAMP('2026-02-19 08:00:00 UTC')  -- BEFORE FAULT
@@ -398,8 +398,8 @@ current AS (
     SELECT 
         node_id,
         node_type,
-        anomaly_score AS current_score,
-        embedding AS current_embedding,
+        hetgnn_score AS current_score,
+        hetgnn_embedding AS current_embedding,
         anomaly_explanation,
         timestamp AS current_time
     FROM NodeEmbedding
@@ -436,15 +436,15 @@ Shows how a specific node's embedding changed over time.
 ```sql
 SELECT 
     timestamp,
-    anomaly_score,
+    hetgnn_score,
     JSON_VALUE(anomaly_explanation, '$.primary_feature') AS primary_feature,
     JSON_VALUE(anomaly_explanation, '$.error_value') AS error_value,
     -- Show first 5 dimensions of embedding for trending
-    embedding[OFFSET(0)] AS emb_dim_0,
-    embedding[OFFSET(1)] AS emb_dim_1,
-    embedding[OFFSET(2)] AS emb_dim_2,
-    embedding[OFFSET(3)] AS emb_dim_3,
-    embedding[OFFSET(4)] AS emb_dim_4
+    hetgnn_embedding[OFFSET(0)] AS emb_dim_0,
+    hetgnn_embedding[OFFSET(1)] AS emb_dim_1,
+    hetgnn_embedding[OFFSET(2)] AS emb_dim_2,
+    hetgnn_embedding[OFFSET(3)] AS emb_dim_3,
+    hetgnn_embedding[OFFSET(4)] AS emb_dim_4
 FROM NodeEmbedding
 WHERE node_id = 'pe1'  -- Focus on specific router
   AND timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 2 HOUR)
@@ -455,32 +455,46 @@ ORDER BY timestamp ASC;
 
 ---
 
-### Query D3: Root Cause Identification via Graph Traversal
+### Query D3: Root Cause Identification via SQL Traversal
 
-Starting from failing devices, trace back through topology to find misconfigured router.
+Starting from a failing device, trace back through the topology to find the misconfigured PE
+router. BGP peering is derived by matching `BGPSession.peer_ip` against
+`PhysicalInterface.ip_address` — there is no `PeersWith` graph edge.
 
-```gql
-GRAPH networkGraph
--- Find devices with connectivity issues (high anomaly)
-MATCH (dev:Device)<-[:PlacedOn]-(intf_ce:PhysicalInterface)
-      <-[:HasInterface]-(ce:PhysicalRouter {role: 'CE'})
-      -[:BelongsToVRF]-(bgp_ce:BGPSession)
-      -[:PeersWith]-(bgp_pe:BGPSession)
-      -[:BelongsToVRF]->(vrf:VRF)
-      -[:LocatedOn]->(pe:PhysicalRouter {role: 'PE'})
-      -[:RouterHasEmbedding]->(pe_emb:NodeEmbedding)
-WHERE dev.name = 'dev1'  -- Device with connectivity issue
-  AND pe_emb.timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 10 MINUTE)
-  AND pe_emb.anomaly_score > 0.1
-RETURN 
-    dev.name AS failing_device,
-    ce.name AS ce_router,
-    pe.name AS pe_router,
-    vrf.name AS vrf_name,
-    vrf.rd AS route_distinguisher,
-    pe_emb.anomaly_score AS pe_anomaly_score,
-    pe_emb.anomaly_explanation AS root_cause
-ORDER BY pe_emb.anomaly_score DESC
+```sql
+-- Trace: failing device → CE router → PE BGP session (via peer_ip match) → VRF → PE embedding
+SELECT
+    d.name                                                        AS failing_device,
+    ce.name                                                       AS ce_router,
+    pe.name                                                       AS pe_router,
+    vrf.name                                                      AS vrf_name,
+    vrf.rd                                                        AS route_distinguisher,
+    pe_emb.hetgnn_score                                           AS pe_hetgnn_score,
+    pe_emb.anomaly_explanation                                    AS root_cause
+FROM Device d
+-- Device connects directly to a specific CE router interface (the gateway interface)
+JOIN PhysicalInterface ce_intf ON d.interface_id = ce_intf.id
+-- Navigate up to the CE router
+JOIN PhysicalRouter ce ON ce_intf.router_id = ce.id
+-- CE router has an interface whose IP matches a PE BGP session's peer_ip
+JOIN PhysicalInterface ce_pe_intf ON ce_pe_intf.router_id = ce.id
+JOIN BGPSession bgp_pe ON bgp_pe.peer_ip = ce_pe_intf.ip_address
+-- The PE BGP session belongs to a VRF on a PE router
+JOIN VRF vrf ON bgp_pe.vrf_id = vrf.id
+JOIN PhysicalRouter pe ON vrf.router_id = pe.id
+-- Latest embedding for that PE router within the last 10 minutes
+JOIN NodeEmbedding pe_emb
+    ON pe_emb.node_id = pe.id
+    AND pe_emb.timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 10 MINUTE)
+WHERE d.name = 'dev1'           -- Device with connectivity issue
+  AND d.valid_end_ts IS NULL
+  AND ce.valid_end_ts IS NULL
+  AND ce_intf.valid_end_ts IS NULL
+  AND bgp_pe.valid_end_ts IS NULL
+  AND vrf.valid_end_ts IS NULL
+  AND pe.valid_end_ts IS NULL
+  AND pe_emb.hetgnn_score > 0.1
+ORDER BY pe_emb.hetgnn_score DESC
 ```
 
 **Expected Result**: Traces from dev1 → ce1-spoke → pe1, showing PE1 has high anomaly in config.
@@ -496,9 +510,9 @@ WITH config_changes AS (
     SELECT 
         node_id,
         timestamp,
-        anomaly_score,
+        hetgnn_score,
         JSON_VALUE(anomaly_explanation, '$.feature_errors."Config (Semantic)"') AS config_error,
-        LAG(anomaly_score) OVER (PARTITION BY node_id ORDER BY timestamp) AS prev_score
+        LAG(hetgnn_score) OVER (PARTITION BY node_id ORDER BY timestamp) AS prev_score
     FROM NodeEmbedding
     WHERE node_type IN ('PE Router', 'P Router', 'CE Router')
       AND timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 2 HOUR)
@@ -506,12 +520,12 @@ WITH config_changes AS (
 SELECT 
     node_id,
     timestamp AS change_detected_at,
-    anomaly_score AS current_score,
+    hetgnn_score AS current_score,
     prev_score,
-    ROUND(anomaly_score - COALESCE(prev_score, 0), 4) AS score_jump,
+    ROUND(hetgnn_score - COALESCE(prev_score, 0), 4) AS score_jump,
     CAST(config_error AS FLOAT64) AS config_error_magnitude
 FROM config_changes
-WHERE anomaly_score - COALESCE(prev_score, 0) > 0.2  -- Significant change
+WHERE hetgnn_score - COALESCE(prev_score, 0) > 0.2  -- Significant change
 ORDER BY score_jump DESC;
 ```
 
@@ -527,7 +541,7 @@ Calculate L2 distance between baseline and current embeddings to quantify change
 WITH baseline AS (
     SELECT 
         node_id,
-        embedding AS baseline_emb
+        hetgnn_embedding AS baseline_emb
     FROM NodeEmbedding
     WHERE timestamp < TIMESTAMP('2026-02-19 08:00:00 UTC')  -- BEFORE FAULT
     QUALIFY ROW_NUMBER() OVER (PARTITION BY node_id ORDER BY timestamp DESC) = 1
@@ -535,15 +549,15 @@ WITH baseline AS (
 current AS (
     SELECT 
         node_id,
-        embedding AS current_emb,
-        anomaly_score
+        hetgnn_embedding AS current_emb,
+        hetgnn_score
     FROM NodeEmbedding
     WHERE timestamp >= TIMESTAMP('2026-02-19 08:00:00 UTC')  -- AFTER FAULT
     QUALIFY ROW_NUMBER() OVER (PARTITION BY node_id ORDER BY timestamp ASC) = 1
 )
 SELECT 
     c.node_id,
-    c.anomaly_score,
+    c.hetgnn_score,
     -- Calculate Euclidean distance between embeddings
     SQRT(
         (SELECT SUM(POW(b_val - c_val, 2))

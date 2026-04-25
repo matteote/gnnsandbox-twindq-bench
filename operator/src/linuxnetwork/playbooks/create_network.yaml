@@ -1,9 +1,17 @@
 ---
 - hosts: all
   become: true
-  gather_facts: true
+  # Disable global fact gathering — most network types (p2p, data) don't need
+  # any Ansible facts.  Fact collection adds 10-30s of SSH overhead per run,
+  # causing playbook timeouts under concurrent load.  Management networks still
+  # need ansible_default_ipv4, so a conditional setup task follows instead.
+  gather_facts: no
 
   tasks:
+    - name: Gather facts for management network only
+      setup:
+      when: network_type == 'management'
+
     - name: Create native Linux bridge network (brctl)
       command: brctl addbr {{ network_name }}
       register: network_result
@@ -27,6 +35,7 @@
         - bandwidth is defined
         - bandwidth is not none
         - bandwidth != ''
+        - bandwidth != 'unlimited'
       shell: |
         set -e
         BRIDGE="{{ network_name }}"
@@ -55,6 +64,7 @@
         - bandwidth is defined
         - bandwidth is not none
         - bandwidth != ''
+        - bandwidth != 'unlimited'
         - tc_result is defined
         - tc_result.stdout is defined
       debug:

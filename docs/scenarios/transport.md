@@ -11,7 +11,10 @@ This script details how to demonstrate a transport network root cause analysis s
 Create an L3 hub and spoke VPN. From the gnnsandbox base directory run the following command.
 
 ```
-kubectl apply -f environment/telco-lab/l3vpn-hub-spoke.yaml
+kubectl apply -f environment/telco-lab/l3vpn-network/infrastructure.yaml
+kubectl apply -f environment/telco-lab/l3vpn-network/underlay.yaml
+kubectl apply -f environment/telco-lab/l3vpn-network/blue-vpn.yaml
+kubectl apply -f environment/telco-lab/l3vpn-network/red-vpn.yaml
 ```
 
 You can see the current state of the routers by running the following command. All VyosRouters and Devices should have a state of `Ready`.
@@ -34,10 +37,11 @@ Vyos Routers [send metrics to Cloud Monitoring](/docs/network/metrics.md), the n
 Run the following command to deploy simulated traffic across the l3 vpn.
 
 ```
-kubectl apply -f environment/telco-lab/l3vpn-test.yaml
+kubectl apply -f environment/telco-lab/traffic-tests/l3vpn-blue-test.yaml
+kubectl apply -f environment/telco-lab/traffic-tests/l3vpn-red-test.yaml
 ```
 
-This will run a test that initiates traffic from both spoke devices to the hub device. The test should run for an hour to collect the data needed to train the GNN. 
+This will run tests traffic from both spoke devices to the hub device, and from all mesh devices. The tests should run for an hour to collect the data needed to train the GNN. 
 
 In the network dashboard UI click on the performance icon on the top right to show the current router performance.
 

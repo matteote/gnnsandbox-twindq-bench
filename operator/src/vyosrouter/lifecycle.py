@@ -37,6 +37,13 @@ async def create_vyosrouter(body, spec, name, namespace, uid, logger, **kwargs):
     """Handle VyOSRouter creation using Ansible"""
     logger.info(f"Creating VyOSRouter: {name} in namespace: {namespace}")
 
+    # Idempotency guard: if already Running (e.g. operator restarted after Ansible
+    # succeeded but before kopf recorded completion), skip re-creation entirely.
+    current_phase = body.get('status', {}).get('phase')
+    if current_phase == 'Running':
+        logger.info(f"VyOSRouter {name} already in Running state, skipping re-creation")
+        return
+
     ip_address = await get_ip("automation", "networkvm")
     if ip_address is None:
         raise kopf.TemporaryError("No ip address found on Network VM yet, temporary error - waiting", 10)
@@ -265,102 +272,6 @@ async def delete_vyosrouter(body, spec, name, namespace, logger, **kwargs):
         logger.error(f"Error during VyOSRouter deletion {name}: {e}")
         # Don't raise error on delete failure
 
-@kopf.timer('google.dev', 'v1', 'vyosrouter', interval=300.0)
-async def monitor_vyosrouter(body, spec, name, namespace, logger, **kwargs):
-    """Monitor VyOSRouter status periodically and report only on state changes"""
-
-    # Do not monitor until after first successful install
-    status_dict = body.get('status', {})
-    logger.info(f"===== Entering VyOSRouter Monitor for  {name}")
-    h = status_dict.copy(); h.pop('applied_config', None)
-    logger.info(f"Previous status dict: {h}")
-    if not status_dict or status_dict.get('phase') in ["Pending", "Creating", "Configuring", "Updating", None]:
-        logger.info(f"Skipping monitor for {name}, router not fully configured yet")
-        return
-
-    ip_address = await get_ip("automation", "networkvm")
-    if ip_address is None:
-        logger.info(f"No ip address found on Network VM yet, skipping monitoring check for {name}")
-        return
-
-    try:
-        from vyosrouter.lifecycle_tasks import get_vyos_router_status
-        result = await get_vyos_router_status(ip_address, name)
-        
-        if not result.get('success', False):
-            logger.warning(f"Failed to get router status for {name}: {result.get('error')}")
-            return
-            
-        running = result.get('running', False)
-        
-        # Get previous state from status
-        previous_phase = status_dict.get('phase')
-        previous_running = previous_phase == "Running"
-        
-        if not running:
-            # Container is down - only update if state changed
-            if previous_running:
-                logger.info(f"VyOSRouter {name} running state changed: {running} -> {previous_running}")
-                logger.info(f"VyOSRouter {name} phase changed: Running -> {previous_phase}")
-                await update_status(name, namespace, "Failed", "VyOS router container is not running",
-                                   body=body, spec=spec, uid=kwargs.get('uid'), logger_obj=logger)
-            return
-
-        # Container is running, extract protocols/interface status
-        protocols = result.get('protocols', {})
-        ospf_status = result.get('ospf_status', {})
-        bgp_status = result.get('bgp_status', {})
-        mpls_status = result.get('mpls_status', {})
-        interface_status = result.get('interface_status', [])
-
-        # Update protocols dict
-        if ospf_status:
-            protocols['ospf'] = ospf_status
-        if bgp_status:
-            protocols['bgp'] = bgp_status
-        if mpls_status:
-            protocols['mpls'] = mpls_status
-
-        # If we have interface status, we can update it
-        status_interfaces = []
-        if interface_status:
-           status_interfaces = interface_status
-
-        # Compare with previous state to detect changes
-        previous_interfaces = status_dict.get('interfaces', [])
-        
-        # Check if state has changed
-        state_changed = False
-        
-        # Check if phase changed from Failed back to Running
-        if not previous_running:
-            state_changed = True
-            logger.info(f"VyOSRouter {name} state changed: Failed -> Running")
-        
-        # Check if interfaces changed
-        if _interfaces_changed(previous_interfaces, status_interfaces):
-            state_changed = True
-            logger.info(f"VyOSRouter {name} interface state changed")
-        
-        # Check if protocols status changed
-        previous_protocols = status_dict.get('protocols_status', {})
-        if _protocols_changed(previous_protocols, protocols):
-            state_changed = True
-            logger.info(f"VyOSRouter {name} protocol state changed")
-        
-        # Only update status if something changed
-        if state_changed:
-            await update_status(name, namespace, "Running", "VyOS router container is running",
-                               body=body, spec=spec, uid=kwargs.get('uid'), logger_obj=logger,
-                               interfaces=status_interfaces if status_interfaces else None,
-                               protocols_status=protocols if protocols else None,
-                               applied_config=result.get('applied_config'))
-        else:
-            logger.debug(f"VyOSRouter {name} state unchanged, skipping status update")
-            
-    except Exception as e:
-        logger.error(f"Failed to monitor VyOSRouter {name}: {e}")
-
 def _is_transient_error(error_msg: str) -> bool:
     """
     Determine if an error is transient (worth retrying) vs permanent.
@@ -402,38 +313,6 @@ def _is_transient_error(error_msg: str) -> bool:
     return any(pattern in error_lower for pattern in transient_patterns)
 
 
-def _interfaces_changed(previous: list, current: list) -> bool:
-    """Compare interface lists to detect changes"""
-    logger.info("Comparing interfaces")
-    logger.info(f"Previous interfaces: len={len(previous)} / {previous}")
-    logger.info(f"Current interfaces: len={len(current)} / {current}")
-
-    if len(previous) != len(current):
-        return True
-    
-    # Create comparable representations
-    prev_set = set()
-    curr_set = set()
-    
-    for iface in previous:
-        # Create a hashable representation of interface
-        key = (iface.get('name'), iface.get('status'), iface.get('linux_network'))
-        prev_set.add(key)
-    
-    for iface in current:
-        key = (iface.get('name'), iface.get('status'), iface.get('linux_network'))
-        curr_set.add(key)
-    
-    return prev_set != curr_set
-
-def _protocols_changed(previous: dict, current: dict) -> bool:
-    """Compare protocol status dictionaries to detect changes"""
-    # Simple JSON comparison for protocol status
-    # We strip any empty values to avoid noise
-    p1 = {k: v for k, v in previous.items() if v}
-    p2 = {k: v for k, v in current.items() if v}
-    return p1 != p2
-
 #########################################################################
 # Status Management
 #########################################################################
@@ -446,41 +325,37 @@ async def update_status(name: str, namespace: str, phase: str, message: str,
     """Update the status of a VyOSRouter resource in both Kubernetes and Spanner"""
     client = kubernetes.dynamic.DynamicClient(kubernetes.client.ApiClient())
     api = client.resources.get(api_version='google.dev/v1', kind='VyOSRouter')
-    
-    resource = api.get(name=name, namespace=namespace)
-    resource_dict = resource.to_dict()
-    
-    if 'status' not in resource_dict:
-        resource_dict['status'] = {}
-    
+
     status = {
         'phase': phase,
         'message': message
     }
-    
+
     if container_id:
         status['container_id'] = container_id
-    
+
     if ip_address:
         status['ip_address'] = ip_address
-    
+
     if interfaces:
         status['interfaces'] = interfaces
-    
+
     if protocols_status:
         status['protocols_status'] = protocols_status
 
     if applied_config:
         status['applied_config'] = applied_config
-    
-    resource_dict['status'].update(status)
 
-    # Update Kubernetes status
+    # Patch only the status delta — do NOT read-modify-write the full resource.
+    # Reading the full resource and patching it back races with kopf's own writes
+    # to status.kopf.progress, causing "Patching failed with inconsistencies" warnings
+    # and potential idempotency-guard misses.  A merge-patch on the status subresource
+    # with only the fields we own leaves status.kopf untouched.
     try:
         api.patch(
             namespace=namespace,
             name=name,
-            body=resource_dict,
+            body={'status': status},
             content_type='application/merge-patch+json',
             subresource='status'
         )

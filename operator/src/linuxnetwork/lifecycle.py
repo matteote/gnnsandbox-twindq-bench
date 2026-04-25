@@ -11,15 +11,12 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-import asyncio
-import hashlib
 import kopf
 import logging
 import kubernetes
 from linuxnetwork.lifecycle_tasks import (
     create_linux_network,
     delete_linux_network,
-    get_detailed_network_status
 )
 from utils.compute import get_ip
 
@@ -84,9 +81,12 @@ async def create_linuxnetwork(body, spec, name, namespace, uid, logger, retry=0,
     except (kopf.TemporaryError, kopf.PermanentError):
         raise
     except Exception as e:
-        logger.error(f"Failed to create LinuxNetwork {name}: {e}")
-        await update_status(name, namespace, "Failed", str(e))
-        raise
+        error_msg = str(e)
+        logger.error(f"Failed to create LinuxNetwork {name}: {error_msg}")
+        await update_status(name, namespace, "Failed", error_msg)
+        # Raise as TemporaryError so kopf retries with a proper delay rather than
+        # treating an unclassified exception as a crash (which has no delay cap).
+        raise kopf.TemporaryError(error_msg, delay=30)
 
 @kopf.on.delete('google.dev', 'v1', 'linuxnetwork')
 async def delete_linuxnetwork(body, spec, status, name, namespace, logger, **kwargs):
@@ -119,114 +119,16 @@ async def resume_linuxnetwork(body, spec, name, namespace, logger, **kwargs):
     """Handle operator restart against already-created LinuxNetwork resources.
 
     kopf fires on.resume (not on.create) when the operator restarts and the
-    on.create handler previously completed.  We just log current state here —
-    the periodic monitor will reconcile any drift.  This prevents the operator
-    from re-running the full creation flow (and causing a Creating blip) every
-    time it restarts.
+    on.create handler previously completed.  We just log current state here to
+    prevent the operator from re-running the full creation flow (and causing a
+    Creating blip) every time it restarts.
     """
     current_phase = body.get('status', {}).get('phase')
     logger.info(f"Resuming LinuxNetwork {name} (phase={current_phase})")
     if current_phase != 'Ready':
         logger.warning(
-            f"LinuxNetwork {name} is not Ready on resume (phase={current_phase}). "
-            f"The periodic monitor will attempt to reconcile state."
+            f"LinuxNetwork {name} is not Ready on resume (phase={current_phase})."
         )
-
-@kopf.timer('google.dev', 'v1', 'linuxnetwork', interval=300.0)
-async def monitor_linuxnetwork(body, spec, name, namespace, uid, logger, memo, **kwargs):
-    """Monitor LinuxNetwork status with detailed state tracking"""
-
-    # ── Thundering-herd protection ────────────────────────────────────────────
-    # On operator restart all N LinuxNetwork timers fire at t=0 simultaneously.
-    # We compute a deterministic, per-resource jitter (0-89 s) from the
-    # resource name hash so monitors spread themselves out automatically.
-    # memo is in-memory and resets at every pod restart, so the jitter only applies
-    # on the very first call after (re)start — subsequent 300-s ticks are unaffected.
-    # Increase max jitter value with the number of items in linux network but keep it under 
-    # interval
-    max_jitter = 90
-    if not memo.get('monitor_jitter_done'):
-        jitter_s = int(hashlib.md5(name.encode()).hexdigest(), 16) % max_jitter
-        if jitter_s > 0:
-            logger.info(f"Staggering LinuxNetwork {name} monitor startup by {jitter_s}s")
-            await asyncio.sleep(jitter_s)
-        memo['monitor_jitter_done'] = True
-    # ─────────────────────────────────────────────────────────────────────────
-
-
-    # Do not monitor until after first successful install and kopf
-    # handlers are still working on it
-    status_dict = body.get('status', {})
-
-    # Skip if the network has never been created
-    if not status_dict or status_dict.get('phase') in ["Pending", "Creating", None]:
-        logger.debug(f"Skipping monitor for {name}, network not fully created yet")
-        return
-
-    # Skip if a kopf handler (create / delete) is currently in-flight for this resource.
-    # An in-flight handler has success=False AND failure=False in kopf's progress state.
-    # Running an Ansible status check while a create/delete Ansible playbook is already
-    # active on the same network would compete for semaphore slots unnecessarily.
-    kopf_progress = body.get('status', {}).get('kopf', {}).get('progress', {})
-    active_handlers = {k: v for k, v in kopf_progress.items()
-                    if not v.get('success') and not v.get('failure')}
-    if active_handlers:
-        logger.info(
-            f"Skipping monitor for {name}, kopf handlers in-flight: {list(active_handlers.keys())}"
-        )
-        return
-
-    # get networkvm IP address
-    ip_address = await get_ip("automation", "networkvm")
-    if ip_address is None:
-        logger.warning("No ip address found on Network VM yet, skipping monitoring check")
-        return
-
-    try:
-        network_name = spec.get('name', name)
-        
-        # Get detailed status including bridge and veth state
-        status = await get_detailed_network_status(ip_address, network_name)
-        
-        # Get previous state
-        previous_phase = status_dict.get('phase')
-        previous_exists = previous_phase == "Ready"
-        previous_state = status_dict.get('operational_state', 'unknown')
-        
-        current_exists = status['exists']
-        current_state = status.get('operational_state', 'unknown')
-        
-        state_changed = False
-        
-        # Check existence change
-        if not current_exists and previous_exists:
-            state_changed = True
-            logger.warning(f"LinuxNetwork {name} state changed: Ready -> Failed (deleted)")
-            await update_status(name, namespace, "Failed", "Linux network no longer exists")
-        
-        elif current_exists and not previous_exists:
-            state_changed = True
-            logger.info(f"LinuxNetwork {name} state changed: Failed -> Ready (restored)")
-            await update_status(name, namespace, "Ready", "Linux network is available",
-                              extra_status={'operational_state': current_state})
-        
-        # Check operational state change
-        elif current_exists and previous_exists and current_state != previous_state:
-            state_changed = True
-            logger.info(f"LinuxNetwork {name} operational state changed: {previous_state} -> {current_state}")
-            await update_status(name, namespace, "Ready", f"Bridge state: {current_state}",
-                              extra_status={'operational_state': current_state})
-        
-        if not state_changed:
-            logger.debug(f"LinuxNetwork {name} state unchanged, skipping K8s status update")
-        
-        # Sync to Spanner - sync function has its own state change detection
-        # Only writes to Spanner if bridge/veth state has changed (SCD Type 2)
-        from graph.lifecycle_tasks import sync_host_network_bridge
-        await sync_host_network_bridge(body, spec, name, namespace, status, logger)
-            
-    except Exception as e:
-        logger.error(f"Failed to check network status for {name}: {e}")
 
 #########################################################################
 # Status Management
@@ -237,30 +139,27 @@ async def update_status(name: str, namespace: str, phase: str, message: str, ext
     client = kubernetes.dynamic.DynamicClient(kubernetes.client.ApiClient())
     api = client.resources.get(api_version='google.dev/v1', kind='LinuxNetwork')
 
-    resource = api.get(name=name, namespace=namespace)
-    resource_dict = resource.to_dict()
-
-    if 'status' not in resource_dict:
-        resource_dict['status'] = {}
-
     status = {
         'phase': phase,
         'message': message
     }
-    
+
     # Add any additional status fields
     if extra_status:
         status.update(extra_status)
 
     logger.debug(f"Updating status for LinuxNetwork {name}: {status}")
 
-    resource_dict['status'].update(status)
-
+    # Patch only the status delta — do NOT read-modify-write the full resource.
+    # Reading the full resource and patching it back races with kopf's own writes
+    # to status.kopf.progress, causing "Patching failed with inconsistencies" warnings
+    # and potential idempotency-guard misses.  A merge-patch on the status subresource
+    # with only the fields we own leaves status.kopf untouched.
     try:
         api.patch(
             namespace=namespace,
             name=name,
-            body=resource_dict,
+            body={'status': status},
             content_type='application/merge-patch+json',
             subresource='status'
         )

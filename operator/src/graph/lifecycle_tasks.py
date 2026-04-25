@@ -94,23 +94,17 @@ SQL_TEMPLATES = {
   'insert_subnet_assoc': "INSERT Subnet_Association (entity_id, subnet_id, entity_type, valid_start_ts, valid_end_ts) VALUES (@entity_id, @subnet_id, @entity_type, PENDING_COMMIT_TIMESTAMP(), NULL)",
   'delete_subnet_assoc_by_id': "UPDATE Subnet_Association SET valid_end_ts = PENDING_COMMIT_TIMESTAMP() WHERE (entity_id = @entity_id OR subnet_id = @subnet_id) AND valid_end_ts IS NULL",
 
-  'upsert_bgp_peering': "INSERT OR IGNORE BGP_Peering (session_id_a, session_id_b) VALUES (@id_a, @id_b)",
-  'delete_bgp_peering': "DELETE FROM BGP_Peering WHERE session_id_a = @id OR session_id_b = @id",
-
-  # BGP_Peering SCD
-  'get_active_bgp_peering': "SELECT session_id_a FROM BGP_Peering WHERE session_id_a = @id_a AND session_id_b = @id_b AND valid_end_ts IS NULL",
-  'close_bgp_peering': "UPDATE BGP_Peering SET valid_end_ts = PENDING_COMMIT_TIMESTAMP() WHERE session_id_a = @id_a AND session_id_b = @id_b AND valid_end_ts IS NULL",
-  'insert_bgp_peering': "INSERT BGP_Peering (session_id_a, session_id_b, valid_start_ts, valid_end_ts) VALUES (@id_a, @id_b, PENDING_COMMIT_TIMESTAMP(), NULL)",
-  'delete_bgp_peering_by_id': "UPDATE BGP_Peering SET valid_end_ts = PENDING_COMMIT_TIMESTAMP() WHERE (session_id_a = @id OR session_id_b = @id) AND valid_end_ts IS NULL",
-
   # Device SCD
-  'get_active_device': "SELECT router_id, network_name, ip_address, gateway, vlan, status, config FROM Device WHERE id = @id AND valid_end_ts IS NULL",
+  'get_active_device': "SELECT interface_id, network_name, ip_address, mgmt_ip, gateway, vlan, status, config FROM Device WHERE id = @id AND valid_end_ts IS NULL",
   'close_device': "UPDATE Device SET valid_end_ts = PENDING_COMMIT_TIMESTAMP() WHERE id = @id AND valid_end_ts IS NULL",
-  'insert_device': "INSERT Device (id, name, router_id, network_name, ip_address, gateway, vlan, status, config, valid_start_ts, valid_end_ts) VALUES (@id, @name, @router_id, @network_name, @ip_address, @gateway, @vlan, @status, @config, PENDING_COMMIT_TIMESTAMP(), NULL)",
+  'insert_device': "INSERT Device (id, name, interface_id, network_name, ip_address, mgmt_ip, gateway, vlan, status, config, valid_start_ts, valid_end_ts) VALUES (@id, @name, @interface_id, @network_name, @ip_address, @mgmt_ip, @gateway, @vlan, @status, @config, PENDING_COMMIT_TIMESTAMP(), NULL)",
   'delete_device': "UPDATE Device SET valid_end_ts = PENDING_COMMIT_TIMESTAMP() WHERE id = @id AND valid_end_ts IS NULL",
 
-  'upsert_service_perf': "INSERT OR UPDATE ServicePerformance (id, service_type, response_time_ms, timestamp, userid, error, node, vpn_id) VALUES (@id, @service_type, @response_time_ms, @timestamp, @userid, @error, @node, @vpn_id)",
-  'upsert_incident': "INSERT OR UPDATE Incident (id, recordedTimestamp, agentTaskId, issue, strategy, root_cause, resolution, resolvedTimestamp) VALUES (@id, @recordedTimestamp, @agentTaskId, @issue, @strategy, @root_cause, @resolution, @resolvedTimestamp)",
+  # TrafficFlow SCD
+  'get_active_flow': "SELECT phase FROM TrafficFlow WHERE id = @id AND valid_end_ts IS NULL",
+  'close_flow': "UPDATE TrafficFlow SET valid_end_ts = PENDING_COMMIT_TIMESTAMP() WHERE id = @id AND valid_end_ts IS NULL",
+  'insert_flow': "INSERT TrafficFlow (id, name, src_device_id, dst_device_id, phase, config, valid_start_ts, valid_end_ts) VALUES (@id, @name, @src_device_id, @dst_device_id, @phase, @config, PENDING_COMMIT_TIMESTAMP(), NULL)",
+  'delete_flow': "UPDATE TrafficFlow SET valid_end_ts = PENDING_COMMIT_TIMESTAMP() WHERE id = @id AND valid_end_ts IS NULL",
 }
 
 # Spanner DB connection check interval
@@ -393,6 +387,87 @@ async def delete_kg_resource_description_node(id):
   return success
 
 # ------------------------------------------
+# Helper to propagate PhysicalLink bandwidth to PhysicalInterface.speed (SCD)
+# ------------------------------------------
+async def _sync_iface_speed_from_bandwidth(interface_id, bandwidth, logger):
+    """Update PhysicalInterface.speed to match a connected PhysicalLink.bandwidth (SCD).
+
+    Called by sync_vyos_infrastructure() after creating an Interface_Link so that
+    the GNN can compute accurate utilisation ratios (tx_bytes / speed_bps) relative
+    to the real simulated link capacity rather than the hardcoded 1G default.
+
+    If the PhysicalInterface doesn't exist yet (router not synced yet) this is a
+    no-op — sync_physical_router() will perform the same link-bandwidth lookup when
+    the router CRD is eventually processed.
+    """
+    if not bandwidth or bandwidth == 'unknown':
+        return
+
+    # Derive router_id and interface name from the ID convention:
+    #   "router:<router-name>:interface:<if-name>"
+    parts = interface_id.split(':interface:')
+    if len(parts) != 2:
+        logger.warning(f"Cannot parse interface_id '{interface_id}' for speed sync")
+        return
+    router_id = parts[0]
+    iface_name = parts[1]
+
+    def sql_sync_speed(transaction):
+        # Read the currently active PhysicalInterface row.
+        results = transaction.execute_sql(
+            SQL_TEMPLATES['get_active_phy_interface'],
+            params={'id': interface_id},
+            param_types={'id': spanner.param_types.STRING}
+        )
+        row = results.one_or_none()
+        if not row:
+            # Interface doesn't exist yet; sync_physical_router() will pick up
+            # the bandwidth when the VyOSRouter CRD is processed.
+            return
+
+        # SELECT speed, media_type, ip_address, mac_address, status
+        existing_speed, existing_media, existing_ip, existing_mac, existing_status = row
+        if existing_speed == bandwidth:
+            return  # Already up to date; nothing to do.
+
+        # Close the existing SCD row and reinsert with the corrected speed.
+        transaction.execute_update(
+            SQL_TEMPLATES['close_phy_interface'],
+            params={'id': interface_id},
+            param_types={'id': spanner.param_types.STRING}
+        )
+        transaction.execute_update(
+            SQL_TEMPLATES['insert_phy_interface'],
+            params={
+                'id': interface_id,
+                'router_id': router_id,
+                'name': iface_name,
+                'speed': bandwidth,
+                'media_type': existing_media,
+                'ip_address': existing_ip,
+                'mac_address': existing_mac,
+                'status': existing_status,
+            },
+            param_types={
+                'id': spanner.param_types.STRING,
+                'router_id': spanner.param_types.STRING,
+                'name': spanner.param_types.STRING,
+                'speed': spanner.param_types.STRING,
+                'media_type': spanner.param_types.STRING,
+                'ip_address': spanner.param_types.STRING,
+                'mac_address': spanner.param_types.STRING,
+                'status': spanner.param_types.STRING,
+            }
+        )
+
+    try:
+        db_container['db'].run_in_transaction(sql_sync_speed)
+        logger.debug(f"Synced interface {interface_id} speed to '{bandwidth}' from PhysicalLink")
+    except Exception as e:
+        logger.error(f"Failed to sync interface {interface_id} speed from bandwidth: {e}")
+
+
+# ------------------------------------------
 # Helper to find PhysicalRouter ID by name
 # ------------------------------------------
 async def _get_router_id_by_name(name):
@@ -478,13 +553,20 @@ async def sync_vyos_infrastructure(body, spec, name, uid, logger):
             bandwidth = net.get('bandwidth', 'unknown')
             link_status = 'UP'  # Could be derived from network/router status
             
-            # Build link properties including all network details
+            # Build link properties including all network details.
+            # bandwidth is included here so that the properties dict comparison in
+            # sql_upsert_link detects bandwidth-only changes — the dedicated
+            # PhysicalLink.bandwidth column is set from net.get('bandwidth') below, but
+            # the SCD change detection reads back only (properties, status) via
+            # get_active_phy_link, so storing bandwidth in properties is the simplest
+            # way to make the equality check fire when only bandwidth changes.
             link_props = {
                 'subnet': net.get('subnet', ''),
                 'network_type': net.get('network_type', 'unknown'),
                 'vlan': net.get('vlan', None),
                 'mtu': net.get('mtu', 1500),
                 'description': net.get('description', ''),
+                'bandwidth': bandwidth,
                 'connected_routers': connected_routers
             }
             
@@ -503,7 +585,9 @@ async def sync_vyos_infrastructure(body, spec, name, uid, logger):
                     existing_props = row[0]
                     existing_status = row[1]
                     
-                    # Compare content (Dict comparison)
+                    # Compare content (Dict comparison).
+                    # link_props includes 'bandwidth' so a bandwidth change will
+                    # cause existing_props != link_props and trigger a new SCD row.
                     if existing_props == link_props and existing_status == link_status.lower():
                         need_insert = False
                     else:
@@ -582,6 +666,13 @@ async def sync_vyos_infrastructure(body, spec, name, uid, logger):
                     logger.debug(f"Linked interface {interface_id} to {link_id}")
                 except Exception as e:
                     logger.error(f"Failed to link interface {interface_id} to {link_id}: {e}")
+
+                # Propagate the link bandwidth to PhysicalInterface.speed so the GNN
+                # can compute accurate utilisation ratios (tx_bytes / speed_bps).
+                # No-op if the interface doesn't exist yet (router not created yet)
+                # or if the speed is already correct.
+                if bandwidth and bandwidth != 'unknown':
+                    await _sync_iface_speed_from_bandwidth(interface_id, bandwidth, logger)
 
 
 async def delete_vyos_infrastructure(uid, spec, logger):
@@ -763,12 +854,38 @@ async def sync_physical_router(body, spec, name, uid, logger):
             else:
                 iface_status = 'ADMIN_DOWN'
         
-        # Extract speed and media type with better defaults
-        speed = iface_data.get('speed', '1G')  # More realistic default
+        # Extract speed and media type.
+        # Preferred source: PhysicalLink.bandwidth from a connected link (set by
+        # sync_vyos_infrastructure from the VyOSInfrastructure spec.networks[*].bandwidth).
+        # This lets the GNN compute accurate utilisation ratios (tx_bytes / speed_bps).
+        # Fallback: CRD spec field → hardcoded default '1G' for non-loopback interfaces.
         media_type = iface_data.get('media_type', 'ethernet')
         if iface_name == 'lo':
             media_type = 'loopback'
             speed = 'N/A'
+        else:
+            speed = None
+            try:
+                with db_container['db'].snapshot() as snapshot:
+                    results = snapshot.execute_sql(
+                        """SELECT pl.bandwidth
+                           FROM PhysicalLink pl
+                           JOIN Interface_Link il ON il.link_id = pl.id
+                           WHERE il.interface_id = @iface_id
+                             AND il.valid_end_ts IS NULL
+                             AND pl.valid_end_ts IS NULL
+                           LIMIT 1""",
+                        params={'iface_id': iface_id},
+                        param_types={'iface_id': spanner.param_types.STRING}
+                    )
+                    row = results.one_or_none()
+                    if row and row[0] and row[0] != 'unknown':
+                        speed = row[0]
+                        logger.debug(f"Using PhysicalLink bandwidth '{speed}' as speed for {iface_id}")
+            except Exception as _e:
+                logger.debug(f"Could not look up link bandwidth for {iface_id}: {_e}")
+            if not speed:
+                speed = iface_data.get('speed', '1G')
         
         def sql_upsert_iface(transaction):
             # 1. Get active interface
@@ -961,127 +1078,6 @@ async def delete_physical_router(uid, name=None):
 # ------------------------------------------
 # Sync L3VPNService
 # ------------------------------------------
-# ------------------------------------------
-# Helper to create BGP Peering edge (SCD)
-# ------------------------------------------
-async def _create_bgp_peering(bgp_id, peer_ip, vpn_name, logger):
-    # Parse router name from bgp_id: bgp:router_name:vpn_name:peer_ip
-    try:
-        parts = bgp_id.split(':')
-        router_name = parts[1]
-        router_id = f"router:{router_name}"
-    except Exception:
-        logger.error(f"Failed to parse router name from bgp_id {bgp_id}")
-        return
-
-    # 1. Get my interface IPs
-    my_ips = []
-    sql_get_ips = "SELECT ip_address FROM PhysicalInterface WHERE router_id = @router_id AND valid_end_ts IS NULL"
-    try:
-        with db_container['db'].snapshot() as snapshot:
-            results = snapshot.execute_sql(sql_get_ips, params={'router_id': router_id}, param_types={'router_id': spanner.param_types.STRING})
-            my_ips = [row[0] for row in results if row[0]]
-            # Also handle CIDR strip if needed, but DB usually has IP
-            my_ips = [ip.split('/')[0] for ip in my_ips]
-    except Exception as e:
-        logger.error(f"Failed to get IPs for router {router_name}: {e}")
-        return
-
-    if not my_ips:
-        return
-
-    # 2. Find peer session
-    # Peer session must be in same VPN and have peer_ip IN my_ips
-    # AND ideally belong to a router that has `peer_ip` (my_peer_ip)
-    
-    # We query for sessions that point TO me
-    sql_find_peer = "SELECT id FROM BGPSession WHERE id LIKE @pattern AND peer_ip IN UNNEST(@my_ips) AND valid_end_ts IS NULL"
-    pattern = f"bgp:%:{vpn_name}:%"
-    
-    peer_session_id = None
-    try:
-        with db_container['db'].snapshot() as snapshot:
-            results = snapshot.execute_sql(
-                sql_find_peer, 
-                params={'pattern': pattern, 'my_ips': my_ips}, 
-                param_types={'pattern': spanner.param_types.STRING, 'my_ips': spanner.param_types.ARRAY(spanner.param_types.STRING)}
-            )
-            # There might be multiple matches if full mesh? 
-            # But typically point-to-point uses specific /30 or /31. 
-            # If multiple sessions point to my IP, it's ambiguous.
-            # We filter by checking if the session ID (which contains peer IP) implies the peer router?
-            # Actually, `bgp_id` contains `peer_ip`.
-            # The session we are looking for is `bgp:PEER_ROUTER:vpn:MY_IP`.
-            # We verify if `PEER_ROUTER` owns `peer_ip` (from my bgp_id argument).
-            
-            candidates = list(results)
-            for row in candidates:
-                cand_id = row[0]
-                # Check if cand_id's router owns `peer_ip`
-                try:
-                    cand_parts = cand_id.split(':')
-                    cand_router_name = cand_parts[1]
-                    cand_router_id = f"router:{cand_router_name}"
-                    
-                    # Check if cand_router owns `peer_ip`
-                    sql_check_ip = "SELECT 1 FROM PhysicalInterface WHERE router_id = @rid AND ip_address LIKE @ip_pattern AND valid_end_ts IS NULL"
-                    # ip_address in DB usually includes CIDR? Or striped? 
-                    # Code: ip_address = ip_address.split('/')[0] (Step 643 upsert).
-                    # So exact match or check.
-                    
-                    with db_container['db'].snapshot() as sub_snap:
-                        res = sub_snap.execute_sql(
-                            sql_check_ip, 
-                            params={'rid': cand_router_id, 'ip_pattern': f"{peer_ip}%"}, # Fuzzy match for CIDR if inconsistent
-                            param_types={'rid': spanner.param_types.STRING, 'ip_pattern': spanner.param_types.STRING}
-                        )
-                        if res.one_or_none():
-                            peer_session_id = cand_id
-                            break
-                except:
-                    continue
-    except Exception as e:
-        logger.error(f"Failed to find peer BGP session: {e}")
-        return
-
-    if peer_session_id:
-        # 3. Create Peering Link (SCD)
-        def sql_link_bgp(transaction):
-            # Sort to avoid duplicates? BGP Peering is directional or non-directional?
-            # Table is (session_a, session_b). Usually implies distinct rows for direction?
-            # Or one row per pair?
-            # If (a,b), then (b,a) is different.
-            # Logic: We insert ONE row per peering relationship?
-            # Or insert (me, peer)?
-            # Code uses `id_a, id_b`.
-            # If specific constraint exists, we sort. 
-            # If we want directional graph, we assume (source, target).
-            # BGP Peering is symmetric. 
-            # Previous code used `unique_sessions = sorted([...])` (Step 544).
-            # So let's sort to keep one canonical row per pair.
-            
-            ids = sorted([bgp_id, peer_session_id])
-            session_a = ids[0]
-            session_b = ids[1]
-
-            results = transaction.execute_sql(
-                SQL_TEMPLATES['get_active_bgp_peering'],
-                params={'id_a': session_a, 'id_b': session_b},
-                param_types={'id_a': spanner.param_types.STRING, 'id_b': spanner.param_types.STRING}
-            )
-            if not results.one_or_none():
-                transaction.execute_update(
-                    SQL_TEMPLATES['insert_bgp_peering'],
-                    params={'id_a': session_a, 'id_b': session_b},
-                    param_types={'id_a': spanner.param_types.STRING, 'id_b': spanner.param_types.STRING}
-                )
-
-        try:
-            db_container['db'].run_in_transaction(sql_link_bgp)
-            logger.debug(f"Linked BGP Session {bgp_id} <-> {peer_session_id}")
-        except Exception as e:
-            logger.error(f"Failed to link BGP sessions: {e}")
-
 async def sync_l3vpn_service(body, spec, name, uid, logger):
     logger.debug(f"Syncing L3VPNService {name}")
     
@@ -1098,36 +1094,41 @@ async def sync_l3vpn_service(body, spec, name, uid, logger):
     # Track VPN IDs created from this CRD for delete tracking
     vpn_ids_in_crd = []
     
-    # 1. Upsert VPN Services (SCD)
+    customer_id = "cust:default"  # Placeholder for customer
+    
+    # Ensure customer exists
+    def sql_upsert_cust(transaction):
+        transaction.execute_update(
+            SQL_TEMPLATES['upsert_customer'],
+            params={'id': customer_id, 'name': 'Default Customer', 'type': 'Internal', 'properties': '{}'},
+            param_types={'id': spanner.param_types.STRING, 'name': spanner.param_types.STRING, 'type': spanner.param_types.STRING, 'properties': spanner.param_types.JSON}
+        )
+    try:
+        db_container['db'].run_in_transaction(sql_upsert_cust)
+    except:
+        pass
+
+    # 1. Upsert VPN Services (SCD) from spec.services
+    # spec.services contains only service metadata (name, type, topology).
+    # spec.routers (top-level sibling) contains the per-router VRF and BGP config.
     services = spec.get('services', [])
+    service_map = {svc['name']: svc for svc in services}
+
     for svc in services:
         vpn_id = f"vpn:{svc['name']}"
         vpn_ids_in_crd.append(vpn_id)
-        customer_id = "cust:default" # Placeholder for customer
-        
-        # Ensure customer exists (Metadata - not Temporal usually, but good to keep)
-        def sql_upsert_cust(transaction):
-             transaction.execute_update(
-                SQL_TEMPLATES['upsert_customer'],
-                params={'id': customer_id, 'name': 'Default Customer', 'type': 'Internal', 'properties': '{}'},
-                param_types={'id': spanner.param_types.STRING, 'name': spanner.param_types.STRING, 'type': spanner.param_types.STRING, 'properties': spanner.param_types.JSON}
-             )
-        try:
-             db_container['db'].run_in_transaction(sql_upsert_cust)
-        except:
-             pass
 
-        # Prepare L3VPN data
         vpn_name = svc['name']
         service_type = svc.get('type', 'L3VPN')
         topology = svc.get('topology', 'Mesh')
         vpn_config = json.dumps(dict(svc) if hasattr(svc, '__iter__') and not isinstance(svc, (str, bytes)) else svc)
 
-        def sql_upsert_l3vpn(transaction):
-            # 1. Get active VPN
+        def sql_upsert_l3vpn(transaction, _vpn_id=vpn_id, _vpn_name=vpn_name,
+                              _service_type=service_type, _topology=topology,
+                              _vpn_config=vpn_config):
             results = transaction.execute_sql(
                 SQL_TEMPLATES['get_active_l3vpn'],
-                params={'id': vpn_id},
+                params={'id': _vpn_id},
                 param_types={'id': spanner.param_types.STRING}
             )
             row = results.one_or_none()
@@ -1136,13 +1137,12 @@ async def sync_l3vpn_service(body, spec, name, uid, logger):
             if row:
                 existing_config = row[0]
                 existing_status = row[1]
-                if existing_config == vpn_config and existing_status == l3vpn_status.lower():
+                if existing_config == _vpn_config and existing_status == l3vpn_status.lower():
                     need_insert = False
                 else:
-                    # Close existing
                     transaction.execute_update(
                         SQL_TEMPLATES['close_l3vpn'],
-                        params={'id': vpn_id},
+                        params={'id': _vpn_id},
                         param_types={'id': spanner.param_types.STRING}
                     )
             
@@ -1150,21 +1150,21 @@ async def sync_l3vpn_service(body, spec, name, uid, logger):
                 transaction.execute_update(
                     SQL_TEMPLATES['insert_l3vpn'],
                     params={
-                        'id': vpn_id, 
-                        'customer_id': customer_id, 
-                        'name': vpn_name, 
-                        'service_type': service_type, 
-                        'topology': topology, 
-                        'status': l3vpn_status.lower(), 
-                        'config': vpn_config
+                        'id': _vpn_id,
+                        'customer_id': customer_id,
+                        'name': _vpn_name,
+                        'service_type': _service_type,
+                        'topology': _topology,
+                        'status': l3vpn_status.lower(),
+                        'config': _vpn_config
                     },
                     param_types={
-                        'id': spanner.param_types.STRING, 
-                        'customer_id': spanner.param_types.STRING, 
-                        'name': spanner.param_types.STRING, 
-                        'service_type': spanner.param_types.STRING, 
-                        'topology': spanner.param_types.STRING, 
-                        'status': spanner.param_types.STRING, 
+                        'id': spanner.param_types.STRING,
+                        'customer_id': spanner.param_types.STRING,
+                        'name': spanner.param_types.STRING,
+                        'service_type': spanner.param_types.STRING,
+                        'topology': spanner.param_types.STRING,
+                        'status': spanner.param_types.STRING,
                         'config': spanner.param_types.JSON
                     }
                 )
@@ -1173,29 +1173,50 @@ async def sync_l3vpn_service(body, spec, name, uid, logger):
             logger.debug(f"Upserted L3VPNService {vpn_id}")
         except Exception as e:
             logger.error(f"Failed to upsert L3VPNService {vpn_id}: {e}")
+
+    # 2. Sync VRFs and BGP Sessions from spec.routers (top-level field).
+    # Each router entry has:
+    #   - name: router name
+    #   - vrfs: list of {name, table, rd, rt_export, rt_import, interfaces}
+    #   - bgp.vrfs: list of {name, neighbors: [{peer, remote_as}]}
+    # The VRF name matches a service name in spec.services, providing the vpn_id link.
+    routers = spec.get('routers', [])
+    for router in routers:
+        router_name = router.get('name')
+        if not router_name:
+            continue
+        
+        router_id = await _get_router_id_by_name(router_name)
+        if not router_id:
+            logger.warning(f"Router {router_name} not found in Spanner for L3VPN {name}")
             continue
 
-        # 2. Sync VRFs (SCD)
-        routers = svc.get('routers', [])
-        for r in routers:
-            router_name = r.get('router_name')
-            if not router_name: continue
-            
-            router_id = await _get_router_id_by_name(router_name)
-            if not router_id:
-                logger.warning(f"Router {router_name} not found for VRF in {vpn_id}")
-                continue
-                
-            vrf_id = f"vrf:{router_name}:{svc['name']}"
-            rd = r.get('rd', 'unknown')
-            vrf_status = 'Active' if l3vpn_status == 'Ready' else 'Pending'
-            vrf_config = json.dumps(dict(r) if hasattr(r, '__iter__') and not isinstance(r, (str, bytes)) else r)
+        # Build a map of VRF name → BGP neighbors from router.bgp.vrfs
+        bgp_neighbors_by_vrf = {}
+        bgp = router.get('bgp', {})
+        for bgp_vrf in bgp.get('vrfs', []):
+            bgp_vrf_name = bgp_vrf.get('name')
+            if bgp_vrf_name:
+                bgp_neighbors_by_vrf[bgp_vrf_name] = bgp_vrf.get('neighbors', [])
 
-            def sql_upsert_vrf(transaction):
-                # 1. Get active VRF
+        # Process each VRF on this router
+        for vrf in router.get('vrfs', []):
+            vrf_name = vrf.get('name')
+            if not vrf_name:
+                continue
+
+            vpn_id = f"vpn:{vrf_name}"
+            vrf_id = f"vrf:{router_name}:{vrf_name}"
+            rd = vrf.get('rd', 'unknown')
+            vrf_status = 'Active' if l3vpn_status == 'Ready' else 'Pending'
+            vrf_config = json.dumps(dict(vrf) if hasattr(vrf, '__iter__') and not isinstance(vrf, (str, bytes)) else vrf)
+
+            def sql_upsert_vrf(transaction, _vrf_id=vrf_id, _router_id=router_id,
+                               _vpn_id=vpn_id, _vrf_name=vrf_name, _rd=rd,
+                               _vrf_status=vrf_status, _vrf_config=vrf_config):
                 results = transaction.execute_sql(
                     SQL_TEMPLATES['get_active_vrf'],
-                    params={'id': vrf_id},
+                    params={'id': _vrf_id},
                     param_types={'id': spanner.param_types.STRING}
                 )
                 row = results.one_or_none()
@@ -1204,13 +1225,12 @@ async def sync_l3vpn_service(body, spec, name, uid, logger):
                 if row:
                     existing_config = row[0]
                     existing_status = row[1]
-                    if existing_config == vrf_config and existing_status == vrf_status.lower():
+                    if existing_config == _vrf_config and existing_status == _vrf_status.lower():
                         need_insert = False
                     else:
-                        # Close existing
                         transaction.execute_update(
                             SQL_TEMPLATES['close_vrf'],
-                            params={'id': vrf_id},
+                            params={'id': _vrf_id},
                             param_types={'id': spanner.param_types.STRING}
                         )
                 
@@ -1218,13 +1238,13 @@ async def sync_l3vpn_service(body, spec, name, uid, logger):
                     transaction.execute_update(
                         SQL_TEMPLATES['insert_vrf'],
                         params={
-                            'id': vrf_id,
-                            'router_id': router_id,
-                            'vpn_id': vpn_id,
-                            'name': f"VRF-{svc['name']}",
-                            'rd': rd,
-                            'status': vrf_status.lower(),
-                            'config': vrf_config
+                            'id': _vrf_id,
+                            'router_id': _router_id,
+                            'vpn_id': _vpn_id,
+                            'name': f"VRF-{_vrf_name}",
+                            'rd': _rd,
+                            'status': _vrf_status.lower(),
+                            'config': _vrf_config
                         },
                         param_types={
                             'id': spanner.param_types.STRING,
@@ -1243,24 +1263,28 @@ async def sync_l3vpn_service(body, spec, name, uid, logger):
                 logger.error(f"Failed to upsert VRF {vrf_id}: {e}")
                 continue
 
-            # 3. Sync BGP Sessions (SCD)
-            neighbors = r.get('neighbors', [])
-            router_local_as = r.get('local_as', 65000)
-            
+            # 3. Sync BGP Sessions for this VRF (SCD)
+            # Neighbors are under router.bgp.vrfs[name].neighbors.
+            # The CRD uses 'peer' for the neighbor IP (not 'peer_ip').
+            neighbors = bgp_neighbors_by_vrf.get(vrf_name, [])
+
             for n in neighbors:
-                peer_ip = n.get('peer_ip')
-                if not peer_ip: continue
+                # CRD schema field is 'peer', not 'peer_ip'
+                peer_ip = n.get('peer') or n.get('peer_ip')
+                if not peer_ip:
+                    continue
                 
-                bgp_id = f"bgp:{router_name}:{svc['name']}:{peer_ip}"
+                bgp_id = f"bgp:{router_name}:{vrf_name}:{peer_ip}"
                 remote_as = n.get('remote_as', 0)
                 bgp_status = 'Established' if l3vpn_status == 'Ready' else 'Idle'
                 bgp_config = json.dumps(dict(n) if hasattr(n, '__iter__') and not isinstance(n, (str, bytes)) else n)
 
-                def sql_upsert_bgp(transaction):
-                    # 1. Get active BGP
+                def sql_upsert_bgp(transaction, _bgp_id=bgp_id, _vrf_id=vrf_id,
+                                   _remote_as=remote_as, _peer_ip=peer_ip,
+                                   _bgp_status=bgp_status, _bgp_config=bgp_config):
                     results = transaction.execute_sql(
                         SQL_TEMPLATES['get_active_bgp'],
-                        params={'id': bgp_id},
+                        params={'id': _bgp_id},
                         param_types={'id': spanner.param_types.STRING}
                     )
                     row = results.one_or_none()
@@ -1269,13 +1293,12 @@ async def sync_l3vpn_service(body, spec, name, uid, logger):
                     if row:
                         existing_config = row[0]
                         existing_status = row[1]
-                        if existing_config == bgp_config and existing_status == bgp_status:
+                        if existing_config == _bgp_config and existing_status == _bgp_status:
                             need_insert = False
                         else:
-                            # Close existing
                             transaction.execute_update(
                                 SQL_TEMPLATES['close_bgp'],
-                                params={'id': bgp_id},
+                                params={'id': _bgp_id},
                                 param_types={'id': spanner.param_types.STRING}
                             )
                     
@@ -1283,13 +1306,13 @@ async def sync_l3vpn_service(body, spec, name, uid, logger):
                         transaction.execute_update(
                             SQL_TEMPLATES['insert_bgp'],
                             params={
-                                'id': bgp_id,
-                                'vrf_id': vrf_id,
-                                'local_as': router_local_as,
-                                'remote_as': remote_as,
-                                'peer_ip': peer_ip,
-                                'status': bgp_status,
-                                'config': bgp_config
+                                'id': _bgp_id,
+                                'vrf_id': _vrf_id,
+                                'local_as': 0,
+                                'remote_as': _remote_as,
+                                'peer_ip': _peer_ip,
+                                'status': _bgp_status,
+                                'config': _bgp_config
                             },
                             param_types={
                                 'id': spanner.param_types.STRING,
@@ -1303,12 +1326,10 @@ async def sync_l3vpn_service(body, spec, name, uid, logger):
                         )
                 try:
                     db_container['db'].run_in_transaction(sql_upsert_bgp)
+                    logger.debug(f"Upserted BGPSession {bgp_id}")
                 except Exception as e:
                     logger.error(f"Failed to upsert BGP {bgp_id}: {e}")
                     continue
-                
-                # Create BGP peering relationships (bidirectional) - Edge Table (stateless for now)
-                await _create_bgp_peering(bgp_id, peer_ip, svc['name'], logger)
     
     return vpn_ids_in_crd
 
@@ -1385,6 +1406,7 @@ async def sync_device(body, spec, name, uid, logger):
     device_id = f"device:{name}"
     network_name = spec.get('network_name', '')
     ip_address = spec.get('ip_address', '')
+    mgmt_ip = spec.get('mgmt_ip', '')
     gateway = spec.get('gateway')
     vlan = spec.get('vlan')
     
@@ -1394,46 +1416,52 @@ async def sync_device(body, spec, name, uid, logger):
     if 'phase' in status_obj:
         device_status = status_obj['phase']
     
+    # Prefer the confirmed mgmt_ip from status (written by the device operator after
+    # successful provisioning) over the requested value in spec, so that the Spanner
+    # column always reflects the actually-assigned management address.
+    if status_obj.get('mgmt_ip'):
+        mgmt_ip = status_obj['mgmt_ip']
+    
     # Prepare config (sanitized body)
     # Convert kopf Body object to dict first
     body_dict = dict(body) if not isinstance(body, dict) else body
     sanitized_body = sanitize_k8s_body(body_dict)
     config_json = json.dumps(sanitized_body)
     
-    # Find the router this device connects to
-    # Match by gateway IP - the gateway should be a router interface IP
-    router_id = None
-    
+    # Find the CE router interface this device connects to.
+    # The device's gateway IP is the IP address of the router's LAN-facing interface,
+    # so we match directly against PhysicalInterface.ip_address and store the interface
+    # ID. This is more precise than storing only the router ID because it captures the
+    # exact attachment point (port) and lets the GNN traverse Device → PhysicalInterface
+    # directly where the interface-level metrics (tx_bytes, rx_bytes, etc.) live.
+    interface_id = None
+
     if gateway:
-        # Query to find router with interface matching the gateway IP
-        sql_find_router = """
-            SELECT DISTINCT r.id 
-            FROM PhysicalRouter r
-            JOIN PhysicalInterface i ON r.id = i.router_id
+        sql_find_interface = """
+            SELECT i.id
+            FROM PhysicalInterface i
             WHERE i.ip_address = @gateway_ip
-              AND r.valid_end_ts IS NULL
               AND i.valid_end_ts IS NULL
             LIMIT 1
         """
-        
         try:
             with db_container['db'].snapshot() as snapshot:
                 results = snapshot.execute_sql(
-                    sql_find_router,
+                    sql_find_interface,
                     params={'gateway_ip': gateway},
                     param_types={'gateway_ip': spanner.param_types.STRING}
                 )
                 row = results.one_or_none()
                 if row:
-                    router_id = row[0]
-                    logger.debug(f"Found router {router_id} for device {name} via gateway {gateway}")
+                    interface_id = row[0]
+                    logger.debug(f"Found interface {interface_id} for device {name} via gateway {gateway}")
                 else:
-                    logger.warning(f"No router found with interface IP {gateway} for device {name}")
+                    logger.warning(f"No interface found with IP {gateway} for device {name}")
         except Exception as e:
-            logger.warning(f"Could not find router for device {name} via gateway {gateway}: {e}")
+            logger.warning(f"Could not find interface for device {name} via gateway {gateway}: {e}")
     else:
-        logger.warning(f"Device {name} has no gateway specified, cannot determine connected router")
-    
+        logger.warning(f"Device {name} has no gateway specified, cannot determine connected interface")
+
     def sql_upsert_device(transaction):
         # 1. Get active device
         results = transaction.execute_sql(
@@ -1442,22 +1470,24 @@ async def sync_device(body, spec, name, uid, logger):
             param_types={'id': spanner.param_types.STRING}
         )
         row = results.one_or_none()
-        
+
         need_insert = True
         if row:
-            # SELECT router_id, network_name, ip_address, gateway, vlan, status, config
-            existing_router_id = row[0]
+            # SELECT interface_id, network_name, ip_address, mgmt_ip, gateway, vlan, status, config
+            existing_interface_id = row[0]
             existing_network = row[1]
             existing_ip = row[2]
-            existing_gateway = row[3]
-            existing_vlan = row[4]
-            existing_status = row[5]
-            existing_config = row[6]
-            
+            existing_mgmt_ip = row[3]
+            existing_gateway = row[4]
+            existing_vlan = row[5]
+            existing_status = row[6]
+            existing_config = row[7]
+
             # Compare content
-            if (existing_router_id == router_id and
+            if (existing_interface_id == interface_id and
                 existing_network == network_name and
                 existing_ip == ip_address and
+                existing_mgmt_ip == mgmt_ip and
                 existing_gateway == gateway and
                 existing_vlan == vlan and
                 existing_status == device_status and
@@ -1470,16 +1500,17 @@ async def sync_device(body, spec, name, uid, logger):
                     params={'id': device_id},
                     param_types={'id': spanner.param_types.STRING}
                 )
-        
+
         if need_insert:
             transaction.execute_update(
                 SQL_TEMPLATES['insert_device'],
                 params={
                     'id': device_id,
                     'name': name,
-                    'router_id': router_id,
+                    'interface_id': interface_id,
                     'network_name': network_name,
                     'ip_address': ip_address,
+                    'mgmt_ip': mgmt_ip,
                     'gateway': gateway,
                     'vlan': vlan,
                     'status': device_status.lower(),
@@ -1488,9 +1519,10 @@ async def sync_device(body, spec, name, uid, logger):
                 param_types={
                     'id': spanner.param_types.STRING,
                     'name': spanner.param_types.STRING,
-                    'router_id': spanner.param_types.STRING,
+                    'interface_id': spanner.param_types.STRING,
                     'network_name': spanner.param_types.STRING,
                     'ip_address': spanner.param_types.STRING,
+                    'mgmt_ip': spanner.param_types.STRING,
                     'gateway': spanner.param_types.STRING,
                     'vlan': spanner.param_types.INT64,
                     'status': spanner.param_types.STRING,
@@ -1874,6 +1906,109 @@ async def _sync_veth_link(link_id, host_veth_name, container_iface_id, bandwidth
         logger.debug(f"Synced veth link {link_id}")
     except Exception as e:
         logger.error(f"Failed to sync veth link {link_id}: {e}")
+
+
+# ------------------------------------------
+# Sync TrafficFlow (SCD Type 2)
+# ------------------------------------------
+async def sync_traffic_flow(body, spec, name, uid, logger):
+    """Sync a TrafficTest CRD to the TrafficFlow Spanner table (SCD Type 2).
+
+    The flow ID is derived from the TrafficTest name so it is stable across
+    operator restarts.  A new SCD row is written whenever the phase changes;
+    the config JSON blob stores the full sanitized TrafficTest spec.
+
+    Device IDs follow the same naming convention used by sync_device:
+      src_device_id = 'device:<source_device_name>'
+      dst_device_id = 'device:<destination_device_name>'
+    """
+    logger.debug(f"Syncing TrafficFlow for TrafficTest {name}")
+
+    flow_id = f"flow:{name}"
+
+    # Phase comes from the TrafficTest status (set by traffictest/lifecycle.py)
+    status_obj = body.get('status', {})
+    phase = status_obj.get('phase', 'unknown').lower()
+
+    # Derive device IDs — one source per TrafficTest (first source device is canonical)
+    source_devices = spec.get('source_devices', [])
+    destination_device = spec.get('destination_device', '')
+
+    src_device_id = f"device:{source_devices[0]}" if source_devices else None
+    dst_device_id = f"device:{destination_device}" if destination_device else None
+
+    # Store the sanitized spec as config
+    body_dict = dict(body) if not isinstance(body, dict) else body
+    sanitized = sanitize_k8s_body(body_dict)
+    config_json = json.dumps(sanitized)
+
+    def sql_upsert_flow(transaction):
+        # 1. Read current active row
+        results = transaction.execute_sql(
+            SQL_TEMPLATES['get_active_flow'],
+            params={'id': flow_id},
+            param_types={'id': spanner.param_types.STRING}
+        )
+        row = results.one_or_none()
+
+        need_insert = True
+        if row:
+            existing_phase = row[0]
+            if existing_phase == phase:
+                need_insert = False
+            else:
+                # Close the existing row (SCD Type 2 versioning)
+                transaction.execute_update(
+                    SQL_TEMPLATES['close_flow'],
+                    params={'id': flow_id},
+                    param_types={'id': spanner.param_types.STRING}
+                )
+
+        if need_insert:
+            transaction.execute_update(
+                SQL_TEMPLATES['insert_flow'],
+                params={
+                    'id': flow_id,
+                    'name': name,
+                    'src_device_id': src_device_id,
+                    'dst_device_id': dst_device_id,
+                    'phase': phase,
+                    'config': config_json,
+                },
+                param_types={
+                    'id': spanner.param_types.STRING,
+                    'name': spanner.param_types.STRING,
+                    'src_device_id': spanner.param_types.STRING,
+                    'dst_device_id': spanner.param_types.STRING,
+                    'phase': spanner.param_types.STRING,
+                    'config': spanner.param_types.JSON,
+                }
+            )
+
+    try:
+        db_container['db'].run_in_transaction(sql_upsert_flow)
+        logger.info(f"Synced TrafficFlow {flow_id} (phase={phase})")
+    except Exception as e:
+        logger.error(f"Failed to sync TrafficFlow {flow_id}: {e}")
+
+
+async def delete_traffic_flow(name=None, uid=None):
+    """Close the active TrafficFlow row in Spanner (SCD Type 2)."""
+    flow_id = f"flow:{name}" if name else uid
+    logger.debug(f"Deleting TrafficFlow {flow_id}")
+
+    def sql_close_flow(transaction):
+        transaction.execute_update(
+            SQL_TEMPLATES['delete_flow'],
+            params={'id': flow_id},
+            param_types={'id': spanner.param_types.STRING}
+        )
+
+    try:
+        db_container['db'].run_in_transaction(sql_close_flow)
+        logger.info(f"Closed TrafficFlow {flow_id} in Spanner")
+    except Exception as e:
+        logger.error(f"Failed to delete TrafficFlow {flow_id}: {e}")
 
 
 async def sync_network_metrics(entity_id, entity_type, metrics, logger):

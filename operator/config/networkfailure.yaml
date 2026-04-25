@@ -3,7 +3,8 @@ kind: CustomResourceDefinition
 metadata:
   name: networkfailures.google.dev
   labels:
-    type: network
+    type: failure
+    agent-accessible: "true"    
 spec:
   scope: Namespaced
   group: google.dev

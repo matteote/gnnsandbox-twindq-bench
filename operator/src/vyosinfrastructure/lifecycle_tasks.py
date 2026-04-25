@@ -49,21 +49,52 @@ def extract_routers_from_spec(spec: dict) -> list:
     return routers
 
 
-async def update_opsagent_config(namespace: str, routers: list) -> None:
+def extract_devices_from_spec(spec: dict) -> list:
+    """
+    Extract device name and management IP from a VyOSInfrastructure spec.
+
+    Returns a list of dicts::
+
+        [{"name": "dev1", "mgmt_ip": "192.168.122.50"}, ...]
+
+    Only devices with both ``name`` and ``mgmt_ip`` set are included.
+    These are the devices running traffic-agent in daemon mode; their
+    Prometheus metrics endpoint is reachable on port 9091 via the
+    management network from the monitoring VM.
+    """
+    devices = []
+    for device in spec.get("devices", []):
+        name = device.get("name", "")
+        mgmt_ip = device.get("mgmt_ip", "")
+        if name and mgmt_ip:
+            devices.append({"name": name, "mgmt_ip": mgmt_ip})
+    logger.info("Extracted %d device(s) for Ops Agent scrape config: %s",
+                len(devices), [d["name"] for d in devices])
+    return devices
+
+
+async def update_opsagent_config(namespace: str, routers: list, devices: list = None) -> None:
     """
     Re-render the Ops Agent config on the VyOSVM and restart the agent.
 
     Args:
         namespace: Kubernetes namespace (used to look up the VyOSVM IP).
-        routers:   List of {"name": str, "ip_address": str} dicts.
-                   Pass an empty list to remove all Prometheus scrape targets
-                   (e.g. on VyOSInfrastructure deletion).
+        routers:   List of {"name": str, "ip_address": str} dicts for VyOS
+                   router scrape targets (node_exporter :9100, frr_exporter :9101).
+                   Pass an empty list to remove all router targets.
+        devices:   List of {"name": str, "mgmt_ip": str} dicts for traffic-agent
+                   Prometheus targets (port 9091).  Defaults to [] when omitted.
     """
+    if devices is None:
+        devices = []
+
     logger.info(
-        "Updating Ops Agent config on %s with %d router(s): %s",
+        "Updating Ops Agent config on %s with %d router(s) and %d device(s): routers=%s devices=%s",
         VYOSVM_NAME,
         len(routers),
+        len(devices),
         [r["name"] for r in routers],
+        [d["name"] for d in devices],
     )
 
     # Resolve the VyOSVM management IP (used for the Ansible SSH connection)
@@ -74,6 +105,7 @@ async def update_opsagent_config(namespace: str, routers: list) -> None:
 
     extravars = {
         "routers": routers,
+        "devices": devices,
     }
 
     hosts = {
@@ -91,6 +123,8 @@ async def update_opsagent_config(namespace: str, routers: list) -> None:
     logger.info("Running Ops Agent update playbook against %s", ip_address)
     logger.debug("Ansible extra vars: %s", extravars)
 
+    ANSIBLE_TIMEOUT_SECONDS = 60
+
     def run_ansible():
         try:
             thread, runner = ansible_runner.run_async(
@@ -101,7 +135,13 @@ async def update_opsagent_config(namespace: str, routers: list) -> None:
                 quiet=False,
                 verbosity=1,
             )
-            thread.join()
+            thread.join(timeout=ANSIBLE_TIMEOUT_SECONDS)
+            if thread.is_alive():
+                logger.error(
+                    "Ansible playbook 'update-opsagent.yaml' did not finish within "
+                    f"{ANSIBLE_TIMEOUT_SECONDS}s — treating as failure"
+                )
+                return None
             return runner
         except Exception as e:
             logger.error("Ansible execution failed: %s", e)

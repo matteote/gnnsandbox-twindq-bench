@@ -10,7 +10,7 @@ The main components of the autonomous network lab are shown below:
 
 ![gcp architecture](/docs/drawings/architecture.drawio.svg)
 
-- [**Network Simulator**](/docs/network/Readme.md): [VyOS](https://vyos.io/) & [free5gc](https://free5gc.org/) based virtual network simulator can deploy complex transport and mobile network topologies, run traffic patterns and generate network state and performance metrics. 
+- [**Network Simulator**](/docs/network/Readme.md): [VyOS](https://vyos.io/) & [free5gc](https://free5gc.org/) based virtual network simulator can deploy complex network topologies, run traffic patterns and generate network state and performance metrics. 
 - [**GKE Network Automation**](/docs/automation/Readme.md): GKE operator deploys network topologies and traffic tests to the network simulator and updates the Spanner digital shadow with topology and state updates.
 - [**Digital Shadow**](/docs/spanner/Readme.md): Google Cloud Spanner stores network topology graphs, temporal state and historical performance. 
 - [**Network GNNs**](/docs/gnn/Readme.md): Training and serving infrastructure for graph neural network models that can pinpoint failures and predict the impact of network changes. 

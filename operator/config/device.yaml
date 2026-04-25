@@ -102,6 +102,20 @@ spec:
                     
                     Valid range: 1-4094 (VLAN 0 reserved, 4095 reserved)
                     Common values: 10, 100, 200 (arbitrary, must match network config)
+                mgmt_ip:
+                  type: string
+                  pattern: '^([0-9]{1,3}\.){3}[0-9]{1,3}$'
+                  description: |
+                    Management IP address assigned to the device's eth1 interface on the management bridge.
+                    Required when the device is deployed as part of a VyOSInfrastructure with daemon mode.
+                    The traffic-agent daemon listens on this IP at port 9090 for flow control requests.
+                    Must be within the management network subnet defined by the infrastructure spec.
+                mgmt_network:
+                  type: string
+                  description: |
+                    Name of the management Linux bridge on the network VM.
+                    Set automatically by the VyOSInfrastructure operator from the management LinuxNetwork.
+                    When set, a second veth pair (eth1) is attached to this bridge and mgmt_ip is assigned.
                 gateway:
                   type: string
                   pattern: '^([0-9]{1,3}\.){3}[0-9]{1,3}$'
@@ -171,6 +185,12 @@ spec:
                     Human-readable status message providing additional context.
                     Contains error details when phase="Failed".
                     Examples: "Device created successfully", "Failed to attach to network: bridge not found"
+                mgmt_ip:
+                  type: string
+                  description: |
+                    Management IP address of the running device container (on eth1).
+                    The traffic-agent daemon is reachable at this address on port 9090.
+                    Populated by the operator after successful device provisioning.
       additionalPrinterColumns:
         - name: Phase
           type: string

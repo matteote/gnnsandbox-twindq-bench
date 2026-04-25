@@ -77,11 +77,20 @@ def fetch_log_entries()->str:
       return []  # Return empty list on error
 
 def delete_logs():
-  success = True
-  with database.batch() as batch:
-    try:
-      batch.delete("KgLogEntryNode", spanner.KeySet(all_=True))
-    except Exception as e:
-      logger.error("Spanner Delete error: {}".format(e))
-      success = False
-  return success
+  """
+  Deletes all records from the KgLogEntryNode table using Partitioned DML,
+  which bypasses the 20,000 mutation-per-transaction limit and is safe for
+  tables with large numbers of rows.
+
+  Returns:
+    bool: True if the operation was successful, False otherwise.
+  """
+  try:
+    row_count = database.execute_partitioned_dml(
+      "DELETE FROM KgLogEntryNode WHERE TRUE"
+    )
+    logger.info(f"Successfully deleted ~{row_count} log entries from KgLogEntryNode")
+    return True
+  except Exception as e:
+    logger.error("Spanner Delete error: {}".format(e))
+    return False

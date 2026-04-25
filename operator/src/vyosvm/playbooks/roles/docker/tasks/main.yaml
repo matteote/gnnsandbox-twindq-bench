@@ -44,20 +44,6 @@
     state: present
   when: docker_check.rc != 0 
 
-# - name: Ensure /etc/docker directory exists
-#   ansible.builtin.file:
-#     path: /etc/docker
-#     state: directory
-#     mode: '0755'
-
-# - name: copy daemon.json
-#   ansible.builtin.copy:
-#     src: daemon.json
-#     dest: /etc/docker/daemon.json
-#     owner: root
-#     group: root
-#     mode: '0644'
-
 - name: Install docker-ce
   apt:
     pkg:
@@ -74,3 +60,13 @@
 
 - name: ensure ufw is disabled
   ansible.builtin.shell: ufw disable
+
+# authenticate with the artefact repo by using service account method
+# https://cloud.google.com/artifact-registry/docs/docker/authentication#json-key
+- name: copy the networkagent.json key
+  ansible.builtin.copy: 
+    src: /operator/networkagent.json
+    dest: /opt
+
+- name: authenticate with the artefact repo
+  raw: "cat /opt/networkagent.json | docker login -u _json_key --password-stdin https://{{GOOGLE_REGION}}-docker.pkg.dev"

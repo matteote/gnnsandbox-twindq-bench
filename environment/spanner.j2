@@ -79,9 +79,10 @@ spec:
   - "CREATE TABLE Device (
       id STRING(MAX) NOT NULL,
       name STRING(MAX) NOT NULL,
-      router_id STRING(MAX),
+      interface_id STRING(MAX),
       network_name STRING(MAX),
       ip_address STRING(MAX),
+      mgmt_ip STRING(MAX),
       gateway STRING(MAX),
       vlan INT64,
       status STRING(MAX),
@@ -89,13 +90,6 @@ spec:
       valid_start_ts TIMESTAMP NOT NULL OPTIONS (allow_commit_timestamp=true),
       valid_end_ts TIMESTAMP OPTIONS (allow_commit_timestamp=true)
     ) PRIMARY KEY (id, valid_start_ts DESC)"
-  - "CREATE TABLE Customer (
-      id STRING(MAX) NOT NULL,
-      name STRING(MAX) NOT NULL,
-      type STRING(MAX),
-      properties JSON,
-      last_updated TIMESTAMP OPTIONS (allow_commit_timestamp=true)
-    ) PRIMARY KEY (id)"
   - "CREATE TABLE L3VPNService (
       id STRING(MAX) NOT NULL,
       customer_id STRING(MAX) NOT NULL,
@@ -149,12 +143,6 @@ spec:
       valid_start_ts TIMESTAMP NOT NULL OPTIONS (allow_commit_timestamp=true),
       valid_end_ts TIMESTAMP OPTIONS (allow_commit_timestamp=true)
     ) PRIMARY KEY (interface_id, link_id, valid_start_ts DESC)"
-  - "CREATE TABLE BGP_Peering (
-      session_id_a STRING(MAX) NOT NULL,
-      session_id_b STRING(MAX) NOT NULL,
-      valid_start_ts TIMESTAMP NOT NULL OPTIONS (allow_commit_timestamp=true),
-      valid_end_ts TIMESTAMP OPTIONS (allow_commit_timestamp=true)
-    ) PRIMARY KEY (session_id_a, session_id_b, valid_start_ts DESC)"
   - "CREATE TABLE Subnet_Association (
       entity_id STRING(MAX) NOT NULL,
       subnet_id STRING(MAX) NOT NULL,
@@ -171,16 +159,6 @@ spec:
        anomaly_explanation JSON,
        timestamp TIMESTAMP NOT NULL OPTIONS (allow_commit_timestamp=true)
      ) PRIMARY KEY (node_id, timestamp DESC)"
-  - "CREATE TABLE Incident (
-        id STRING(MAX) NOT NULL,
-        recordedTimestamp TIMESTAMP NOT NULL,
-        agentTaskId String(MAX) NOT NULL,
-        issue JSON NOT NULL,
-        strategy JSON,
-        root_cause String(MAX),
-        resolution String(MAX),
-        resolvedTimestamp TIMESTAMP
-      ) PRIMARY KEY (id)"
   - "CREATE TABLE KgLogEntryNode (
        id STRING(17) NOT NULL,
        timestamp TIMESTAMP NOT NULL,
@@ -203,16 +181,6 @@ spec:
         interface STRING(MAX)
     ) PRIMARY KEY (id, timestamp)"
   - "CREATE INDEX NetworkMetricsIdx1 ON NetworkMetrics(timestamp DESC) STORING (node_name, metric_name, metric_type, kind, value, labels, interface)"
-  - "CREATE TABLE ServicePerformance (
-        id STRING(36) NOT NULL,
-        service_type STRING(MAX) NOT NULL,
-        response_time_ms FLOAT64,
-        timestamp TIMESTAMP NOT NULL,
-        userid STRING(MAX),
-        error STRING(MAX),
-        node STRING(MAX),
-        vpn_id STRING(MAX)
-      ) PRIMARY KEY (id)"
   - "CREATE TABLE AgentTrace (
        id STRING(36) NOT NULL,
        event_type STRING(MAX) NOT NULL,
@@ -223,18 +191,28 @@ spec:
        timestamp TIMESTAMP NOT NULL OPTIONS (allow_commit_timestamp=true),
        details JSON
     ) PRIMARY KEY(id)"
-  - "CREATE CHANGE STREAM AgentTraceStream
-       FOR AgentTrace
-       OPTIONS (
-         retention_period = '7d',
-         value_capture_type = 'NEW_ROW'
-       )"
-  - "CREATE TABLE Orders (
-       id STRING(36) NOT NULL,
-       timestamp TIMESTAMP NOT NULL OPTIONS (allow_commit_timestamp=true),
-       customer_id STRING(MAX),
-       customer STRING(MAX) NOT NULL
-     ) PRIMARY KEY(id)"
+  - "CREATE TABLE TrafficFlow (
+       id STRING(MAX) NOT NULL,
+       name STRING(MAX),
+       src_device_id STRING(MAX),
+       dst_device_id STRING(MAX),
+       phase STRING(MAX),
+       config JSON,
+       valid_start_ts TIMESTAMP NOT NULL OPTIONS (allow_commit_timestamp=true),
+       valid_end_ts TIMESTAMP OPTIONS (allow_commit_timestamp=true)
+     ) PRIMARY KEY (id, valid_start_ts DESC)"
+  - "CREATE TABLE NetworkDescriptor (
+       id STRING(MAX) NOT NULL,
+       name STRING(MAX) NOT NULL,
+       description STRING(MAX),
+       infrastructure JSON NOT NULL,
+       underlay JSON,
+       vpns JSON,
+       traffic_tests JSON,
+       labels JSON,
+       created_at TIMESTAMP NOT NULL OPTIONS (allow_commit_timestamp=true),
+       updated_at TIMESTAMP NOT NULL OPTIONS (allow_commit_timestamp=true)
+     ) PRIMARY KEY (id)"
   - "CREATE VIEW HasInterface_Edge SQL SECURITY INVOKER AS 
        SELECT 
          r.id AS router_id, r.valid_start_ts AS router_ts,
@@ -281,13 +259,6 @@ spec:
        WHERE l.valid_start_ts < IFNULL(i.valid_end_ts, TIMESTAMP('9999-12-31T23:59:59Z'))
        AND IFNULL(l.valid_end_ts, TIMESTAMP('9999-12-31T23:59:59Z')) > i.valid_start_ts
        GROUP BY link_id, link_ts, interface_id, interface_ts"
-  - "CREATE VIEW OwnedBy_Edge SQL SECURITY INVOKER AS
-       SELECT
-         vpn.id AS vpn_id, vpn.valid_start_ts AS vpn_ts,
-         c.id AS customer_id
-       FROM L3VPNService vpn
-       JOIN Customer c ON vpn.customer_id = c.id
-       GROUP BY vpn_id, vpn_ts, customer_id"
   - "CREATE VIEW RealizesVPN_Edge SQL SECURITY INVOKER AS
        SELECT
          vrf.id AS vrf_id, vrf.valid_start_ts AS vrf_ts,
@@ -318,16 +289,6 @@ spec:
        AND bgp.valid_start_ts < IFNULL(vrf.valid_end_ts, TIMESTAMP('9999-12-31T23:59:59Z'))
        AND IFNULL(bgp.valid_end_ts, TIMESTAMP('9999-12-31T23:59:59Z')) > vrf.valid_start_ts
        GROUP BY bgp_id, bgp_ts, vrf_id, vrf_ts"
-  - "CREATE VIEW PeersWith_Edge SQL SECURITY INVOKER AS
-       SELECT
-         bgp1.id AS bgp1_id, bgp1.valid_start_ts AS bgp1_ts,
-         bgp2.id AS bgp2_id, bgp2.valid_start_ts AS bgp2_ts
-       FROM BGPSession bgp1
-       JOIN BGP_Peering bp ON bgp1.id = bp.session_id_a
-       JOIN BGPSession bgp2 ON bp.session_id_b = bgp2.id
-       WHERE bgp1.valid_start_ts < IFNULL(bgp2.valid_end_ts, TIMESTAMP('9999-12-31T23:59:59Z'))
-       AND IFNULL(bgp1.valid_end_ts, TIMESTAMP('9999-12-31T23:59:59Z')) > bgp2.valid_start_ts
-       GROUP BY bgp1_id, bgp1_ts, bgp2_id, bgp2_ts"
   - "CREATE VIEW AssociatedWith_Edge SQL SECURITY INVOKER AS
        SELECT
          i.id AS interface_id, i.valid_start_ts AS interface_ts,
@@ -341,31 +302,44 @@ spec:
   - "CREATE VIEW ConnectedTo_Edge SQL SECURITY INVOKER AS
        SELECT
          d.id AS device_id, d.valid_start_ts AS device_ts,
-         r.id AS router_id, r.valid_start_ts AS router_ts
+         i.id AS interface_id, i.valid_start_ts AS interface_ts
        FROM Device d
-       JOIN PhysicalRouter r
-       ON d.router_id = r.id
-       AND d.valid_start_ts < IFNULL(r.valid_end_ts, TIMESTAMP('9999-12-31T23:59:59Z'))
-       AND IFNULL(d.valid_end_ts, TIMESTAMP('9999-12-31T23:59:59Z')) > r.valid_start_ts
-       GROUP BY device_id, device_ts, router_id, router_ts"
+       JOIN PhysicalInterface i
+       ON d.interface_id = i.id
+       AND d.valid_start_ts < IFNULL(i.valid_end_ts, TIMESTAMP('9999-12-31T23:59:59Z'))
+       AND IFNULL(d.valid_end_ts, TIMESTAMP('9999-12-31T23:59:59Z')) > i.valid_start_ts
+       GROUP BY device_id, device_ts, interface_id, interface_ts"
+  - "CREATE VIEW FlowFromDevice_Edge SQL SECURITY INVOKER AS
+       SELECT
+         f.id AS flow_id, f.valid_start_ts AS flow_ts,
+         d.id AS device_id, d.valid_start_ts AS device_ts
+       FROM TrafficFlow f
+       JOIN Device d ON f.src_device_id = d.id
+       WHERE f.valid_start_ts < IFNULL(d.valid_end_ts, TIMESTAMP('9999-12-31T23:59:59Z'))
+       AND IFNULL(f.valid_end_ts, TIMESTAMP('9999-12-31T23:59:59Z')) > d.valid_start_ts
+       GROUP BY flow_id, flow_ts, device_id, device_ts"
+  - "CREATE VIEW FlowToDevice_Edge SQL SECURITY INVOKER AS
+       SELECT
+         f.id AS flow_id, f.valid_start_ts AS flow_ts,
+         d.id AS device_id, d.valid_start_ts AS device_ts
+       FROM TrafficFlow f
+       JOIN Device d ON f.dst_device_id = d.id
+       WHERE f.valid_start_ts < IFNULL(d.valid_end_ts, TIMESTAMP('9999-12-31T23:59:59Z'))
+       AND IFNULL(f.valid_end_ts, TIMESTAMP('9999-12-31T23:59:59Z')) > d.valid_start_ts
+       GROUP BY flow_id, flow_ts, device_id, device_ts"
   - "CREATE OR REPLACE PROPERTY GRAPH networkGraph
        NODE TABLES (
          PhysicalRouter,
          PhysicalInterface,
          PhysicalLink,
-         Device,
-         Customer,
-         L3VPNService,
+          Device,
+          L3VPNService,
          VRF,
          BGPSession,
          LogicalSubnet,
-         Incident,
-         ServicePerformance,
-         Orders,
-         AgentTrace,
          NetworkMetrics,
-         KgLogEntryNode,
-         NodeEmbedding
+         NodeEmbedding,
+         TrafficFlow
        )
        EDGE TABLES (
          HasInterface_Edge 
@@ -393,12 +367,7 @@ spec:
            KEY (link_id, link_ts, interface_id, interface_ts)
            SOURCE KEY (link_id, link_ts) REFERENCES PhysicalLink (id, valid_start_ts)
            DESTINATION KEY (interface_id, interface_ts) REFERENCES PhysicalInterface (id, valid_start_ts),
-         OwnedBy_Edge 
-           AS OwnedBy
-           KEY (vpn_id, vpn_ts, customer_id)
-           SOURCE KEY (vpn_id, vpn_ts) REFERENCES L3VPNService (id, valid_start_ts)
-           DESTINATION KEY (customer_id) REFERENCES Customer (id),
-         RealizesVPN_Edge 
+          RealizesVPN_Edge 
            AS RealizesVPN
            KEY (vrf_id, vrf_ts, vpn_id, vpn_ts)
            SOURCE KEY (vrf_id, vrf_ts) REFERENCES VRF (id, valid_start_ts)
@@ -413,22 +382,24 @@ spec:
            KEY (bgp_id, bgp_ts, vrf_id, vrf_ts)
            SOURCE KEY (bgp_id, bgp_ts) REFERENCES BGPSession (id, valid_start_ts)
            DESTINATION KEY (vrf_id, vrf_ts) REFERENCES VRF (id, valid_start_ts),
-         PeersWith_Edge 
-           AS PeersWith
-           KEY (bgp1_id, bgp1_ts, bgp2_id, bgp2_ts)
-           SOURCE KEY (bgp1_id, bgp1_ts) REFERENCES BGPSession (id, valid_start_ts)
-           DESTINATION KEY (bgp2_id, bgp2_ts) REFERENCES BGPSession (id, valid_start_ts),
          AssociatedWith_Edge 
            AS AssociatedWith
            KEY (interface_id, interface_ts, subnet_id, subnet_ts)
            SOURCE KEY (interface_id, interface_ts) REFERENCES PhysicalInterface (id, valid_start_ts)
            DESTINATION KEY (subnet_id, subnet_ts) REFERENCES LogicalSubnet (id, valid_start_ts),
-         ConnectedTo_Edge 
-           AS ConnectedTo
-           KEY (device_id, device_ts, router_id, router_ts)
-           SOURCE KEY (device_id, device_ts) REFERENCES Device (id, valid_start_ts)
-           DESTINATION KEY (router_id, router_ts) REFERENCES PhysicalRouter (id, valid_start_ts),
-         Orders AS PlacedBy
-           SOURCE KEY (customer_id) REFERENCES Customer (id)
-           DESTINATION KEY (id) REFERENCES Orders (id)
+          ConnectedTo_Edge 
+            AS ConnectedTo
+            KEY (device_id, device_ts, interface_id, interface_ts)
+            SOURCE KEY (device_id, device_ts) REFERENCES Device (id, valid_start_ts)
+            DESTINATION KEY (interface_id, interface_ts) REFERENCES PhysicalInterface (id, valid_start_ts),
+          FlowFromDevice_Edge
+           AS FlowFromDevice
+           KEY (flow_id, flow_ts, device_id, device_ts)
+           SOURCE KEY (flow_id, flow_ts) REFERENCES TrafficFlow (id, valid_start_ts)
+           DESTINATION KEY (device_id, device_ts) REFERENCES Device (id, valid_start_ts),
+         FlowToDevice_Edge
+           AS FlowToDevice
+           KEY (flow_id, flow_ts, device_id, device_ts)
+           SOURCE KEY (flow_id, flow_ts) REFERENCES TrafficFlow (id, valid_start_ts)
+           DESTINATION KEY (device_id, device_ts) REFERENCES Device (id, valid_start_ts)
        )"
