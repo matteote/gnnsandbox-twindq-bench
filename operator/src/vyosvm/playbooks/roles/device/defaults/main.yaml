@@ -1,2 +1,9 @@
 device_image: "device:latest"
 build_context: "/tmp/device-build"
+
+# Artifact Registry coordinates for the traffic-agent carrier image.
+# Set agent_version to a specific tag (e.g. "v1.2.0") to pin the binary
+# version — changing this value causes Ansible to detect a new image tag
+# and rebuild the device image automatically.
+agent_image: "{{ GOOGLE_REGION }}-docker.pkg.dev/{{ GOOGLE_PROJECT }}/networkagent/traffic-agent"
+agent_version: "latest"

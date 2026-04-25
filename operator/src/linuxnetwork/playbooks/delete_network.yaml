@@ -1,7 +1,9 @@
 ---
 - hosts: all
   become: true
-  gather_facts: true
+  # No facts needed for any deletion task — skipping gather_facts eliminates
+  # 10-30s of SSH fact-collection overhead per playbook run.
+  gather_facts: no
 
   tasks:
     - name: Remove tc bandwidth limits from non-management bridge
@@ -12,6 +14,19 @@
 
     - name: Bring down non-management bridge before deletion
       command: ip link set {{ network_name }} down
+      ignore_errors: yes
+
+    - name: Detach and delete all ports from bridge before deletion
+      # During concurrent l3vpn teardown, VyOS router containers may still
+      # have host-side veth interfaces enslaved to this bridge.  brctl delbr
+      # fails with "device or resource busy" if any port remains attached.
+      # Flush them first so the bridge can always be removed cleanly.
+      shell: |
+        for iface in $(ip link show master {{ network_name }} 2>/dev/null \
+            | grep -oP '^\d+: \K[^@:]+'); do
+          ip link set "$iface" nomaster 2>/dev/null || true
+          ip link delete "$iface" 2>/dev/null || true
+        done
       ignore_errors: yes
 
     - name: Delete native Linux bridge network (brctl)

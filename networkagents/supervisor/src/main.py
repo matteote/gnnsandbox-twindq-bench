@@ -21,9 +21,9 @@ import os
 import json
 from tools.topology import build_graph, spanner_connect
 from tools.metrics import fetch_all_last_metrics
-from tools.service_performance import get_active_users, get_average_performance_by_service_type
 from tools.logs import fetch_log_entries
 from tools.traces import TraceStreamListener
+from tools.networkdescriptors import initialise_default_network
 from endpoints.socketendpoint import clients_state, view_to_edge_label_map
 
 
@@ -71,6 +71,11 @@ async def init():
     logger.info("starting server on port %s",port)
     site = web.TCPSite(runner, host="0.0.0.0", port=port, ssl_context=None)
     await site.start()
+
+    # Initialise the default network descriptor in Spanner if not present.
+    # Run in an executor because the Spanner calls are synchronous.
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(None, initialise_default_network)
     
     # Trace listener was already initialized before SocketEndpoint creation
     # Just log confirmation

@@ -234,11 +234,8 @@ SetDemoEnv()
     export SINK_NAME="nwoplogs-sink"
     export TOPIC_NAME="nwoplogs-topic"
     export CAPTURE_LOG_FUNCTION="capture_log"
-    export NETWORK_OPERATOR="free5gc-operator"
+    export NETWORK_OPERATOR="vyosnetwork-operator"
     export GIT_OPERATOR="gitea-operator"
-
-    export FAULT_SINK_NAME="network-fault-sink"
-    export FAULT_TOPIC_NAME="network-fault"
 
     # If running from a Cloud Shell session fix a few problems
     # with preinstalled flutter
@@ -450,8 +447,9 @@ Create()
     jinja -E GOOGLE_VM_USER -E GOOGLE_PROJECT -E GOOGLE_REGION -E GOOGLE_ZONE -E GOOGLE_REPO networkagents/tester/cloudbuild.j2 > networkagents/tester/cloudbuild.yaml
     jinja -E GOOGLE_VM_USER -E GOOGLE_PROJECT -E GOOGLE_REGION -E GOOGLE_ZONE -E GOOGLE_REPO networkagents/logs/cloudbuild.j2 > networkagents/logs/cloudbuild.yaml
     jinja -E GOOGLE_VM_USER -E GOOGLE_PROJECT -E GOOGLE_REGION -E GOOGLE_ZONE -E GOOGLE_REPO networkagents/supervisor/cloudbuild.j2 > networkagents/supervisor/cloudbuild.yaml
-    jinja -E GOOGLE_VM_USER -E GOOGLE_PROJECT -E GOOGLE_REGION -E GOOGLE_ZONE -E GOOGLE_REPO ui/dashboard/cloudbuild.j2 > ui/dashboard/cloudbuild.yaml
+    jinja -E GOOGLE_VM_USER -E GOOGLE_PROJECT -E GOOGLE_REGION -E GOOGLE_ZONE -E GOOGLE_REPO dashboard/cloudbuild.j2 > dashboard/cloudbuild.yaml
     jinja -E GOOGLE_VM_USER -E GOOGLE_PROJECT -E GOOGLE_REGION -E GOOGLE_ZONE -E GOOGLE_REPO logservices/metricscollector/cloudbuild.j2 > logservices/metricscollector/cloudbuild.yaml
+    jinja -E GOOGLE_PROJECT -E GOOGLE_REGION -E GOOGLE_REPO traffic-agent/cloudbuild.j2 > traffic-agent/cloudbuild.yaml
 
     echo "##############################################################"
     echo "generating GNN pipeline submission script from template"
@@ -735,7 +733,7 @@ Delete()
         networkagents/logs/src/networkagent.json \
         networkagents/logs/cloudbuild.yaml \
         \
-        ui/dashboard/cloudbuild.yaml \
+        dashboard/cloudbuild.yaml \
         \
         logservices/metricscollector/src/networkagent.json \
         logservices/metricscollector/cloudbuild.yaml \
@@ -747,7 +745,8 @@ Delete()
         \
         networkagent.json \
         google-compute* \
-        gnn/src/pipeline/submit_pipeline.py
+        gnn/src/pipeline/submit_pipeline.py \
+        traffic-agent/cloudbuild.yaml
 
 }
 
@@ -862,10 +861,35 @@ Kill()
 }
 
 ############################################################
+# Build and push the traffic-agent image                   #
+############################################################
+DeployTrafficAgent()
+{
+    echo "########################################"
+    echo "Build and push traffic-agent image"
+    echo "########################################"
+    IMAGE_URI="$GOOGLE_REGION-docker.pkg.dev/$GOOGLE_PROJECT/$GOOGLE_REPO/traffic-agent:latest"
+    if [[ $YES_FLAG != "y" ]] && [[ $NO_FLAG != "y" ]] && $(gcloud artifacts docker images describe $IMAGE_URI >/dev/null 2>&1); then
+        read -p "Traffic-agent image already exists. Rebuild? (y/n) " -n 1 -r
+        echo
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            gcloud builds submit --region=$GOOGLE_REGION --config traffic-agent/cloudbuild.yaml .
+        fi
+    elif [[ $NO_FLAG == "y" ]] && $(gcloud artifacts docker images describe $IMAGE_URI >/dev/null 2>&1); then
+        echo "Traffic-agent image already exists - not building the image (NO_FLAG set)"
+    else
+        gcloud builds submit --region=$GOOGLE_REGION --config traffic-agent/cloudbuild.yaml .
+    fi
+}
+
+############################################################
 # Build and deploy the operator                            #
 ############################################################
 DeployOperator()
 {
+    # The operator's device container copies the traffic-agent binary from
+    # the traffic-agent image, so it must be built and pushed first.
+    DeployTrafficAgent
 
     jinja -E GOOGLE_VM_USER -E GOOGLE_PROJECT -E GOOGLE_PROJECT_NUMBER -E GOOGLE_REGION -E GOOGLE_ZONE -E GOOGLE_REPO -E WEBAPPS_LOGIN \
           -E WEBAPPS_PWD -E NETWORK_OPERATOR -E GIT_OPERATOR -E GOOGLE_ORG_NAME -E GOOGLE_NAMESPACE \
@@ -900,13 +924,7 @@ DeployOperator()
     kubectl rollout status deployment $NETWORK_OPERATOR -n $GOOGLE_NAMESPACE --timeout=120s
 
     # load the crds
-    kubectl apply -f config/gitea.yaml
-    kubectl apply -f config/vyosvm.yaml
-    kubectl apply -f config/device.yaml
-    kubectl apply -f config/traffic.yaml
-    kubectl apply -f config/free5gc/
-    kubectl apply -f config/transport/
-    kubectl apply -f config/networkfailure.yaml
+    kubectl apply -f config
 
     cd ..
 }
@@ -1246,6 +1264,7 @@ Networkagent()
         --memory 1Gi \
         --update-env-vars GOOGLE_PROJECT=$GOOGLE_PROJECT \
         --update-env-vars GOOGLE_REGION=$GOOGLE_REGION \
+        --update-env-vars GOOGLE_ZONE=$GOOGLE_ZONE \
         --update-env-vars GOOGLE_CLOUD_PROJECT=$GOOGLE_PROJECT \
         --update-env-vars GOOGLE_CLOUD_LOCATION=$GOOGLE_REGION \
         --update-env-vars GOOGLE_GENAI_USE_VERTEXAI=1 \
@@ -1340,7 +1359,7 @@ Networkagent()
             read -p "Dashboard image already exists. Rebuild? (y/n) " -n 1 -r
             echo
             if [[ $REPLY =~ ^[Yy]$ ]]; then
-                cd ui/dashboard
+                cd dashboard
                 echo "Cleaning flutter environment"
                 flutter clean
                 echo "Building flutter web app"
@@ -1352,11 +1371,13 @@ Networkagent()
                         --dart-define=NETWORKAGENT_URL=${SUPERVISOR_URL}\
                         --dart-define=TRAIN_GNN_URI=${TRAIN_GNN_URI}\
                         --dart-define=SERVE_GNN_URI=${SERVE_GNN_URI}
-                cd ../../
-                gcloud builds submit --region=$GOOGLE_REGION --config ui/dashboard/cloudbuild.yaml .
+                cd ../
+                gcloud builds submit --region=$GOOGLE_REGION --config dashboard/cloudbuild.yaml .
             fi
+        elif [[ $NO_FLAG == "y" ]] && $(gcloud artifacts docker images describe $IMAGE_URI >/dev/null 2>&1); then
+            echo "Dashboard image already exists - not building the image (NO_FLAG set)"
         else
-            cd ui/dashboard
+            cd dashboard
             echo "Cleaning flutter environment"
             flutter clean
             echo "Building flutter web app"
@@ -1368,8 +1389,8 @@ Networkagent()
                     --dart-define=NETWORKAGENT_URL=${SUPERVISOR_URL}\
                     --dart-define=TRAIN_GNN_URI=${TRAIN_GNN_URI}\
                     --dart-define=SERVE_GNN_URI=${SERVE_GNN_URI}
-            cd ../../
-            gcloud builds submit --region=$GOOGLE_REGION --config ui/dashboard/cloudbuild.yaml .
+            cd ../
+            gcloud builds submit --region=$GOOGLE_REGION --config dashboard/cloudbuild.yaml .
         fi
 
         gcloud run deploy network-dashboard \

@@ -151,13 +151,14 @@ logging:
         receivers: [vyos_syslog]
         processors: [add_vyos_marker, vyos_parser, set_severity, set_facility]
 
-{% if routers | length > 0 %}
+{% if routers | length > 0 or devices | length > 0 %}
 metrics:
   receivers:
     vyos_nodes:
       type: prometheus
       config:
         scrape_configs:
+{% if routers | length > 0 %}
           - job_name: 'vyos-lab'
             scrape_interval: 15s
             scrape_timeout: 15s
@@ -176,6 +177,28 @@ metrics:
                 target_label: 'router_name'
                 replacement: '{{ router.name }}'
 {% endfor %}
+{% endif %}
+{% if devices | length > 0 %}
+          - job_name: 'traffic-agents'
+            # Scrape the traffic-agent Prometheus endpoint on each device.
+            # Each device runs traffic-agent daemon which exposes GET /metrics
+            # on port 9091 with per-flow throughput, latency, loss and jitter.
+            scrape_interval: 15s
+            scrape_timeout: 15s
+            static_configs:
+              - targets:
+{% for device in devices %}
+                # traffic-agent metrics - {{ device.name }}
+                - '{{ device.mgmt_ip }}:9091'
+{% endfor %}
+            relabel_configs:
+{% for device in devices %}
+              - source_labels: [__address__]
+                regex: '{{ device.mgmt_ip | replace(".", "\\.") }}:.*'
+                target_label: 'device_name'
+                replacement: '{{ device.name }}'
+{% endfor %}
+{% endif %}
   service:
     pipelines:
       prometheus_pipeline:

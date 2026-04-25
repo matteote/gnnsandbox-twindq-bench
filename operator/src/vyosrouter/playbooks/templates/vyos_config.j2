@@ -2,6 +2,41 @@ source /opt/vyatta/etc/functions/script-template
 
 configure
 
+# === Remove stale config (update mode only) ===
+# These delete commands run BEFORE any set commands so that subsequent set
+# commands re-apply only what is still wanted.  They are no-ops if the config
+# section doesn't exist (VyOS ignores delete of non-existent paths).
+{% if config_mode == 'update' %}
+
+# Clear any stale VRF assignments on ALL interfaces (physical AND VLAN sub-interfaces).
+# MUST happen BEFORE "delete vrf" — VyOS refuses to delete a VRF while any interface
+# still holds a reference to it; if the commit fails, ALL changes (including the
+# subsequent set commands) are rolled back, leaving both the old and new VRFs in place.
+# The interface set commands later will re-apply only the VRF fields still in spec.
+# VyOS silently ignores these delete commands when the interface has no VRF assignment.
+{% for interface in interfaces %}
+{% if interface.name != 'lo' %}
+{% if interface.vlan is defined %}
+delete interfaces ethernet {{ interface.name }} vif {{ interface.vlan }} vrf
+{% else %}
+delete interfaces ethernet {{ interface.name }} vrf
+{% endif %}
+{% endif %}
+{% endfor %}
+
+# Remove ALL VRF definitions then re-apply only those still in the spec.
+# This cleanly removes VRFs that were added by a VPN and are now gone.
+# VyOS silently ignores "delete vrf" when no VRFs exist.
+delete vrf
+
+# Remove BGP entirely if it is no longer part of this router's spec.
+# CE routers have their eBGP config removed here after VPN deletion.
+{% if protocols.bgp is not defined or (protocols.bgp is mapping and not protocols.bgp) %}
+delete protocols bgp
+{% endif %}
+
+{% endif %}
+
 # Set hostname
 set system host-name {{ router_hostname }}
 

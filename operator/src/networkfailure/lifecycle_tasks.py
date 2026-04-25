@@ -184,6 +184,8 @@ async def _run_ansible_playbook(networkvm_ip_address: str, playbook: str,
 
     logger.info(f"Running Ansible playbook: {playbook} on {networkvm_ip_address}")
 
+    ANSIBLE_TIMEOUT_SECONDS = 60
+
     def run_ansible():
         try:
             thread, runner = ansible_runner.run_async(
@@ -194,7 +196,13 @@ async def _run_ansible_playbook(networkvm_ip_address: str, playbook: str,
                 quiet=False,
                 verbosity=1,
             )
-            thread.join()
+            thread.join(timeout=ANSIBLE_TIMEOUT_SECONDS)
+            if thread.is_alive():
+                logger.error(
+                    f"Ansible playbook '{playbook}' did not finish within "
+                    f"{ANSIBLE_TIMEOUT_SECONDS}s — treating as failure"
+                )
+                return None
             return runner
         except Exception as e:
             logger.error(f"Ansible execution error: {e}")

@@ -17,6 +17,7 @@ import logging
 import utils.constants as constants
 from utils.compute import *
 from graph.lifecycle_tasks import *
+from graph.lifecycle_tasks import sync_traffic_flow, delete_traffic_flow
 
 logger = logging.getLogger(__name__)
 
@@ -89,3 +90,23 @@ async def obj_device_delete(name, uid, logger, **kwargs):
     """Delete Device from Spanner"""
     logger.debug(f"Device {name} deleted - removing from Spanner")
     await delete_device(uid, name=name)
+
+# --- TrafficTest Handlers ---
+
+@kopf.on.create('google.dev', 'v1', 'traffictest', id='traffictest-create-graph')
+async def obj_traffictest_create(body, spec, name, uid, logger, **kwargs):
+    """Sync new TrafficTest to Spanner as a TrafficFlow (SCD Type 2)"""
+    logger.debug(f"TrafficTest {name} created - syncing to Spanner")
+    await sync_traffic_flow(body, spec, name, uid, logger)
+
+@kopf.on.update('google.dev', 'v1', 'traffictest', field='status', id='traffictest-status-graph')
+async def obj_traffictest_status_update(body, spec, name, uid, logger, **kwargs):
+    """Sync TrafficTest phase changes to Spanner (new SCD row per phase transition)"""
+    logger.debug(f"TrafficTest {name} status updated - syncing to Spanner")
+    await sync_traffic_flow(body, spec, name, uid, logger)
+
+@kopf.on.delete('google.dev', 'v1', 'traffictest', id='traffictest-delete-graph')
+async def obj_traffictest_delete(name, uid, logger, **kwargs):
+    """Close the active TrafficFlow row in Spanner"""
+    logger.debug(f"TrafficTest {name} deleted - closing TrafficFlow in Spanner")
+    await delete_traffic_flow(name=name)

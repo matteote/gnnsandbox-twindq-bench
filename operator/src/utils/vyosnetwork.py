@@ -14,6 +14,7 @@
 
 import logging
 import ipaddress
+import re
 import kubernetes
 from typing import Dict, List, Any, Optional
 
@@ -325,13 +326,18 @@ def generate_linux_networks(spec: Dict[str, Any], parent_name: str, parent_names
             },
             'spec': {
                 'name': network['name'],
-                'description': network.get('description', ''),
                 'source_network': parent_name,
                 'network_type': network.get('network_type', 'p2p'),
-                'bandwidth': network.get('bandwidth'),
                 'connected_routers': network.get('connected_routers', [])
             }
         }
+
+        # Only include bandwidth when it is a valid value matching the CRD pattern
+        # (^[0-9]+[kmg]?bit$).  Values like "unlimited" or None are silently omitted,
+        # which means no bandwidth cap is applied on the Linux network.
+        bandwidth = network.get('bandwidth')
+        if bandwidth and re.match(r'^[0-9]+[kmg]?bit$', bandwidth):
+            linux_network_cr['spec']['bandwidth'] = bandwidth
 
         # Add gateway if specified
         if 'gateway' in network:
@@ -604,15 +610,43 @@ def generate_router_firewall_config(router: Dict[str, Any]) -> Dict[str, Any]:
 #########################################################################
 
 async def create_linux_network(network_cr: Dict[str, Any], namespace: str):
-    """Create a LinuxNetwork custom resource"""
+    """Create a LinuxNetwork custom resource.
+
+    Raises:
+        RuntimeError: when a 409 conflict is returned and the existing resource
+            has a ``deletionTimestamp`` (i.e. it is still terminating).  The
+            caller should treat this as a transient failure and retry later.
+        kubernetes.client.rest.ApiException: for any non-409 API errors.
+    """
     client = kubernetes.dynamic.DynamicClient(kubernetes.client.ApiClient())
     api = client.resources.get(api_version='google.dev/v1', kind='LinuxNetwork')
-    
+    name = network_cr['metadata']['name']
+
     try:
         api.create(network_cr)
     except kubernetes.client.rest.ApiException as e:
         if e.status == 409:  # Already exists
-            logger.info(f"LinuxNetwork {network_cr['metadata']['name']} already exists")
+            # Check whether the conflicting resource is being deleted.  If it
+            # has a deletionTimestamp the CR is still terminating — silently
+            # skipping creation here would leave the network permanently absent
+            # once the old object is finally removed from etcd.
+            try:
+                existing = api.get(name=name, namespace=namespace)
+                existing_dict = existing.to_dict() if hasattr(existing, 'to_dict') else existing
+                if existing_dict.get('metadata', {}).get('deletionTimestamp'):
+                    raise RuntimeError(
+                        f"LinuxNetwork '{name}' is still terminating "
+                        f"(deletionTimestamp={existing_dict['metadata']['deletionTimestamp']}); "
+                        "will retry after it is fully removed"
+                    )
+                # Truly already exists and is healthy — nothing to do.
+                logger.info(f"LinuxNetwork '{name}' already exists and is not terminating")
+            except kubernetes.client.rest.ApiException as get_exc:
+                if get_exc.status == 404:
+                    # Disappeared between the create attempt and this get — no-op.
+                    logger.info(f"LinuxNetwork '{name}' vanished between create-409 and get; treating as success")
+                else:
+                    raise
         else:
             raise
 
@@ -642,7 +676,8 @@ async def create_vyos_router(router_cr: Dict[str, Any], namespace: str):
             raise
 
 async def update_status(name: str, namespace: str, kind: str, phase: str, message: str, 
-                       networks: Optional[List[str]] = None, routers: Optional[List[str]] = None):
+                       networks: Optional[List[str]] = None, routers: Optional[List[str]] = None,
+                       devices: Optional[List[str]] = None):
     """Update the status of a Custom Resource"""
     logger.info(f"Updating {kind} {name} status to {phase}: {message}")
 
@@ -668,6 +703,8 @@ async def update_status(name: str, namespace: str, kind: str, phase: str, messag
             status['networks'] = networks
         if routers:
             status['routers'] = routers
+        if devices:
+            status['devices'] = devices
 
         resource_dict['status'].update(status)
         
@@ -774,3 +811,77 @@ async def check_and_update_parent_status(parent_name: str, parent_kind: str, nam
             
     except Exception as e:
         logger.error(f"Failed to check parent status for {parent_name}: {e}")
+
+#########################################################################
+# Device CR Generation
+#########################################################################
+
+def generate_devices(spec: Dict[str, Any], parent_name: str, parent_namespace: str, parent_uid: str, parent_kind: str) -> List[Dict[str, Any]]:
+    """Generate Device CRs from a VyOSInfrastructure spec.
+
+    Each entry in ``spec.devices`` becomes a Device CR owned by the parent.
+    The management bridge name is looked up automatically from the
+    ``management`` network in the spec so callers don't have to pass it.
+    """
+    devices = spec.get('devices', [])
+    if not devices:
+        return []
+
+    management_network_name = get_management_network_name(spec.get('networks', []))
+    device_crs = []
+
+    for device in devices:
+        device_cr: Dict[str, Any] = {
+            'apiVersion': 'google.dev/v1',
+            'kind': 'Device',
+            'metadata': {
+                'name': device['name'],
+                'namespace': parent_namespace,
+                'labels': {
+                    'parent-kind': parent_kind,
+                    'parent-name': parent_name,
+                    'environment': 'lab',
+                },
+                'ownerReferences': [{
+                    'apiVersion': 'google.dev/v1',
+                    'kind': parent_kind,
+                    'name': parent_name,
+                    'uid': parent_uid,
+                    'controller': True,
+                    'blockOwnerDeletion': True,
+                }],
+            },
+            'spec': {
+                'network_name': device['network_name'],
+                'ip_address': device['ip_address'],
+                'mgmt_ip': device['mgmt_ip'],
+                # Management bridge name derived from the infrastructure spec
+                'mgmt_network': management_network_name or '',
+            },
+        }
+
+        if 'gateway' in device:
+            device_cr['spec']['gateway'] = device['gateway']
+        if 'vlan' in device:
+            device_cr['spec']['vlan'] = device['vlan']
+        if 'image' in device:
+            device_cr['spec']['image'] = device['image']
+
+        device_crs.append(device_cr)
+
+    return device_crs
+
+
+async def create_device(device_cr: Dict[str, Any], namespace: str):
+    """Create a Device custom resource (idempotent — ignores 409 Conflict)."""
+    client = kubernetes.dynamic.DynamicClient(kubernetes.client.ApiClient())
+    api = client.resources.get(api_version='google.dev/v1', kind='Device')
+
+    try:
+        api.create(device_cr)
+        logger.info(f"Created Device {device_cr['metadata']['name']}")
+    except kubernetes.client.rest.ApiException as e:
+        if e.status == 409:
+            logger.info(f"Device {device_cr['metadata']['name']} already exists — skipping")
+        else:
+            raise

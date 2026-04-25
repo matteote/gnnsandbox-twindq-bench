@@ -391,25 +391,23 @@ class SpannerDataset:
                     })
             logger.info(f"Fetched {len(bgp_to_router)} BGP sessions")
 
-            # ── 7. bgp_peer edges (router ↔ router via BGP_Peering) ──────────
+            # ── 7. bgp_peer edges (router ↔ router via BGPSession.peer_ip) ────
+            # Derive bgp_peer edges directly: router A is a BGP peer of router B
+            # if A has a BGPSession whose peer_ip matches an IP owned by B's
+            # PhysicalInterfaces.  This avoids relying on the BGP_Peering join
+            # table, which cannot be populated when CE sessions are not in the DB.
             query_bgp_peer = f"""
-                SELECT DISTINCT v1.router_id AS router_a, v2.router_id AS router_b
-                FROM BGP_Peering bp
-                JOIN BGPSession bs1 ON bs1.id = bp.session_id_a
-                    AND bs1.valid_start_ts <= @ts
-                    AND (bs1.valid_end_ts > @ts OR bs1.valid_end_ts IS NULL)
-                JOIN BGPSession bs2 ON bs2.id = bp.session_id_b
-                    AND bs2.valid_start_ts <= @ts
-                    AND (bs2.valid_end_ts > @ts OR bs2.valid_end_ts IS NULL)
-                JOIN VRF v1 ON v1.id = bs1.vrf_id
-                    AND v1.valid_start_ts <= @ts
-                    AND (v1.valid_end_ts > @ts OR v1.valid_end_ts IS NULL)
-                JOIN VRF v2 ON v2.id = bs2.vrf_id
-                    AND v2.valid_start_ts <= @ts
-                    AND (v2.valid_end_ts > @ts OR v2.valid_end_ts IS NULL)
-                WHERE bp.valid_start_ts <= @ts
-                  AND (bp.valid_end_ts > @ts OR bp.valid_end_ts IS NULL)
-                  AND v1.router_id != v2.router_id
+                SELECT DISTINCT v.router_id AS router_a, pi_peer.router_id AS router_b
+                FROM BGPSession bs
+                JOIN VRF v ON v.id = bs.vrf_id
+                    AND v.valid_start_ts <= @ts
+                    AND (v.valid_end_ts > @ts OR v.valid_end_ts IS NULL)
+                JOIN PhysicalInterface pi_peer ON pi_peer.ip_address = bs.peer_ip
+                    AND pi_peer.valid_start_ts <= @ts
+                    AND (pi_peer.valid_end_ts > @ts OR pi_peer.valid_end_ts IS NULL)
+                WHERE bs.valid_start_ts <= @ts
+                  AND (bs.valid_end_ts > @ts OR bs.valid_end_ts IS NULL)
+                  AND v.router_id != pi_peer.router_id
             """
             bgp_peer_pairs = set()
             logger.debug("[snapshot:sql] bgp_peer:\n%s", _render_spanner_query(query_bgp_peer, params))

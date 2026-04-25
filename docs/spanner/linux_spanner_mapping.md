@@ -277,11 +277,7 @@ writers share the same table via nullable columns.
 
 ### ID Convention
 ```
-id = "<entity-id>:<iso-timestamp>"
-
-Example:
-  subnet:management:2026-03-07T10:00:00.123456
-  link:veth:edge-1:eth0:2026-03-07T10:00:00.123456
+id = GENERATE_UUID()  -- auto-generated; callers do not supply this value
 ```
 
 ### Bridge / Veth Monitoring Columns (operator)
@@ -289,9 +285,11 @@ Example:
 | Column | Value |
 |---|---|
 | `kind` | `"LogicalSubnet"` (bridge) or `"PhysicalLink"` (veth) |
-| `name` | e.g. `"subnet:management"` or `"link:veth:edge-1:eth0"` |
-| `interface_id` | same as `name` |
-| `metrics` | JSON blob: `{rx_packets, tx_packets, rx_bytes, tx_bytes, rx_errors, tx_errors}` |
+| `node_name` | e.g. `"subnet:management"` or `"link:veth:edge-1:eth0"` |
+| `metric_name` | e.g. `"rx_packets"`, `"tx_bytes"`, `"rx_errors"` |
+| `metric_type` | `"counter"` |
+| `value` | Metric value (FLOAT64) |
+| `labels` | JSON: `{entity_id: "...", entity_type: "..."}` |
 | `timestamp` | Poll time |
 
 ### VyOS Prometheus Columns (metricscollector)

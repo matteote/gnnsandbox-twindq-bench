@@ -14,6 +14,17 @@
 
 import os
 import sys
+
+# gRPC fork-safety: must be set BEFORE any google-cloud / grpcio import.
+# Both variables are required together — see Dockerfile comment for full detail.
+#   GRPC_ENABLE_FORK_SUPPORT=1  → registers proper at-fork cleanup handlers
+#   GRPC_POLL_STRATEGY=poll     → uses poll() engine whose PostforkChild() is
+#                                 fork-safe (epoll1's ConsumeWakeup() is not)
+# The Dockerfile sets these via ENV for the container; setdefault here covers
+# local runs outside Docker.
+os.environ.setdefault('GRPC_ENABLE_FORK_SUPPORT', '1')
+os.environ.setdefault('GRPC_POLL_STRATEGY', 'poll')
+
 import utils.constants as constants
 
 # Attach the Cloud Logging handler to the Python root logger 
@@ -78,14 +89,6 @@ def legacy_import_modules():
         import device.lifecycle
         import traffictest.lifecycle
         import networkfailure.lifecycle
-
-    if os.getenv("FREE5GC") is not None:
-        logger.info("FREE5GC Lifecycle")
-        import free5gc.ueransim.lifecycle
-        import free5gc.upf.lifecycle
-        import free5gc.controlplane.lifecycle
-        import free5gc.dnn.lifecycle
-        import free5gc.uetest.lifecycle
 
     if os.getenv("GITEA") is not None:
         logger.info("GITEA Lifecycle")

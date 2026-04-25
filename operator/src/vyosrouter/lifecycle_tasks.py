@@ -13,12 +13,11 @@
 # limitations under the License.
 
 import asyncio
-import ansible_runner
-import os
 import json
+import os
+import subprocess
 import utils.constants as constants
 import logging
-import kopf
 from typing import Dict, Any
 import kubernetes
 
@@ -127,66 +126,88 @@ async def delete_vyos_router(ip_address:str, router_name: str, interfaces: list 
         'error': result.get('error') if not result['success'] else None
     }
 
-async def get_vyos_router_status(ip_address:str, router_name: str) -> Dict[str, Any]:
-    """Get VyOS router status using Ansible"""
-    logger.info(f"Getting VyOS router status: {router_name}")
-    
-    extravars = {
-        'router_name': router_name,
-        'operation': 'status'
-    }
-    
-    result = await _run_ansible_playbook(ip_address, 'router_management.yaml', extravars, is_monitoring=True)
-    logger.info(f"Result:\n{result}")
-    return result
-
 #########################################################################
 # Ansible Execution Helper
 #########################################################################
 
-async def _run_ansible_playbook(ip_address:str, playbook: str, 
-                                extravars: Dict[str, Any], is_monitoring: bool = False) -> Dict[str, Any]:
-    """Run an Ansible playbook with the given extra variables"""
-    
+async def _run_ansible_playbook(ip_address: str, playbook: str,
+                                extravars: Dict[str, Any]) -> Dict[str, Any]:
+    """Run an Ansible playbook with the given extra variables.
+
+    Uses subprocess.run() (fork+exec) instead of ansible_runner.run_async()
+    (fork-only multiprocessing) to avoid the gRPC ev_poll_posix / wakeup_fd
+    crash that occurs when gRPC's eventfds are inherited into a forked Python
+    worker.
+    """
+
     # Get the appropriate Ansible semaphore for throttling
-    from utils.ansible import get_ansible_operational_semaphore, get_ansible_monitor_semaphore
-    semaphore = get_ansible_monitor_semaphore() if is_monitoring else get_ansible_operational_semaphore()
-    
-    # Prepare host inventory
-    hosts = {
-        'hosts': {
-            "monitor": {
-                'ansible_host': ip_address,
-                'ansible_user': os.getenv("GOOGLE_VM_USER"),
-                'ansible_connection': 'ssh',
-                'ansible_ssh_private_key_file': constants.basedir+'/google-compute',
-                'ansible_ssh_common_args': '-o StrictHostKeyChecking=no'
+    from utils.ansible import get_ansible_operational_semaphore
+    semaphore = get_ansible_operational_semaphore()
+
+    # Inventory in the format expected by ansible-playbook -i <file>
+    inventory = {
+        'all': {
+            'hosts': {
+                'monitor': {
+                    'ansible_host': ip_address,
+                    'ansible_user': os.getenv("GOOGLE_VM_USER"),
+                    'ansible_connection': 'ssh',
+                    'ansible_ssh_private_key_file': constants.basedir + '/google-compute',
+                    'ansible_ssh_common_args': '-o StrictHostKeyChecking=no',
+                }
             }
         }
     }
-    
+
     logger.info(f"Running Ansible playbook: {playbook}")
     logger.info(f"Extra vars: {extravars}")
-    
+
+    # Hard timeout (seconds) for any single Ansible playbook run.
+    # Prevents a hung SSH connection or stalled Docker command from keeping
+    # a resource permanently stuck in "Creating" or "Configuring".
+    ANSIBLE_TIMEOUT_SECONDS = 120
+
     def run_ansible(temp_dir):
-        """Wrapper function to run ansible_runner.run_async"""
+        """Write temp files and call ansible-playbook via subprocess (fork+exec)."""
+        inv_file = os.path.join(temp_dir, 'inventory.json')
+        extravars_file = os.path.join(temp_dir, 'extravars.json')
+        playbook_path = os.path.join(constants.basedir, 'vyosrouter/playbooks', playbook)
+
+        with open(inv_file, 'w') as fh:
+            json.dump(inventory, fh)
+        with open(extravars_file, 'w') as fh:
+            json.dump(extravars, fh)
+
+        # Use the json stdout callback so we can parse facts from the output.
+        # ANSIBLE_FORCE_COLOR=0 keeps the JSON clean (no ANSI escape codes).
+        env = os.environ.copy()
+        env['ANSIBLE_STDOUT_CALLBACK'] = 'json'
+        env['ANSIBLE_FORCE_COLOR'] = '0'
+
         try:
-            thread, runner = ansible_runner.run_async(
-                private_data_dir=temp_dir,
-                project_dir=constants.basedir + "/vyosrouter/playbooks",
-                inventory={'all': hosts},
-                playbook=playbook,
-                extravars=extravars,
-                quiet=True,
-                verbosity=0
+            result = subprocess.run(
+                [
+                    'ansible-playbook',
+                    '-i', inv_file,
+                    playbook_path,
+                    '--extra-vars', f'@{extravars_file}',
+                ],
+                capture_output=True,
+                text=True,
+                timeout=ANSIBLE_TIMEOUT_SECONDS,
+                env=env,
             )
-            # Wait for the thread to complete
-            thread.join()
-            return runner
+            return result
+        except subprocess.TimeoutExpired:
+            logger.error(
+                f"Ansible playbook '{playbook}' did not finish within "
+                f"{ANSIBLE_TIMEOUT_SECONDS}s — treating as failure"
+            )
+            return None
         except Exception as e:
             logger.error(f"Ansible execution failed: {e}")
             return None
-    
+
     # Throttle concurrent Ansible executions using semaphore
     async with semaphore:
         logger.info(f"Acquired Ansible semaphore for playbook: {playbook}")
@@ -196,90 +217,85 @@ async def _run_ansible_playbook(ip_address:str, playbook: str,
         try:
             # Execute in thread pool to avoid blocking the async event loop
             loop = asyncio.get_event_loop()
-            runner = await loop.run_in_executor(None, run_ansible, temp_dir)
-            
-            if runner is None:
+            result = await loop.run_in_executor(None, run_ansible, temp_dir)
+
+            if result is None:
                 return {
                     'success': False,
-                    'error': 'Failed to execute Ansible playbook'
+                    'error': 'Failed to execute Ansible playbook (timeout or launch error)'
                 }
-            
-            if runner.status == 'successful':
-                # Extract results from Ansible facts if available
+
+            # Log all task results (changed→INFO, ok/skipped→DEBUG, failures→ERROR)
+            from utils.ansible import log_ansible_output
+            log_ansible_output(playbook, result.stdout, logger)
+
+            if result.returncode == 0:
+                # Parse the JSON callback output and extract results from every task,
+                # mirroring the runner.events logic from the old ansible_runner path.
                 result_data = {}
-                
-                # Try to get results from the last event
-                for event in runner.events:
-                    if event.get('event') == 'runner_on_ok':
-                        event_data = event.get('event_data', {})
-                        res = event_data.get('res', {})
-                        task_name = event_data.get('task', '')
-                        
-                        # Extract router information from Ansible results
-                        if task_name == "Capture VyOS configuration":
-                            result_data['applied_config'] = res.get('vyos_config_commands', '')
-                            
-                        if 'container_id' in res:
-                            result_data['container_id'] = res['container_id']
-                        if 'management_ip' in res:
-                            result_data['management_ip'] = res['management_ip']
-                        if 'running' in res:
-                            result_data['running'] = res['running']
-                        
-                        # Extract from ansible_facts if they exist
-                        if 'ansible_facts' in res:
-                            ansible_facts = res['ansible_facts']
-                            if 'running' in ansible_facts:
-                                result_data['running'] = ansible_facts['running']
-                            if 'interface_status' in ansible_facts:
-                                raw = ansible_facts['interface_status']
-                                result_data['interface_status'] = raw if isinstance(raw, list) else []
-                                if not isinstance(raw, list):
-                                    logger.warning(f"interface_status Ansible fact is not a list (got {type(raw).__name__}), ignoring")
-                            if 'ospf_status' in ansible_facts:
-                                result_data['ospf_status'] = ansible_facts['ospf_status']
-                            if 'bgp_status' in ansible_facts:
-                                result_data['bgp_status'] = ansible_facts['bgp_status']
-                            if 'mpls_status' in ansible_facts:
-                                result_data['mpls_status'] = ansible_facts['mpls_status']
-                
-                logger.info(f"Extracted VyOS status data: running={result_data.get('running')}, "
-                           f"interfaces={len(result_data.get('interface_status', []))}")
-                
+                if result.stdout and result.stdout.strip():
+                    try:
+                        output = json.loads(result.stdout)
+                        for play in output.get('plays', []):
+                            for task in play.get('tasks', []):
+                                task_name = task.get('task', {}).get('name', '')
+                                for _host, host_result in task.get('hosts', {}).items():
+                                    # Applied config from the specific capture task
+                                    if task_name == "Capture VyOS configuration":
+                                        result_data['applied_config'] = host_result.get('vyos_config_commands', '')
+
+                                    # Direct result fields
+                                    for key in ('container_id', 'management_ip'):
+                                        if key in host_result:
+                                            result_data[key] = host_result[key]
+                    except Exception as parse_err:
+                        logger.debug(
+                            f"Could not parse ansible JSON output: {parse_err}. "
+                            f"Raw stdout (first 200 chars): {result.stdout[:200]!r}"
+                        )
+
+                logger.info(f"Extracted VyOS result data: {list(result_data.keys())}")
                 return {
                     'success': True,
                     **result_data
                 }
             else:
-                # Extract error information — check unreachable first (transient), then task failures
-                error_msg = f"Ansible playbook failed with status: {runner.status}"
+                error_msg = f"Ansible playbook failed with rc={result.returncode}"
+                logger.error(f"Ansible playbook '{playbook}' failed (rc={result.returncode})")
 
-                for event in runner.events:
-                    event_type = event.get('event', '')
-                    event_data = event.get('event_data', {})
-                    res = event_data.get('res', {})
+                # Try to parse the JSON output for task-level failure details
+                try:
+                    output = json.loads(result.stdout)
+                    for play in output.get('plays', []):
+                        for task in play.get('tasks', []):
+                            task_name = task.get('task', {}).get('name', '')
+                            for _host, host_result in task.get('hosts', {}).items():
+                                if host_result.get('unreachable'):
+                                    msg = host_result.get('msg', 'unknown host')
+                                    error_msg = f"Host unreachable: {msg}"
+                                    raise StopIteration
+                                if host_result.get('failed'):
+                                    msg = (
+                                        host_result.get('msg', '')
+                                        or host_result.get('stderr', '')
+                                        or str(host_result)
+                                    )
+                                    rc = host_result.get('rc')
+                                    if rc == 124 or 'Killed' in msg or 'exit code 124' in msg:
+                                        error_msg = f"exit code 124: vbash timed out applying configuration in task '{task_name}'"
+                                    else:
+                                        error_msg = msg if msg else error_msg
+                                    raise StopIteration
+                except StopIteration:
+                    pass
+                except Exception:
+                    pass
 
-                    if event_type == 'runner_on_unreachable':
-                        # SSH/network connectivity failure — always transient
-                        detail = res.get('msg', event_data.get('task', 'unknown host'))
-                        error_msg = f"Host unreachable: {detail}"
-                        break
-
-                    if event_type == 'runner_on_failed':
-                        task_name = event_data.get('task', '')
-                        msg = res.get('msg', '')
-                        stderr = res.get('stderr', '')
-                        rc = res.get('rc', None)
-
-                        # Prefer the most informative field
-                        raw_detail = msg or stderr or str(res)
-
-                        # Annotate timeout kills (exit code 124 from timeout(1) wrapper)
-                        if rc == 124 or 'Killed' in raw_detail or 'exit code 124' in raw_detail:
-                            error_msg = f"exit code 124: vbash timed out applying configuration in task '{task_name}'"
-                        else:
-                            error_msg = raw_detail if raw_detail else error_msg
-                        break
+                # Fallback: surface raw stderr/stdout tail if still generic
+                if error_msg.startswith("Ansible playbook failed with rc="):
+                    raw = (result.stderr or result.stdout or '').strip()
+                    if raw:
+                        error_msg = f"Ansible output: {raw[-800:]}"
 
                 logger.error(f"Ansible playbook execution failed: {error_msg}")
                 return {

@@ -3,7 +3,8 @@ kind: CustomResourceDefinition
 metadata:
   name: traffictests.google.dev
   labels:
-    type: network
+    type: traffic
+    agent-accessible: "true"
 spec:
   scope: Namespaced
   group: google.dev
@@ -25,7 +26,6 @@ spec:
             
             The TrafficTest resource enables:
             - End-to-end connectivity validation between customer devices
-            - Network performance measurement (throughput, latency, packet loss)
             - Service level agreement (SLA) verification and compliance testing
             - Network capacity planning and bandwidth utilization analysis
             - Quality of Service (QoS) policy validation and traffic prioritization testing
@@ -36,7 +36,9 @@ spec:
             - Tests can traverse multiple network segments including L3VPN tunnels
             - Supports both TCP and UDP protocols for different application scenarios
             - Configurable traffic patterns simulate real-world application behavior
-            - Metrics collection enables performance analysis and trend monitoring
+            - All flow metrics (throughput, latency, packet loss, jitter) are collected
+              automatically by the Ops Agent Prometheus scrape on each device — no
+              metrics configuration is required in the TrafficTest spec.
             
             Use Cases:
             - Customer onboarding: Validate connectivity and performance before service activation
@@ -54,7 +56,22 @@ spec:
                 - source_devices
                 - destination_device
                 - protocol
+                - vpnRef
               properties:
+                vpnRef:
+                  type: string
+                  description: |
+                    Name of the VyOSL3VPN resource that must be in Ready state before
+                    this TrafficTest is provisioned. The operator checks status.phase on
+                    the referenced VyOSL3VPN every 30 seconds until it equals 'Ready'.
+                    A missing VPN (404) results in a permanent error — no retry.
+                    
+                    Dependency Chain:
+                      VyOSInfrastructure → VyOSUnderlay → VyOSL3VPN (Ready)
+                                                                ↓
+                                                          TrafficTest provisions
+                    
+                    Example: 'l3vpn-blue-service'
                 source_devices:
                   type: array
                   minItems: 1
@@ -80,8 +97,8 @@ spec:
                     Traffic Pattern:
                     - All sources use identical traffic configuration (pattern, bandwidth, duration)
                     - Traffic generators run independently on each source
-                    - Metrics collected per-source and aggregated for total view
-                    - Each source maintains separate iperf3 connection to destination
+                    - Each source maintains a separate connection to the destination
+                    - Flow metrics are collected per-source by the Ops Agent on each device
                     
                     Common Source Device Types:
                     - Customer CPE routers for end-to-end connectivity testing
@@ -147,44 +164,6 @@ spec:
                     - Choose TCP for bandwidth and reliability testing
                     - Choose UDP for latency, jitter, and real-time application testing
                     - Consider the actual applications that will use the network path
-                port_mode:
-                  type: string
-                  enum: [auto, manual]
-                  default: auto
-                  description: |
-                    Port allocation mode:
-                    - auto: The operator automatically allocates a free port block.
-                    - manual: The user specifies the base port in the 'port' field.
-                port:
-                  type: integer
-                  minimum: 1
-                  maximum: 65535
-                  description: |
-                    TCP or UDP port number for the traffic test destination.
-                    Required if port_mode is set to 'manual'.
-                    
-                    Port Selection Considerations:
-                    - Must be available and not blocked by firewalls or security policies
-                    - Should match the intended application or service being tested
-                    - Consider QoS policies that may prioritize specific port ranges
-                    - Avoid well-known system ports (1-1023) unless specifically testing those services
-                    
-                    Common Port Ranges:
-                    - 80, 443: HTTP/HTTPS web traffic simulation
-                    - 22: SSH administrative traffic testing
-                    - 53: DNS query simulation
-                    - 5060-5061: SIP voice traffic testing
-                    - 1024-65535: User/application ports for general testing
-                    
-                    QoS and Firewall Impact:
-                    - Some ports may receive different QoS treatment
-                    - Firewall rules may allow/block specific ports
-                    - Port selection can affect traffic classification and prioritization
-                    
-                    Examples:
-                    - 80: Web traffic simulation
-                    - 5001: iperf3 default port for bandwidth testing
-                    - 8080: Alternative HTTP port for testing
                 duration:
                   type: integer
                   minimum: 1
@@ -253,45 +232,50 @@ spec:
                     - periodic
                     - burst
                     - poisson
+                    - multi_sine
+                    - schedule
                   default: constant
                   description: |
                     Type of traffic pattern to generate, simulates different application behaviors and network conditions.
                     
                     Traffic Pattern Types:
                     
-                    "constant": Steady, continuous traffic at fixed rate
-                    - Maintains consistent bandwidth throughout test duration
-                    - Ideal for baseline performance measurement and capacity testing
-                    - Simulates applications with steady data transfer (file downloads, streaming)
-                    - Provides stable measurements for throughput and latency analysis
-                    - Use cases: Bandwidth validation, network capacity planning, SLA verification
+                    "constant": Steady, continuous traffic at fixed rate.
+                    - Ideal for baseline performance measurement and capacity testing.
+                    - Use cases: Bandwidth validation, SLA verification.
                     
-                    "periodic": Cyclical traffic with configurable wave patterns
-                    - Traffic varies in regular cycles (sine, square, sawtooth waves)
-                    - Simulates applications with predictable usage patterns
-                    - Tests network behavior under varying load conditions
-                    - Useful for QoS testing and congestion management validation
-                    - Use cases: Business hour simulation, batch processing, scheduled backups
+                    "periodic": Single-component cyclical traffic (sine, square, sawtooth).
+                    - Kept for backward compatibility; prefer multi_sine for new tests.
+                    - Use cases: Simple QoS testing, congestion management validation.
                     
-                    "burst": High-intensity traffic bursts with idle periods
-                    - Alternates between high-rate bursts and low-rate idle periods
-                    - Simulates bursty applications and user behavior patterns
-                    - Tests network buffer management and burst handling capabilities
-                    - Reveals performance under sudden traffic spikes
-                    - Use cases: Web browsing, email, interactive applications, database queries
+                    "burst": High-intensity traffic bursts with idle periods.
+                    - Alternates between high-rate bursts and low-rate idle periods.
+                    - Use cases: Web browsing, interactive applications, database queries.
                     
-                    "poisson": Stochastic traffic based on Poisson arrival process
-                    - Random user arrivals following statistical distribution
-                    - Simulates realistic user behavior and session patterns
-                    - Tests network performance under unpredictable load variations
-                    - Models concurrent user sessions and think times
-                    - Use cases: Web applications, user session simulation, realistic load testing
+                    "poisson": Stochastic traffic based on Poisson arrival process.
+                    - Random user arrivals following statistical distribution.
+                    - Use cases: Web applications, realistic load testing.
+                    
+                    "multi_sine": Composite sinusoidal model with N superimposed terms.
+                    - Superposes multiple sine waves with independent periods and amplitudes.
+                    - Supports wall_clock time reference — waves lock to UTC time so a
+                      daily sine naturally peaks at the configured hour across all devices.
+                    - Gaussian noise can be added for realistic traffic variation.
+                    - Use cases: Time-of-day modelling, long-running topology studies,
+                      GNN dataset generation with realistic temporal patterns.
+                    
+                    "schedule": Piecewise-linear (or step) profile with HH:MM waypoints.
+                    - Interpolates between bandwidth targets at specified times of day.
+                    - Supports "daily" / "weekly" repeat cycles anchored to UTC.
+                    - Use cases: Business-hours simulation, scheduled backup windows,
+                      shift-based capacity planning.
                     
                     Selection Guidelines:
-                    - Use "constant" for baseline measurements and capacity validation
-                    - Use "periodic" for predictable load variations and QoS testing
-                    - Use "burst" for applications with intermittent high-bandwidth needs
-                    - Use "poisson" for realistic user behavior and application simulation
+                    - Use "constant" for baseline measurements.
+                    - Use "multi_sine" for realistic time-of-day traffic modelling.
+                    - Use "schedule" for business-hours or shift-based simulation.
+                    - Use "burst" for bursty application simulation.
+                    - Use "poisson" for stochastic user arrival modelling.
                 pattern_config:
                   type: object
                   description: |
@@ -602,6 +586,140 @@ spec:
                         - 0.5: One new user every 2 seconds on average
                         - 2.0: Two new users per second for moderate load
                         - 10.0: Ten new users per second for high-traffic applications
+
+                    # ── multi_sine pattern fields ───────────────────────────────────────────
+                    time_reference:
+                      type: string
+                      enum:
+                        - wall_clock
+                        - elapsed
+                      description: |
+                        How the pattern measures time.  Used by multi_sine and schedule patterns.
+                        
+                        "wall_clock": The waveform is anchored to UTC wall-clock time.
+                        - A daily sine with time_reference: wall_clock peaks at the same
+                          clock hour every day, regardless of when the test was started.
+                        - Enables synchronized traffic shapes across many devices.
+                        - Ideal for GNN dataset generation requiring realistic temporal patterns.
+                        
+                        "elapsed": The waveform counts from t=0 when the test starts.
+                        - Classic behavior compatible with the old traffic_generator.py.
+                        - Use this for short tests where absolute time of day is irrelevant.
+                    components:
+                      type: array
+                      description: |
+                        List of sinusoidal components for the multi_sine pattern.
+                        Each component adds a sine wave term to the total bandwidth.
+                        
+                        Formula: bw(t) = base_rate + Σ(amplitude_i × sin(2π(t + offset_i)/period_i))
+                        
+                        Example — daily + weekly combined:
+                          components:
+                            - period: 86400       # 24-hour cycle
+                              amplitude: 30Mbps
+                              phase_offset: -28800  # peak at 14:00 UTC
+                            - period: 604800      # 7-day weekly cycle
+                              amplitude: 10Mbps
+                              phase_offset: 0
+                      items:
+                        type: object
+                        properties:
+                          period:
+                            type: number
+                            minimum: 1
+                            description: |
+                              Full-cycle duration in seconds.
+                              Common values: 86400 (daily), 604800 (weekly), 3600 (hourly).
+                          amplitude:
+                            type: string
+                            pattern: '^[0-9]+(Kbps|Mbps|Gbps)$'
+                            description: |
+                              Peak deviation from base_rate for this sine component.
+                          phase_offset:
+                            type: number
+                            description: |
+                              Time shift in seconds to control peak placement.
+                              For wall_clock daily peaks: offset = period/4 - peak_second_of_day.
+                              Example to peak at 14:00 UTC: offset = 21600 - 50400 = -28800.
+                    noise_stddev_pct:
+                      type: number
+                      minimum: 0
+                      description: |
+                        Gaussian noise standard deviation as a percentage of the current rate.
+                        Used by multi_sine to add realistic stochastic variation.
+                        Example: 3.0 adds ±3% random variation on top of the sine envelope.
+                    min_rate:
+                      type: string
+                      pattern: '^[0-9]+(Kbps|Mbps|Gbps)$'
+                      description: |
+                        Hard floor for multi_sine pattern output.
+                        Prevents the composite waveform going negative at low amplitudes.
+                    max_rate:
+                      type: string
+                      pattern: '^[0-9]+(Kbps|Mbps|Gbps)$'
+                      description: |
+                        Hard ceiling for multi_sine pattern output.
+                        Prevents peaks exceeding the physical interface capacity.
+
+                    # ── schedule pattern fields ─────────────────────────────────────────────
+                    interpolation:
+                      type: string
+                      enum:
+                        - linear
+                        - step
+                      description: |
+                        How bandwidth changes between schedule waypoints.
+                        
+                        "linear": Smooth linear ramp between adjacent waypoints (default).
+                        "step": Hold the previous waypoint's rate until the next waypoint
+                                is reached (staircase profile).
+                    repeat:
+                      type: string
+                      enum:
+                        - daily
+                        - weekly
+                        - none
+                      description: |
+                        Whether the schedule cycles after the last waypoint.
+                        
+                        "daily":  Repeat every 24 hours (pairs with time_reference: wall_clock).
+                        "weekly": Repeat every 7 days.
+                        "none":   Hold the last waypoint rate for the remainder of the test.
+                    waypoints:
+                      type: array
+                      description: |
+                        Ordered list of (time, rate) control points for the schedule pattern.
+                        
+                        Each waypoint specifies a target bandwidth at a given time.
+                        The agent interpolates between consecutive waypoints.
+                        
+                        time format:
+                          - "HH:MM" for wall_clock mode (UTC 24-hour clock)
+                          - Integer string for elapsed mode (seconds from test start)
+                        
+                        Example — business hours (wall_clock, daily):
+                          waypoints:
+                            - time: "00:00"  rate: "5Mbps"
+                            - time: "09:00"  rate: "80Mbps"
+                            - time: "12:30"  rate: "60Mbps"
+                            - time: "14:00"  rate: "90Mbps"
+                            - time: "18:00"  rate: "30Mbps"
+                            - time: "22:00"  rate: "10Mbps"
+                      items:
+                        type: object
+                        required:
+                          - time
+                          - rate
+                        properties:
+                          time:
+                            type: string
+                            description: |
+                              Point in time for this waypoint.
+                              "HH:MM" for wall_clock mode; seconds integer for elapsed mode.
+                          rate:
+                            type: string
+                            pattern: '^[0-9]+(Kbps|Mbps|Gbps)$'
+                            description: Target bandwidth at this waypoint.
                 concurrent_users:
                   type: integer
                   minimum: 1
@@ -708,89 +826,147 @@ spec:
                     - 0: Continuous traffic for maximum load testing
                     - 15: Fifteen-second pauses for web browsing simulation
                     - 60: One-minute pauses for document review applications
-                metrics_enabled:
+
+                # ── Bidirectional traffic fields ────────────────────────────────────────
+                bidirectional:
                   type: boolean
                   default: false
                   description: |
-                    Enable comprehensive metrics collection during traffic testing.
+                    When true, traffic flows simultaneously in both directions:
+                    forward (source→destination) AND reverse (destination→source).
                     
-                    Metrics Collection Benefits:
-                    - Real-time performance monitoring and analysis
-                    - Historical data for trend analysis and capacity planning
-                    - SLA compliance verification and reporting
-                    - Network troubleshooting and performance optimization
-                    - Quality of Service (QoS) policy validation
+                    This is the recommended way to simulate realistic application
+                    traffic such as video streaming or web browsing, where data flows
+                    in both directions asymmetrically.
                     
-                    Collected Metrics Include:
-                    - Throughput: Actual data transfer rates (bits per second)
-                    - Latency: Round-trip time and response delays (milliseconds)
-                    - Packet Loss: Lost packet percentage and retransmission rates
-                    - Jitter: Variation in packet arrival times (milliseconds)
-                    - Connection Statistics: Active connections, setup/teardown rates
+                    Implementation:
+                    - The operator allocates a separate port for each reverse flow.
+                    - Reverse flow IDs follow the pattern "{name}_{source}_rev" and
+                      appear in Prometheus metrics with role="source" (destination agent)
+                      and role="destination" (source agent).
+                    - Forward and reverse flows run independently and are started
+                      and stopped together.
                     
-                    Performance Impact:
-                    - Metrics collection adds minimal overhead to traffic generation
-                    - Storage requirements increase with longer test durations
-                    - Network bandwidth used for metrics transmission to storage
-                    - Consider impact on test accuracy for high-precision measurements
+                    Traffic Direction:
+                    - Forward: source_device → destination_device  (role=source on source_device)
+                    - Reverse: destination_device → source_device  (role=source on destination_device)
                     
                     Use Cases:
-                    - Enable for performance analysis and SLA verification
-                    - Enable for network troubleshooting and optimization
-                    - Disable for simple connectivity testing to reduce overhead
-                    - Enable for long-term monitoring and trend analysis
-                    
-                    Integration:
-                    - Metrics can be stored in time-series database
-                    - Compatible with visualization and alerting tools
-                    - Supports automated analysis and reporting workflows
-                metrics_interval:
-                  type: integer
-                  minimum: 1
-                  default: 5
-                  description: |
-                    Metrics sampling and reporting interval in seconds.
-                    
-                    Sampling Interval Configuration:
-                    - Determines how frequently metrics are collected and stored
-                    - Shorter intervals provide higher resolution data
-                    - Longer intervals reduce storage requirements and overhead
-                    - Should balance measurement precision with resource usage
-                    
-                    Interval Selection Guidelines:
-                    - High-precision testing: 1-2 seconds for detailed analysis
-                    - Standard performance testing: 5-10 seconds for good resolution
-                    - Long-term monitoring: 30-60 seconds for trend analysis
-                    - Capacity planning: 60-300 seconds for aggregate statistics
-                    
-                    Storage and Performance Impact:
-                    - Shorter intervals generate more data points and storage requirements
-                    - Very short intervals may impact test accuracy due to measurement overhead
-                    - Network bandwidth used for metrics transmission increases with frequency
-                    - Database performance affected by ingestion rate
-                    
-                    Data Resolution Considerations:
-                    - Should be shorter than expected performance variations
-                    - Network events may occur faster than sampling interval
-                    - Consider test duration when selecting interval (avoid excessive data)
-                    - Balance between measurement accuracy and system resources
+                    - Video streaming: set source=client, destination=server.
+                      bandwidth = small (client control/requests → server).
+                      reverse_bandwidth = large (server video stream → client).
+                    - Web browsing: set source=client, destination=server.
+                      bandwidth = small (HTTP requests → server).
+                      reverse_bandwidth = large (HTTP responses → client).
+                    - VoIP / video calls: symmetric — bandwidth ≈ reverse_bandwidth.
+                    - File upload: set source=client, destination=server.
+                      bandwidth = large (file data → server).
+                      reverse_bandwidth = small (ACKs/metadata → client).
                     
                     Examples:
-                    - 1: One-second intervals for high-precision analysis
-                    - 5: Five-second intervals for standard performance testing
-                    - 30: Thirty-second intervals for long-term monitoring
+                    - true: Enable bidirectional traffic simulation
+                    - false: Unidirectional traffic only (default)
+                reverse_bandwidth:
+                  type: string
+                  pattern: '^[0-9]+(Kbps|Mbps|Gbps)$'
+                  description: |
+                    Target bandwidth for the reverse direction (destination→source).
+                    Only used when bidirectional: true.
+                    
+                    Defaults to the same value as bandwidth if not specified,
+                    producing symmetric bidirectional traffic.
+                    
+                    Bandwidth Direction Reference:
+                    - bandwidth        controls source_device → destination_device traffic.
+                    - reverse_bandwidth controls destination_device → source_device traffic.
+                    
+                    Typical values when source=client, destination=server:
+                    - Video streaming:  bandwidth="100Kbps" (control), reverse_bandwidth="5Mbps" (stream)
+                    - Web browsing:     bandwidth="1Mbps" (requests), reverse_bandwidth="20Mbps" (responses)
+                    - File upload:      bandwidth="100Mbps" (upload), reverse_bandwidth="500Kbps" (ACKs)
+                    - VoIP:             bandwidth="1Mbps", reverse_bandwidth="1Mbps" (symmetric)
+                    
+                    Examples:
+                    - "100Kbps": Tiny control channel from client when server is the large sender
+                    - "1Mbps":   Small HTTP request channel from client to server
+                    - "5Mbps":   Symmetric stream in each direction
+                reverse_pattern_type:
+                  type: string
+                  enum:
+                    - constant
+                    - periodic
+                    - burst
+                    - poisson
+                    - multi_sine
+                    - schedule
+                  default: constant
+                  description: |
+                    Traffic pattern for the reverse flow (destination→source).
+                    Only used when bidirectional: true.
+                    
+                    Defaults to "constant" if not specified.  Can be set independently
+                    of pattern_type to produce realistic asymmetric shapes.
+                    
+                    Common combinations (when source=client, destination=server):
+                    - pattern_type: constant + reverse_pattern_type: burst
+                        client sends steady small requests; server sends bursty large responses
+                    - pattern_type: constant + reverse_pattern_type: constant
+                        symmetric steady-state streams (e.g. VoIP, video call)
+                    - pattern_type: burst + reverse_pattern_type: burst
+                        bursty in both directions with different rates (e.g. web browsing)
+                    - pattern_type: constant + reverse_pattern_type: multi_sine
+                        steady low-rate upstream; time-varying downstream load
+                    
+                    See pattern_type for full description of each pattern.
+                reverse_pattern_config:
+                  type: object
+                  x-kubernetes-preserve-unknown-fields: true
+                  description: |
+                    Pattern configuration for the reverse flow (destination→source).
+                    Only used when bidirectional: true.
+                    
+                    Uses the same structure as pattern_config.
+                    See pattern_config for field descriptions.
+                    
+                    Example — web browsing (source=client, destination=server):
+                      # client → server: small bursty HTTP requests
+                      pattern_type: burst
+                      pattern_config:
+                        burst_rate: "1Mbps"
+                        idle_rate: "10Kbps"
+                        burst_duration: 1
+                        burst_interval: 5
+                      # server → client: large bursty HTTP responses
+                      reverse_pattern_type: burst
+                      reverse_pattern_config:
+                        burst_rate: "20Mbps"
+                        idle_rate: "500Kbps"
+                        burst_duration: 2
+                        burst_interval: 5
+                    
+                    Example — symmetric multi_sine bidirectional (e.g. VoIP):
+                      reverse_pattern_type: multi_sine
+                      reverse_pattern_config:
+                        base_rate: 1Mbps
+                        time_reference: elapsed
+                        components:
+                          - period: 86400
+                            amplitude: 200Kbps
+                            phase_offset: 0
+
             status:
               type: object
               description: |
                 Current status and runtime information for the traffic test execution.
                 
                 Status Tracking provides:
-                - Real-time test execution phase and progress monitoring
-                - Performance metrics and measurement results per source device
-                - Aggregate metrics across all source devices
+                - Real-time test execution phase and progress monitoring (phase per source device)
                 - Error reporting and troubleshooting information
                 - Test lifecycle management and completion status
-                - Historical data for analysis and reporting
+                
+                Note: Flow metrics (throughput, latency, packet loss, jitter) are NOT stored
+                in status — they are written directly to Cloud Monitoring by the Ops Agent
+                Prometheus scrape running on each device.
               properties:
                 source_count:
                   type: integer
@@ -801,18 +977,11 @@ spec:
                     - Single source: Traditional point-to-point test
                     - Multiple sources: Load testing or aggregate capacity measurement
                     - Useful for capacity planning and resource allocation
-                allocated_ports:
-                  type: array
-                  items:
-                    type: integer
-                  description: |
-                    The list of port numbers allocated for this traffic test.
-                    This field is populated by the operator during the 'Allocating' phase.
                 source_status:
                   type: object
                   additionalProperties:
                     type: object
-                    description: Per-source device status and metrics
+                    description: Per-source device status
                     properties:
                       phase:
                         type: string
@@ -825,87 +994,30 @@ spec:
                       message:
                         type: string
                         description: Status message specific to this source device
-                      metrics:
-                        type: object
-                        description: Performance metrics for this source device
-                        properties:
-                          throughput_bps:
-                            type: number
-                            description: Throughput from this source in bits per second
-                          latency_ms:
-                            type: number
-                            description: Latency measured from this source in milliseconds
-                          packet_loss_pct:
-                            type: number
-                            description: Packet loss percentage from this source
-                          active_connections:
-                            type: integer
-                            description: Number of active connections from this source
-                          retransmissions:
-                            type: integer
-                            description: Number of retransmissions from this source
                   description: |
-                    Per-source device status and metrics tracking.
+                    Per-source device status tracking.
                     
                     Structure: Map of device name to status object
                     - Key: Source device name (e.g., "branch-1")
-                    - Value: Status object with phase, message, and metrics
+                    - Value: Status object with phase and message
+                    
+                    Flow metrics (throughput, latency, packet loss, jitter) are
+                    collected independently by the Ops Agent Prometheus scrape
+                    running on each device — they are not mirrored into this status.
                     
                     Use Cases:
-                    - Identify which sources are performing well vs struggling
+                    - Identify which sources are running vs failed
                     - Detect individual source failures without failing entire test
-                    - Compare performance across different network paths
                     - Debug connectivity issues for specific sources
                     
                     Example:
                     source_status:
                       branch-1:
                         phase: Running
-                        metrics:
-                          throughput_bps: 98000000
-                          latency_ms: 12.5
+                        message: "elapsed=120s / 600s"
                       branch-2:
                         phase: Running
-                        metrics:
-                          throughput_bps: 95000000
-                          latency_ms: 15.2
-                aggregate_metrics:
-                  type: object
-                  description: |
-                    Aggregated performance metrics across all source devices.
-                    
-                    Aggregation Methods:
-                    - Throughput: Sum of all source throughputs (total bandwidth)
-                    - Latency: Average across all sources
-                    - Packet Loss: Average across all sources
-                    - Connections: Sum of all source connections
-                    
-                    Use Cases:
-                    - Total network capacity measurement
-                    - Overall SLA compliance verification
-                    - Aggregate performance trending
-                    - Capacity planning and forecasting
-                  properties:
-                    total_throughput_bps:
-                      type: number
-                      description: |
-                        Sum of throughput from all source devices in bits per second.
-                        Represents total aggregate bandwidth to destination.
-                    avg_latency_ms:
-                      type: number
-                      description: |
-                        Average latency across all source devices in milliseconds.
-                        Provides overall network latency characteristic.
-                    avg_packet_loss_pct:
-                      type: number
-                      description: |
-                        Average packet loss percentage across all source devices.
-                        Indicates overall network quality.
-                    total_connections:
-                      type: integer
-                      description: |
-                        Sum of active connections from all source devices.
-                        Represents total concurrent sessions.
+                        message: "elapsed=120s / 600s"
                 phase:
                   type: string
                   enum:
@@ -934,15 +1046,13 @@ spec:
                     
                     "Running": Test is actively executing and generating traffic
                     - Traffic generation is active between source and destination
-                    - Metrics collection and measurement in progress
                     - Test duration timer is counting down
-                    - Real-time performance data being collected and reported
+                    - Flow metrics are collected by the Ops Agent on each device
                     
                     "Completed": Test finished successfully with results available
                     - Test duration elapsed or stopped by user request
-                    - All metrics collected and final results calculated
                     - Test infrastructure cleaned up and resources released
-                    - Results available for analysis and reporting
+                    - Flow metrics available in Cloud Monitoring via Ops Agent
                     
                     "Failed": Test encountered an error and could not complete
                     - Configuration validation failed or network connectivity issues
@@ -1024,168 +1134,18 @@ spec:
                     - May be shorter than configured duration if stopped early
                     - Used for performance normalization and rate calculations
                     - Important for SLA compliance and billing calculations
-                current_metrics:
-                  type: object
+                allocated_ports:
+                  type: array
+                  items:
+                    type: integer
                   description: |
-                    Real-time performance metrics collected during test execution.
+                    Ports allocated by the operator for this traffic test.
                     
-                    Metrics Collection provides:
-                    - Live performance monitoring during test execution
-                    - Immediate feedback on network behavior and test progress
-                    - Early detection of performance issues or network problems
-                    - Data for real-time dashboards and alerting systems
-                    
-                    Metrics Update Frequency:
-                    - Updated according to metrics_interval configuration
-                    - Provides near real-time visibility into test performance
-                    - Enables dynamic test adjustment and early termination if needed
-                    - Supports automated monitoring and threshold-based alerting
-                    
-                    Data Accuracy:
-                    - Represents current measurement window averages
-                    - May show temporary fluctuations due to network conditions
-                    - More stable over longer measurement intervals
-                    - Final results available after test completion for analysis
-                  properties:
-                    throughput_bps:
-                      type: number
-                      description: |
-                        Current measured throughput in bits per second.
-                        
-                        Throughput Measurement:
-                        - Actual data transfer rate achieved during current measurement interval
-                        - May be lower than configured bandwidth due to network conditions
-                        - Includes protocol overhead and network efficiency factors
-                        - Represents end-to-end application-layer data transfer rate
-                        
-                        Interpretation Guidelines:
-                        - Compare with configured bandwidth to assess network performance
-                        - Sustained values below target may indicate network bottlenecks
-                        - Fluctuations normal due to network conditions and traffic patterns
-                        - Use for real-time performance monitoring and SLA verification
-                        
-                        Factors Affecting Throughput:
-                        - Network congestion and available bandwidth
-                        - Protocol overhead (TCP acknowledgments, UDP packet loss)
-                        - Device processing capacity and system resources
-                        - QoS policies and traffic shaping configurations
-                        
-                        Examples:
-                        - 95000000: 95 Mbps actual throughput
-                        - 1000000000: 1 Gbps line-rate performance
-                        - 50000000: 50 Mbps with some network limitations
-                    latency_ms:
-                      type: number
-                      description: |
-                        Current measured round-trip latency in milliseconds.
-                        
-                        Latency Measurement:
-                        - Round-trip time between source and destination devices
-                        - Includes network propagation delay and processing time
-                        - Measured at application layer for end-to-end perspective
-                        - Averaged over current measurement interval for stability
-                        
-                        Latency Components:
-                        - Propagation delay: Physical distance and medium characteristics
-                        - Transmission delay: Time to transmit packet onto network
-                        - Processing delay: Router and device processing time
-                        - Queuing delay: Time spent in network buffers and queues
-                        
-                        Performance Implications:
-                        - Low latency critical for real-time applications (voice, gaming)
-                        - High latency affects interactive application responsiveness
-                        - Consistent latency important for streaming and video applications
-                        - Latency spikes may indicate network congestion or issues
-                        
-                        Typical Values:
-                        - Local network: 0.1-1 ms
-                        - Metropolitan area: 1-10 ms
-                        - Regional/national: 10-50 ms
-                        - International: 50-200+ ms
-                    packet_loss_pct:
-                      type: number
-                      description: |
-                        Current measured packet loss percentage.
-                        
-                        Packet Loss Measurement:
-                        - Percentage of packets lost during transmission
-                        - Calculated as (lost_packets / total_packets) × 100
-                        - Measured over current interval for real-time monitoring
-                        - Critical indicator of network quality and congestion
-                        
-                        Loss Impact by Application:
-                        - TCP applications: Automatic retransmission reduces throughput
-                        - UDP applications: Data loss affects application quality
-                        - Real-time applications: Loss causes audio/video artifacts
-                        - File transfers: Increased completion time due to retransmissions
-                        
-                        Acceptable Loss Levels:
-                        - Excellent: 0-0.01% packet loss
-                        - Good: 0.01-0.1% packet loss
-                        - Acceptable: 0.1-1% packet loss (depending on application)
-                        - Poor: >1% packet loss (significant impact on performance)
-                        
-                        Causes of Packet Loss:
-                        - Network congestion and buffer overflow
-                        - Interface errors and physical layer issues
-                        - QoS policies dropping low-priority traffic
-                        - Device overload and processing limitations
-                    active_connections:
-                      type: integer
-                      description: |
-                        Number of currently active network connections.
-                        
-                        Connection Tracking:
-                        - Count of established TCP connections or active UDP sessions
-                        - Reflects current concurrency level and resource utilization
-                        - Important for understanding network and system load
-                        - Varies based on traffic pattern and user behavior simulation
-                        
-                        Connection Lifecycle:
-                        - TCP: Established connections in ESTABLISHED state
-                        - UDP: Active sessions with recent packet exchange
-                        - Includes both data transfer and idle connections
-                        - Excludes connections in setup or teardown phases
-                        
-                        Scaling Implications:
-                        - Higher connection counts require more system resources
-                        - Network devices have connection table size limitations
-                        - Affects memory usage and processing overhead
-                        - Important for capacity planning and resource allocation
-                        
-                        Pattern-Specific Behavior:
-                        - Constant pattern: Steady connection count
-                        - Burst pattern: Fluctuating based on burst/idle cycles
-                        - Poisson pattern: Variable based on user arrival/departure
-                        - Periodic pattern: Cyclical variation with traffic waves
-                    retransmissions:
-                      type: integer
-                      description: |
-                        Total number of packet retransmissions (TCP only).
-                        
-                        Retransmission Tracking:
-                        - Count of TCP segments that required retransmission
-                        - Indicates network reliability and congestion levels
-                        - Directly impacts throughput and application performance
-                        - Not applicable to UDP traffic (no automatic retransmission)
-                        
-                        Retransmission Causes:
-                        - Packet loss due to network congestion
-                        - Timeout due to high latency or jitter
-                        - Duplicate acknowledgments indicating out-of-order delivery
-                        - Network path changes causing temporary connectivity loss
-                        
-                        Performance Impact:
-                        - Reduces effective throughput due to repeated transmissions
-                        - Increases latency for affected data segments
-                        - Consumes additional network bandwidth
-                        - May trigger TCP congestion control mechanisms
-                        
-                        Analysis Guidelines:
-                        - Low retransmissions (< 1% of total packets): Good network quality
-                        - Moderate retransmissions (1-5%): Some network stress or congestion
-                        - High retransmissions (> 5%): Significant network issues requiring investigation
-                        - Trend analysis more important than absolute numbers
+                    Port Allocation:
+                    - Unidirectional tests: one port per source device.
+                    - Bidirectional tests: two ports per source device (forward + reverse).
+                    - Persisted in status so the PortAllocator can be re-seeded when
+                      the operator restarts (anti-entropy synchronisation on startup).
       additionalPrinterColumns:
         - name: Phase
           type: string
@@ -1203,7 +1163,3 @@ spec:
         - name: Duration
           type: integer
           jsonPath: .spec.duration
-        - name: Ports
-          type: string
-          jsonPath: .status.allocated_ports
-          description: Allocated ports

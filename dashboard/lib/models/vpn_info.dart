@@ -1,0 +1,271 @@
+// Models for VyOSL3VPN and TrafficTest Kubernetes CRDs as returned by
+// the supervisor REST API (/vpns and /traffictests endpoints).
+
+// ---------------------------------------------------------------------------
+// VPN helper models
+// ---------------------------------------------------------------------------
+
+/// Per-router VRF entry with RD / RT routing policy info.
+class VpnRouterVrf {
+  final String router;
+  final String vrf;
+  final String? rd;
+  final List<String> rtExport;
+  final List<String> rtImport;
+  final String? description;
+
+  const VpnRouterVrf({
+    required this.router,
+    required this.vrf,
+    this.rd,
+    required this.rtExport,
+    required this.rtImport,
+    this.description,
+  });
+
+  factory VpnRouterVrf.fromJson(Map<String, dynamic> json) {
+    List<String> toStrings(dynamic v) =>
+        v is List ? List<String>.from(v.whereType<String>()) : [];
+    return VpnRouterVrf(
+      router: json['router'] as String? ?? '',
+      vrf: json['vrf'] as String? ?? '',
+      rd: json['rd'] as String?,
+      rtExport: toStrings(json['rt_export']),
+      rtImport: toStrings(json['rt_import']),
+      description: json['description'] as String?,
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        'router': router,
+        'vrf': vrf,
+        'rd': rd,
+        'rt_export': rtExport,
+        'rt_import': rtImport,
+        'description': description,
+      };
+}
+
+/// Service-level VPN metadata (topology type, service-scoped RD/RT, description).
+class VpnService {
+  final String name;
+  final String? type;
+  final String? topology;
+  final String? rd;
+  final String? rtExport;
+  final String? rtImport;
+  final String? description;
+
+  const VpnService({
+    required this.name,
+    this.type,
+    this.topology,
+    this.rd,
+    this.rtExport,
+    this.rtImport,
+    this.description,
+  });
+
+  factory VpnService.fromJson(Map<String, dynamic> json) => VpnService(
+        name: json['name'] as String? ?? '',
+        type: json['type'] as String?,
+        topology: json['topology'] as String?,
+        rd: json['rd'] as String?,
+        rtExport: json['rt_export'] as String?,
+        rtImport: json['rt_import'] as String?,
+        description: json['description'] as String?,
+      );
+
+  Map<String, dynamic> toJson() => {
+        'name': name,
+        'type': type,
+        'topology': topology,
+        'rd': rd,
+        'rt_export': rtExport,
+        'rt_import': rtImport,
+        'description': description,
+      };
+}
+
+// ---------------------------------------------------------------------------
+// VpnInfo
+// ---------------------------------------------------------------------------
+
+class VpnInfo {
+  final String name;
+  final String phase;
+  final String message;
+
+  /// Names of routers involved in this VPN (PE + CE).
+  final List<String> routers;
+  final String? underlayRef;
+
+  /// Per-router VRF entries with RD / RT info (PE routers only).
+  final List<VpnRouterVrf> routerVrfs;
+
+  /// Service-level metadata from spec.services[].
+  final List<VpnService> services;
+
+  const VpnInfo({
+    required this.name,
+    required this.phase,
+    required this.message,
+    required this.routers,
+    this.underlayRef,
+    this.routerVrfs = const [],
+    this.services = const [],
+  });
+
+  factory VpnInfo.fromJson(Map<String, dynamic> json) {
+    final routersList = json['routers'];
+    final vrfsList = json['router_vrfs'];
+    final svcList = json['services'];
+    return VpnInfo(
+      name: json['name'] as String? ?? 'unknown',
+      phase: json['phase'] as String? ?? 'Unknown',
+      message: json['message'] as String? ?? '',
+      routers: routersList is List
+          ? List<String>.from(routersList.whereType<String>())
+          : [],
+      underlayRef: json['underlay_ref'] as String?,
+      routerVrfs: vrfsList is List
+          ? vrfsList
+              .whereType<Map<String, dynamic>>()
+              .map(VpnRouterVrf.fromJson)
+              .toList()
+          : [],
+      services: svcList is List
+          ? svcList
+              .whereType<Map<String, dynamic>>()
+              .map(VpnService.fromJson)
+              .toList()
+          : [],
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        'name': name,
+        'phase': phase,
+        'message': message,
+        'routers': routers,
+        'underlay_ref': underlayRef,
+        'router_vrfs': routerVrfs.map((v) => v.toJson()).toList(),
+        'services': services.map((s) => s.toJson()).toList(),
+      };
+
+  /// True if there is any RD/RT routing info available to display.
+  bool get hasRouteInfo => routerVrfs.isNotEmpty;
+}
+
+// ---------------------------------------------------------------------------
+// TrafficTestInfo
+// ---------------------------------------------------------------------------
+
+class TrafficTestInfo {
+  final String name;
+  final String phase;
+  final String message;
+  final String? vpnRef;
+  final List<String> sourceDevices;
+  final String? destinationDevice;
+
+  /// Network protocol: TCP or UDP (from spec.protocol).
+  final String? protocol;
+
+  /// Target bandwidth string, e.g. "100Mbps" (from spec.bandwidth).
+  final String? bandwidth;
+
+  /// Traffic pattern type, e.g. "constant", "burst", "multi_sine" (from spec.pattern_type).
+  final String? patternType;
+
+  final int duration;
+  final bool bidirectional;
+  final int sourceCount;
+  final String? startTime;
+  final String? endTime;
+  final List<int> allocatedPorts;
+
+  const TrafficTestInfo({
+    required this.name,
+    required this.phase,
+    required this.message,
+    this.vpnRef,
+    required this.sourceDevices,
+    this.destinationDevice,
+    this.protocol,
+    this.bandwidth,
+    this.patternType,
+    required this.duration,
+    this.bidirectional = false,
+    required this.sourceCount,
+    this.startTime,
+    this.endTime,
+    required this.allocatedPorts,
+  });
+
+  factory TrafficTestInfo.fromJson(Map<String, dynamic> json) {
+    final srcDevices = json['source_devices'];
+    final ports = json['allocated_ports'];
+    return TrafficTestInfo(
+      name: json['name'] as String? ?? 'unknown',
+      phase: json['phase'] as String? ?? 'Unknown',
+      message: json['message'] as String? ?? '',
+      vpnRef: json['vpn_ref'] as String?,
+      sourceDevices: srcDevices is List
+          ? List<String>.from(srcDevices.whereType<String>())
+          : [],
+      destinationDevice: json['destination_device'] as String?,
+      protocol: json['protocol'] as String?,
+      bandwidth: json['bandwidth'] as String?,
+      patternType: json['pattern_type'] as String?,
+      duration: (json['duration'] as num?)?.toInt() ?? 60,
+      bidirectional: json['bidirectional'] as bool? ?? false,
+      sourceCount: (json['source_count'] as num?)?.toInt() ?? 0,
+      startTime: json['start_time'] as String?,
+      endTime: json['end_time'] as String?,
+      allocatedPorts: ports is List
+          ? List<int>.from(ports.whereType<num>().map((n) => n.toInt()))
+          : [],
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        'name': name,
+        'phase': phase,
+        'message': message,
+        'vpn_ref': vpnRef,
+        'source_devices': sourceDevices,
+        'destination_device': destinationDevice,
+        'protocol': protocol,
+        'bandwidth': bandwidth,
+        'pattern_type': patternType,
+        'duration': duration,
+        'bidirectional': bidirectional,
+        'source_count': sourceCount,
+        'start_time': startTime,
+        'end_time': endTime,
+        'allocated_ports': allocatedPorts,
+      };
+
+  /// All device names associated with this test (sources + destination).
+  List<String> get allDeviceNames {
+    final devices = List<String>.from(sourceDevices);
+    if (destinationDevice != null) {
+      devices.add(destinationDevice!);
+    }
+    return devices;
+  }
+
+  /// Whether the test is currently active (running or deploying).
+  bool get isActive =>
+      phase == 'Running' || phase == 'Deploying' || phase == 'Pending';
+
+  /// Compact summary of traffic parameters for display: e.g. "TCP • 100Mbps • constant"
+  String get trafficSummary {
+    final parts = <String>[];
+    if (protocol != null) parts.add(protocol!);
+    if (bandwidth != null) parts.add(bandwidth!);
+    if (patternType != null) parts.add(patternType!);
+    return parts.join(' • ');
+  }
+}

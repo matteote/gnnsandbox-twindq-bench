@@ -19,7 +19,7 @@ Dimension Type 2) — closing the current row and inserting a new one whenever s
 | `VyOSInfrastructure` | `google.dev/v1` | Parent composite resource — physical topology | `LogicalSubnet`, `PhysicalLink`, `Interface_Link` |
 | `VyOSRouter` | `google.dev/v1` | Individual router node | `PhysicalRouter`, `PhysicalInterface`, `LogicalSubnet`, `Subnet_Association` |
 | `VyOSUnderlay` | `google.dev/v1` | Core protocol layer (OSPF/MPLS/BGP) | *(indirect — patches `PhysicalRouter.config` via VyOSRouter update)* |
-| `VyOSL3VPN` | `google.dev/v1` | VPN overlay service | `Customer`, `L3VPNService`, `VRF`, `BGPSession`, `BGP_Peering` |
+| `VyOSL3VPN` | `google.dev/v1` | VPN overlay service | `L3VPNService`, `VRF`, `BGPSession` |
 | `Device` | `google.dev/v1` | End-host / CE device | `Device` |
 | `LinuxNetwork` | `google.dev/v1` | Linux bridge (host network) | `LogicalSubnet`, `Subnet_Association`, `PhysicalLink`, `Interface_Link`, `NetworkMetrics` *(see linux_spanner_mapping.md)* |
 
@@ -45,7 +45,7 @@ VyOSInfrastructure        ← creates child LinuxNetwork + VyOSRouter CRDs
          VyOSUnderlay       ← patches VyOSRouter spec (OSPF / MPLS / BGP)
                 │
                 ▼
-          VyOSL3VPN         → L3VPNService, VRF, BGPSession, BGP_Peering
+          VyOSL3VPN         → L3VPNService, VRF, BGPSession
                 │
                 ▼
             Device          → Device (connects to a router via gateway IP)
@@ -148,7 +148,7 @@ This function is called on every status transition (`Pending` → `Creating` →
 | *(sanitised body)* | `PhysicalRouter` | `config` (full CRD JSON) |
 | `spec.interfaces[*].name` | `PhysicalInterface` | `id = "router:<name>:interface:<if-name>"`, `name` |
 | `spec.interfaces[*].address` | `PhysicalInterface` | `ip_address` (CIDR stripped) |
-| `spec.interfaces[*].speed` | `PhysicalInterface` | `speed` |
+| `PhysicalLink.bandwidth` of the connected link (set by `VyOSInfrastructure`) | `PhysicalInterface` | `speed` — looked up via `Interface_Link → PhysicalLink` at sync time; falls back to `spec.interfaces[*].speed` or `"1G"` if no link is found |
 | `spec.interfaces[*].media_type` | `PhysicalInterface` | `media_type` |
 | derived from `status.phase` or Ansible operstate | `PhysicalInterface` | `status` (`"UP"` / `"DOWN"` / `"ADMIN_DOWN"`) |
 | `spec.interfaces[*].address` (CIDR) | `LogicalSubnet` | `id = "subnet:<cidr>"`, `cidr` |
@@ -250,7 +250,7 @@ VyOSUnderlay.spec.infrastructureRef → must point to a Ready VyOSInfrastructure
 
 ---
 
-## 4. VyOSL3VPN → `Customer` + `L3VPNService` + `VRF` + `BGPSession` + `BGP_Peering`
+## 4. VyOSL3VPN → `L3VPNService` + `VRF` + `BGPSession`
 
 `VyOSL3VPN` is the overlay service layer. It patches VyOS PE routers with VRF definitions
 and BGP neighbor configurations, and synchronises the full logical service topology to Spanner
@@ -267,15 +267,12 @@ VyOSL3VPN.spec.underlayRef → must point to a Ready VyOSUnderlay
 ```
 VyOSL3VPN.spec
   │
-  ├── (implicit) → Customer         "cust:default"  (upserted, non-temporal)
-  │
   ├── spec.services[*]
   │       └── L3VPNService          "vpn:<service-name>"
   │
   └── spec.routers[*]
           ├── VRF                   "vrf:<router-name>:<service-name>"
-          ├── BGPSession            "bgp:<router-name>:<service-name>:<peer-ip>"
-          └── BGP_Peering           (session_id_a, session_id_b)
+          └── BGPSession            "bgp:<router-name>:<service-name>:<peer-ip>"
 ```
 
 ### Field Mappings
@@ -287,7 +284,7 @@ VyOSL3VPN.spec
 | `name` | `id = "vpn:<name>"`, `name` |
 | `type` | `service_type` (e.g. `"l3vpn"`) |
 | `topology` | `topology` (`"hub"` \| `"spoke"` \| `"mesh"`) |
-| `"cust:default"` | `customer_id` |
+| *(static string)* | `customer_id` (set to `"cust:default"` — no Customer table) |
 | derived from CRD status | `status` (`"Ready"` \| `"Unknown"`) |
 | *(full service object)* | `config` (JSON) |
 
@@ -305,31 +302,27 @@ VyOSL3VPN.spec
 
 #### `BGPSession`
 
-| `spec.routers[*].neighbors[*]` field | `BGPSession` column |
+Neighbors are read from `spec.routers[*].bgp.vrfs[*].neighbors[*]`. The CRD field for the
+neighbor address is `peer` (not `peer_ip`); the operator normalises this when writing to Spanner.
+
+| `spec.routers[*].bgp.vrfs[*].neighbors[*]` field | `BGPSession` column |
 |---|---|
-| `"bgp:<router-name>:<service-name>:<peer-ip>"` | `id` |
+| `"bgp:<router-name>:<service-name>:<peer>"` | `id` |
 | `"vrf:<router-name>:<service-name>"` | `vrf_id` |
-| `local_as` | `local_as` |
+| *(set to 0 — not in CRD)* | `local_as` |
 | `remote_as` | `remote_as` |
-| `peer_ip` | `peer_ip` |
+| `peer` | `peer_ip` |
 | derived from L3VPN status | `status` (`"Established"` \| `"Idle"`) |
 | *(full neighbor config)* | `config` (JSON) |
 
-#### `BGP_Peering`
-
-Two `BGPSession` rows are linked by a `BGP_Peering` edge when the operator can resolve the
-reverse session (i.e. the peer router's matching session). The pair is stored canonically
-(sorted IDs) to avoid duplicate rows.
-
-```
-BGP_Peering: (session_id_a, session_id_b)
-  e.g. ("bgp:pe1:BLUE_SPOKE:10.50.50.2", "bgp:ce1-spoke:BLUE_SPOKE:10.50.50.1")
-```
+> **BGP peering edges** are not stored as a join table. The GNN derives `bgp_peer` edges at
+> query time by matching `BGPSession.peer_ip` against `PhysicalInterface.ip_address`. This
+> avoids write-time complexity of resolving both sides of a peering simultaneously, and works
+> correctly in CE↔PE topologies where only the PE side has a `BGPSession` row.
 
 ### ID Conventions
 
 ```
-Customer:      id = "cust:default"
 L3VPNService:  id = "vpn:<service-name>"
                    e.g. vpn:BLUE_HUB   vpn:BLUE_SPOKE
 
@@ -385,9 +378,9 @@ CREATE TABLE BGPSession (
 ### State Change Behaviour
 
 ```
-VyOSL3VPN created (status=Ready):    → insert Customer (upsert), L3VPNService,
-                                        VRF rows per PE router, BGPSession rows
-                                        per neighbour, BGP_Peering edges
+VyOSL3VPN created (status=Ready):    → insert L3VPNService,
+                                        VRF rows per PE router,
+                                        BGPSession rows per VRF neighbor
 VyOSL3VPN updated:                   → close changed rows, insert new rows
 VyOSL3VPN deleted:                   → close all vpn:*, vrf:* rows and associated
                                         BGPSession rows
@@ -428,7 +421,7 @@ existing `PhysicalInterface.ip_address` records.
 | `spec` / `metadata` field | `Device` column |
 |---|---|
 | `metadata.name` | `id = "device:<name>"`, `name` |
-| resolved via gateway IP lookup | `router_id` (e.g. `"router:ce1-hub"`) |
+| resolved via gateway IP lookup | `interface_id` (e.g. `"router:ce1-hub:interface:eth2"`) |
 | `spec.network_name` | `network_name` (e.g. `"lan-hub"`) |
 | `spec.ip_address` | `ip_address` |
 | `spec.gateway` | `gateway` |
@@ -447,20 +440,20 @@ Examples:
   device:dev2
 ```
 
-### Gateway → Router Resolution
+### Gateway → Interface Resolution
 
-The operator resolves the `router_id` by querying Spanner for a `PhysicalInterface` whose
-`ip_address` matches the device's `spec.gateway`. This links the device to its CE router in
-the graph without requiring an explicit `router_name` in the spec.
+The operator resolves `interface_id` by querying Spanner for the `PhysicalInterface` whose
+`ip_address` matches the device's `spec.gateway`. This links the device directly to the
+specific CE router port it is attached to — more precise than a router-level link — so that
+graph traversals and the GNN can access interface-level metrics without an extra hop.
 
-```python
-# From graph/lifecycle_tasks.py:sync_device()
-SELECT DISTINCT r.id
-FROM PhysicalRouter r
-JOIN PhysicalInterface i ON r.id = i.router_id
+```sql
+-- From graph/lifecycle_tasks.py:sync_device()
+SELECT i.id
+FROM PhysicalInterface i
 WHERE i.ip_address = @gateway_ip
-  AND r.valid_end_ts IS NULL
   AND i.valid_end_ts IS NULL
+LIMIT 1
 ```
 
 ### Spanner Schema
@@ -469,9 +462,10 @@ WHERE i.ip_address = @gateway_ip
 CREATE TABLE Device (
   id           STRING(MAX) NOT NULL,  -- "device:devhub"
   name         STRING(MAX) NOT NULL,  -- "devhub"
-  router_id    STRING(MAX),           -- "router:ce1-hub"  (resolved from gateway)
+  interface_id STRING(MAX),           -- "router:ce1-hub:interface:eth2"  (resolved from gateway)
   network_name STRING(MAX),           -- "lan-hub"
   ip_address   STRING(MAX),           -- "10.100.2.10"
+  mgmt_ip      STRING(MAX),           -- management IP (optional)
   gateway      STRING(MAX),           -- "10.100.2.1"
   vlan         INT64,                 -- optional
   status       STRING(MAX),           -- "Ready" | "Failed"
@@ -484,17 +478,17 @@ CREATE TABLE Device (
 ### State Change Behaviour
 
 ```
-Device created (phase=Ready):    → insert Device row (router_id resolved from gateway)
+Device created (phase=Ready):    → insert Device row (interface_id resolved from gateway)
 Device deleted:                  → close Device row (valid_end_ts = NOW())
 ```
 
 ### Example Rows (hub-and-spoke lab)
 
 ```
-id            | name    | router_id       | network_name | ip_address    | gateway
-device:devhub | devhub  | router:ce1-hub  | lan-hub      | 10.100.2.10   | 10.100.2.1
-device:dev1   | dev1    | router:ce1-spoke| lan-spoke1   | 10.100.1.10   | 10.100.1.1
-device:dev2   | dev2    | router:ce2-spoke| lan-spoke2   | 10.100.3.10   | 10.100.3.1
+id            | name    | interface_id                        | network_name | ip_address    | gateway
+device:devhub | devhub  | router:ce1-hub:interface:eth2       | lan-hub      | 10.100.2.10   | 10.100.2.1
+device:dev1   | dev1    | router:ce1-spoke:interface:eth1     | lan-spoke1   | 10.100.1.10   | 10.100.1.1
+device:dev2   | dev2    | router:ce2-spoke:interface:eth1     | lan-spoke2   | 10.100.3.10   | 10.100.3.1
 ```
 
 ---
@@ -510,7 +504,6 @@ device:dev2   | dev2    | router:ce2-spoke| lan-spoke2   | 10.100.3.10   | 10.10
 | `LogicalSubnet` (infra) | `subnet:<network-name>` | `subnet:p1-pe1` |
 | `LogicalSubnet` (bridge) | `subnet:<bridge-name>` | `subnet:management` |
 | `LogicalSubnet` (iface) | `subnet:<cidr>` | `subnet:172.16.90.0/24` |
-| `Customer` | `cust:<name>` | `cust:default` |
 | `L3VPNService` | `vpn:<service-name>` | `vpn:BLUE_HUB` |
 | `VRF` | `vrf:<router>:<service>` | `vrf:pe2:BLUE_HUB` |
 | `BGPSession` | `bgp:<router>:<service>:<peer-ip>` | `bgp:pe2:BLUE_HUB:10.80.80.2` |
@@ -555,62 +548,68 @@ kubectl apply -f l3vpn-hub-spoke.yaml
       │       ├── check_underlay_ready()          (wait for VyOSUnderlay=Ready)
       │       ├── patch_vyos_router() × N         (merge VRF/BGP into VyOSRouter spec)
       │       └── sync_l3vpn_service() → Spanner:
-      │               ├── Customer         (upsert cust:default)
       │               ├── L3VPNService     (one per spec.services[*])
       │               ├── VRF              (one per router per service)
-      │               ├── BGPSession       (one per VRF neighbor)
-      │               └── BGP_Peering      (bidirectional edge per session pair)
+      │               └── BGPSession       (one per VRF neighbor)
       │
       └─ Device created
               ├── Ansible: device.yaml  (create container on host network)
               └── sync_device() → Spanner:
-                      └── Device  (router_id resolved from gateway → PhysicalInterface lookup)
+                      └── Device  (interface_id resolved from gateway → PhysicalInterface lookup)
 ```
 
 ---
 
 ## 8. Property Graph Traversal Examples
 
-### Find full L3VPN service topology (Customer → VPN → VRF → Router)
+### Find full L3VPN service topology (VPN → VRF → Router)
 
 ```sql
 GRAPH networkGraph
-MATCH (c:Customer)<-[:OwnedBy]-(vpn:L3VPNService)
-      <-[:RealizesVPN]-(vrf:VRF)
+MATCH (vpn:L3VPNService)<-[:RealizesVPN]-(vrf:VRF)
       -[:LocatedOn]->(r:PhysicalRouter)
 WHERE vpn.name = 'BLUE_HUB'
   AND vpn.valid_end_ts IS NULL
   AND vrf.valid_end_ts IS NULL
   AND r.valid_end_ts IS NULL
-RETURN c.name AS customer, vpn.topology, vrf.rd, r.name AS router, r.location_city
+RETURN vpn.name, vpn.topology, vrf.rd, r.name AS router, r.location_city
 ```
 
-### Trace BGP peering chain across the VPN
+### Find all BGP sessions for a VPN (SQL)
+
+BGP peering relationships are derived at query time — there is no `PeersWith` graph edge.
+Use a SQL join matching `BGPSession.peer_ip` against `PhysicalInterface.ip_address`:
+
+```sql
+SELECT
+  b.id        AS session_id,
+  b.peer_ip,
+  b.status,
+  r.name      AS router
+FROM BGPSession b
+JOIN VRF v ON b.vrf_id = v.id
+JOIN PhysicalRouter r ON v.router_id = r.id
+WHERE v.vpn_id = 'vpn:BLUE_SPOKE'
+  AND b.valid_end_ts IS NULL
+  AND v.valid_end_ts IS NULL
+  AND r.valid_end_ts IS NULL
+ORDER BY r.name, b.peer_ip
+```
+
+### Find all devices reachable via a VPN (Device → Interface → Router → VRF → VPN)
 
 ```sql
 GRAPH networkGraph
-MATCH (b1:BGPSession)-[:PeersWith]->(b2:BGPSession)
-      <-[:BelongsToVRF]-(vrf:VRF)
-      -[:RealizesVPN]->(vpn:L3VPNService)
-WHERE vpn.name = 'BLUE_SPOKE'
-  AND vpn.valid_end_ts IS NULL
-  AND b1.valid_end_ts IS NULL
-RETURN b1.id AS session_a, b2.id AS session_b, b1.status, b1.peer_ip
-```
-
-### Find all devices reachable via a VPN (Device → Router → VRF → VPN)
-
-```sql
-GRAPH networkGraph
-MATCH (d:Device)-[:ConnectedTo]->(r:PhysicalRouter)
+MATCH (d:Device)-[:ConnectedTo]->(i:PhysicalInterface)<-[:HasInterface]-(r:PhysicalRouter)
       <-[:LocatedOn]-(vrf:VRF)
       -[:RealizesVPN]->(vpn:L3VPNService)
 WHERE vpn.name = 'BLUE_SPOKE'
   AND d.valid_end_ts IS NULL
+  AND i.valid_end_ts IS NULL
   AND r.valid_end_ts IS NULL
   AND vrf.valid_end_ts IS NULL
   AND vpn.valid_end_ts IS NULL
-RETURN d.name, d.ip_address, r.name AS ce_router, vrf.rd
+RETURN d.name, d.ip_address, i.name AS ce_port, r.name AS ce_router, vrf.rd
 ```
 
 ### Find all physical links between two specific routers
@@ -634,11 +633,11 @@ MATCH (r:PhysicalRouter)<-[:LocatedOn]-(vrf:VRF)
       -[:RealizesVPN]->(vpn:L3VPNService),
       (r)-[:RouterHasEmbedding]->(e:NodeEmbedding)
 WHERE vpn.name = 'BLUE_HUB'
-  AND e.dgat_score > 0.7
+  AND e.hetgnn_score > 0.7
   AND vpn.valid_end_ts IS NULL
   AND vrf.valid_end_ts IS NULL
-RETURN r.name, r.location_city, vrf.name, e.dgat_score, e.anomaly_explanation
-ORDER BY e.dgat_score DESC
+RETURN r.name, r.location_city, vrf.name, e.hetgnn_score, e.anomaly_explanation
+ORDER BY e.hetgnn_score DESC
 ```
 
 ### SQL: Show VRF history on a PE router

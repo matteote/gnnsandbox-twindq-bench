@@ -17,6 +17,9 @@ import logging
 from agent_library import get_credentials
 import json as json
 import datetime
+import kubernetes
+from kubernetes.client.rest import ApiException
+from utils.k8s import get_client as get_k8s_client
 
 SPANNER_INSTANCE = 'networktopology-instance'
 SPANNER_DATABASE = 'networktopology-db'
@@ -226,8 +229,6 @@ def _add_embeddings_to_routers(database, routers, target_timestamp=None):
             router_embedding_query = """
                 SELECT 
                     e.node_id,
-                    e.stgnn_score,
-                    e.dgat_score,
                     e.hetgnn_score,
                     TO_JSON_STRING(e.anomaly_explanation) AS anomaly_explanation,
                     e.timestamp
@@ -242,8 +243,6 @@ def _add_embeddings_to_routers(database, routers, target_timestamp=None):
                     i.router_id,
                     e.node_id AS interface_id,
                     i.name AS interface_name,
-                    e.stgnn_score,
-                    e.dgat_score,
                     e.hetgnn_score,
                     TO_JSON_STRING(e.anomaly_explanation) AS anomaly_explanation,
                     e.timestamp
@@ -258,8 +257,6 @@ def _add_embeddings_to_routers(database, routers, target_timestamp=None):
             router_embedding_query = """
                 SELECT 
                     e.node_id,
-                    e.stgnn_score,
-                    e.dgat_score,
                     e.hetgnn_score,
                     TO_JSON_STRING(e.anomaly_explanation) AS anomaly_explanation,
                     e.timestamp
@@ -277,8 +274,6 @@ def _add_embeddings_to_routers(database, routers, target_timestamp=None):
                     i.router_id,
                     e.node_id AS interface_id,
                     i.name AS interface_name,
-                    e.stgnn_score,
-                    e.dgat_score,
                     e.hetgnn_score,
                     TO_JSON_STRING(e.anomaly_explanation) AS anomaly_explanation,
                     e.timestamp
@@ -314,18 +309,18 @@ def _add_embeddings_to_routers(database, routers, target_timestamp=None):
                 
                 if router_id in routers:
                     anomaly_explanation = None
-                    if row[4]:  # anomaly_explanation is now at index 4
+                    if row[2]:  # anomaly_explanation at index 2
                         try:
-                            anomaly_explanation = json.loads(row[4])
+                            anomaly_explanation = json.loads(row[2])
                         except (json.JSONDecodeError, TypeError):
                             pass
                     
-                    # Store all 3 model scores
-                    routers[router_id]['stgnn_score'] = row[1]
-                    routers[router_id]['dgat_score'] = row[2]
-                    routers[router_id]['hetgnn_score'] = row[3]
+                    # Store hetgnn_score (stgnn/dgat not present in current schema)
+                    routers[router_id]['stgnn_score'] = None
+                    routers[router_id]['dgat_score'] = None
+                    routers[router_id]['hetgnn_score'] = row[1]
                     routers[router_id]['router_rca'] = anomaly_explanation
-                    routers[router_id]['embedding_timestamp'] = row[5].isoformat() if row[5] else None
+                    routers[router_id]['embedding_timestamp'] = row[3].isoformat() if row[3] else None
         
         # Fetch interface embeddings
         with database.snapshot() as snapshot:
@@ -335,10 +330,8 @@ def _add_embeddings_to_routers(database, routers, target_timestamp=None):
                 router_id = row[0]
                 interface_id = row[1]
                 interface_name = row[2]
-                stgnn_score = row[3]
-                dgat_score = row[4]
-                hetgnn_score = row[5]
-                anomaly_explanation_str = row[6]
+                hetgnn_score = row[3]
+                anomaly_explanation_str = row[4]
                 
                 if router_id and router_id in routers:
                     if 'interface_mses' not in routers[router_id]:
@@ -353,8 +346,8 @@ def _add_embeddings_to_routers(database, routers, target_timestamp=None):
                     
                     routers[router_id]['interface_mses'][interface_id] = {
                         'name': interface_name,
-                        'stgnn_score': stgnn_score,
-                        'dgat_score': dgat_score,
+                        'stgnn_score': None,
+                        'dgat_score': None,
                         'hetgnn_score': hetgnn_score,
                         'rca': anomaly_explanation
                     }
@@ -383,13 +376,17 @@ def _add_devices_to_topology(database, topology, target_timestamp=None):
                 SELECT 
                     d.id,
                     d.name,
-                    d.router_id,
+                    d.interface_id,
                     d.network_name,
                     d.ip_address,
                     d.gateway,
                     d.vlan,
-                    d.status
+                    d.status,
+                    i.router_id
                 FROM Device d
+                LEFT JOIN PhysicalInterface i ON d.interface_id = i.id
+                    AND i.valid_start_ts <= @target_timestamp
+                    AND (i.valid_end_ts > @target_timestamp OR i.valid_end_ts IS NULL)
                 WHERE d.valid_start_ts <= @target_timestamp
                   AND (d.valid_end_ts > @target_timestamp OR d.valid_end_ts IS NULL)
             """
@@ -401,13 +398,15 @@ def _add_devices_to_topology(database, topology, target_timestamp=None):
                 SELECT 
                     d.id,
                     d.name,
-                    d.router_id,
+                    d.interface_id,
                     d.network_name,
                     d.ip_address,
                     d.gateway,
                     d.vlan,
-                    d.status
+                    d.status,
+                    i.router_id
                 FROM Device d
+                LEFT JOIN PhysicalInterface i ON d.interface_id = i.id AND i.valid_end_ts IS NULL
                 WHERE d.valid_end_ts IS NULL
             """
             params = {}
@@ -419,19 +418,21 @@ def _add_devices_to_topology(database, topology, target_timestamp=None):
             for row in results:
                 device_id = row[0]
                 device_name = row[1]
-                router_id = row[2]
+                interface_id = row[2]
                 network_name = row[3]
                 ip_address = row[4]
                 gateway = row[5]
                 vlan = row[6]
                 status = row[7]
+                router_id = row[8]  # resolved via PhysicalInterface JOIN
                 
                 # Add device as a node
                 device_node = {
                     'id': device_id,
                     'name': device_name,
                     'type': 'device',
-                    'router_id': router_id,
+                    'interface_id': interface_id,
+                    'router_id': router_id,  # kept for UI backward-compat; resolved from interface
                     'network_name': network_name,
                     'ip_address': ip_address,
                     'gateway': gateway,
@@ -441,16 +442,20 @@ def _add_devices_to_topology(database, topology, target_timestamp=None):
                 
                 topology['nodes'].append(device_node)
                 
-                # Add connection from device to router if router_id exists
-                if router_id:
+                # Add connection from device to its CE router interface.
+                # The target is the specific interface the device's gateway resolves to.
+                # router_id is also stored on the connection so the UI can draw the
+                # device → router edge if it does not yet render interface-level nodes.
+                if interface_id or router_id:
                     connection_id = f"device_conn:{device_id}"
                     topology['connections'].append({
                         'id': connection_id,
-                        'name': f"{device_name} -> Router",
+                        'name': f"{device_name} -> Interface",
                         'source_device_id': device_id,
                         'source_device_name': device_name,
+                        'target_interface_id': interface_id,
                         'target_router_id': router_id,
-                        'type': 'device_to_router'
+                        'type': 'device_to_interface'
                     })
         
         logger.info(f"Added {len([n for n in topology['nodes'] if n.get('type') == 'device'])} devices to topology")
@@ -582,19 +587,24 @@ def fetch_device_details(device_id):
     try:
         database = spanner_connect()
         
-        # Query to get device details
+        # Query to get device details, joining through PhysicalInterface to resolve
+        # the parent router (Device now stores interface_id, not router_id directly).
         device_query = """
             SELECT 
                 d.id,
                 d.name,
-                d.router_id,
+                d.interface_id,
                 d.network_name,
                 d.ip_address,
                 d.gateway,
                 d.vlan,
                 d.status,
-                TO_JSON_STRING(d.config) AS device_config
+                TO_JSON_STRING(d.config) AS device_config,
+                i.router_id,
+                i.name AS interface_name,
+                i.ip_address AS interface_ip
             FROM Device d
+            LEFT JOIN PhysicalInterface i ON d.interface_id = i.id AND i.valid_end_ts IS NULL
             WHERE d.id = @device_id
               AND d.valid_end_ts IS NULL
         """
@@ -620,13 +630,16 @@ def fetch_device_details(device_id):
                 device_detail = {
                     'id': row[0],
                     'name': row[1],
-                    'router_id': row[2],
+                    'interface_id': row[2],
                     'network_name': row[3] if row[3] else 'unknown',
                     'ip_address': row[4] if row[4] else 'unknown',
                     'gateway': row[5] if row[5] else 'unknown',
                     'vlan': row[6],
                     'status': row[7] if row[7] else 'unknown',
-                    'config': device_config
+                    'config': device_config,
+                    'router_id': row[9],          # resolved from PhysicalInterface
+                    'interface_name': row[10],
+                    'interface_ip': row[11]
                 }
                 break
         
@@ -657,15 +670,11 @@ def fetch_node_embeddings(node_id):
     try:
         database = spanner_connect()
         
-        # Query to get the latest embedding for the router (all 3 models)
+        # Query to get the latest embedding for the router (hetgnn model)
         router_embedding_query = """
             SELECT 
                 e.node_id,
                 e.node_type,
-                e.stgnn_score,
-                e.stgnn_embedding,
-                e.dgat_score,
-                e.dgat_embedding,
                 e.hetgnn_score,
                 e.hetgnn_embedding,
                 e.timestamp,
@@ -676,15 +685,11 @@ def fetch_node_embeddings(node_id):
             LIMIT 1
         """
         
-        # Query to get the latest embeddings for all interfaces of this router (all 3 models)
+        # Query to get the latest embeddings for all interfaces of this router (hetgnn model)
         interface_embeddings_query = """
             SELECT 
                 i.id AS interface_id,
                 i.name AS interface_name,
-                e.stgnn_score,
-                e.stgnn_embedding,
-                e.dgat_score,
-                e.dgat_embedding,
                 e.hetgnn_score,
                 e.hetgnn_embedding,
                 e.timestamp,
@@ -720,22 +725,22 @@ def fetch_node_embeddings(node_id):
             
             for row in router_results:
                 anomaly_explanation = None
-                if row[9]:
+                if row[5]:
                     try:
-                        anomaly_explanation = json.loads(row[9])
+                        anomaly_explanation = json.loads(row[5])
                     except (json.JSONDecodeError, TypeError):
                         anomaly_explanation = None
                 
                 result['router_embedding'] = {
                     'node_id': row[0],
                     'node_type': row[1],
-                    'stgnn_score': row[2],
-                    'stgnn_embedding': row[3],
-                    'dgat_score': row[4],
-                    'dgat_embedding': row[5],
-                    'hetgnn_score': row[6],
-                    'hetgnn_embedding': row[7],
-                    'timestamp': row[8].isoformat() if row[8] else None,
+                    'stgnn_score': None,
+                    'stgnn_embedding': None,
+                    'dgat_score': None,
+                    'dgat_embedding': None,
+                    'hetgnn_score': row[2],
+                    'hetgnn_embedding': row[3],
+                    'timestamp': row[4].isoformat() if row[4] else None,
                     'anomaly_explanation': anomaly_explanation
                 }
                 break
@@ -750,22 +755,22 @@ def fetch_node_embeddings(node_id):
             
             for row in interface_results:
                 anomaly_explanation = None
-                if row[9]:
+                if row[5]:
                     try:
-                        anomaly_explanation = json.loads(row[9])
+                        anomaly_explanation = json.loads(row[5])
                     except (json.JSONDecodeError, TypeError):
                         anomaly_explanation = None
                 
                 result['interface_embeddings'].append({
                     'interface_id': row[0],
                     'interface_name': row[1],
-                    'stgnn_score': row[2],
-                    'stgnn_embedding': row[3],
-                    'dgat_score': row[4],
-                    'dgat_embedding': row[5],
-                    'hetgnn_score': row[6],
-                    'hetgnn_embedding': row[7],
-                    'timestamp': row[8].isoformat() if row[8] else None,
+                    'stgnn_score': None,
+                    'stgnn_embedding': None,
+                    'dgat_score': None,
+                    'dgat_embedding': None,
+                    'hetgnn_score': row[2],
+                    'hetgnn_embedding': row[3],
+                    'timestamp': row[4].isoformat() if row[4] else None,
                     'anomaly_explanation': anomaly_explanation
                 })
         
@@ -775,6 +780,58 @@ def fetch_node_embeddings(node_id):
     except Exception as e:
         logger.error(f"Error fetching node embeddings: {e}", exc_info=True)
         return {'error': str(e)}
+
+
+def clear_topology():
+    """
+    Clears all physical and logical topology data from Spanner using Partitioned DML,
+    which bypasses the 20,000 mutation-per-transaction limit.
+
+    Tables cleared (physical + logical topology + derived GNN data):
+      Physical: PhysicalRouter, PhysicalInterface, PhysicalLink,
+                Interface_Link, Subnet_Association, LogicalSubnet,
+                Device, TrafficFlow
+      Logical:  L3VPNService, VRF, BGPSession
+      Derived:  NodeEmbedding
+
+    Tables NOT touched: NetworkMetrics, KgLogEntryNode, NetworkDescriptor
+
+    Returns:
+        bool: True if all deletes succeeded, False if any failed.
+    """
+    tables = [
+        # Order chosen to respect logical dependencies (children before parents
+        # where possible), though Spanner has no FK enforcement.
+        "BGPSession",
+        "VRF",
+        "L3VPNService",
+        "Device",
+        "TrafficFlow",
+        "Interface_Link",
+        "Subnet_Association",
+        "LogicalSubnet",
+        "PhysicalLink",
+        "PhysicalInterface",
+        "PhysicalRouter",
+        "NodeEmbedding",
+    ]
+
+    try:
+        database = spanner_connect()
+        for table in tables:
+            try:
+                row_count = database.execute_partitioned_dml(
+                    f"DELETE FROM {table} WHERE TRUE"
+                )
+                logger.info(f"Cleared ~{row_count} rows from {table}")
+            except Exception as e:
+                logger.error(f"Failed to clear table {table}: {e}", exc_info=True)
+                return False
+        logger.info("Successfully cleared all topology tables")
+        return True
+    except Exception as e:
+        logger.error(f"Error clearing topology: {e}", exc_info=True)
+        return False
 
 
 def build_graph(database, edge_label=None):
@@ -874,10 +931,8 @@ def fetch_anomalies(limit: int = 50, timestamp_str: str = None):
                     SELECT 
                         e.node_id, 
                         e.node_type,
-                        e.stgnn_score,
-                        e.dgat_score,
                         e.hetgnn_score,
-                        (e.stgnn_score + e.dgat_score + e.hetgnn_score) / 3.0 AS avg_score,
+                        e.hetgnn_score AS avg_score,
                         e.anomaly_explanation AS root_cause, 
                         COALESCE(r.name, i.name) as name, 
                         e.timestamp
@@ -895,10 +950,8 @@ def fetch_anomalies(limit: int = 50, timestamp_str: str = None):
                 SELECT 
                     e.node_id, 
                     e.node_type,
-                    e.stgnn_score,
-                    e.dgat_score,
                     e.hetgnn_score,
-                    (e.stgnn_score + e.dgat_score + e.hetgnn_score) / 3.0 AS avg_score,
+                    e.hetgnn_score AS avg_score,
                     e.anomaly_explanation AS root_cause, 
                     COALESCE(r.name, i.name) as name, 
                     e.timestamp
@@ -917,16 +970,244 @@ def fetch_anomalies(limit: int = 50, timestamp_str: str = None):
                 anomalies.append({
                     "node_id": row[0],
                     "node_type": row[1],
-                    "stgnn_score": row[2],
-                    "dgat_score": row[3],
-                    "hetgnn_score": row[4],
-                    "anomaly_score": row[5],  # Average score for sorting/display
-                    "root_cause": row[6],
-                    "name": row[7] if row[7] else "Unknown",
-                    "timestamp": row[8].isoformat() if row[8] else None
+                    "stgnn_score": None,
+                    "dgat_score": None,
+                    "hetgnn_score": row[2],
+                    "anomaly_score": row[3],  # hetgnn_score used as anomaly score
+                    "root_cause": row[4],
+                    "name": row[5] if row[5] else "Unknown",
+                    "timestamp": row[6].isoformat() if row[6] else None
                 })
                 
         return {"anomalies": anomalies}
     except Exception as e:
         logger.error(f"Failed to fetch anomalies: {e}", exc_info=True)
         return {"error": str(e)}
+
+#####################################################################################
+# VyOSL3VPN & TrafficTest (Kubernetes CRDs)
+#####################################################################################
+
+def fetch_vpns(namespace: str = "default") -> list:
+    """
+    Fetch all VyOSL3VPN custom resources from Kubernetes and return a
+    normalised summary list suitable for the dashboard.
+
+    Returns:
+        list of dicts with keys:
+            name, phase, message, routers (list of str), underlay_ref
+    """
+    logger.info(f"Fetching VyOSL3VPN resources from namespace={namespace}")
+
+    try:
+        client = kubernetes.dynamic.DynamicClient(get_k8s_client())
+        api = client.resources.get(api_version="google.dev/v1", kind="VyOSL3VPN")
+        resources = api.get(namespace=namespace)
+
+        vpns = []
+        for item in resources.items:
+            item_dict = item.to_dict()
+            spec   = item_dict.get("spec",   {}) or {}
+            status = item_dict.get("status", {}) or {}
+
+            # Collect all router names (PE + CE)
+            router_names = [r.get("name") for r in spec.get("routers", []) if r.get("name")]
+            ce_names     = [r.get("name") for r in spec.get("ce_routers", []) if r.get("name")]
+            all_routers  = router_names + ce_names
+
+            # Collect per-router VRF RD/RT info for the dashboard table
+            router_vrfs = []
+            for pe_router in spec.get("routers", []):
+                rname = pe_router.get("name", "")
+                for vrf in pe_router.get("vrfs", []):
+                    router_vrfs.append({
+                        "router":     rname,
+                        "vrf":        vrf.get("name", ""),
+                        "rd":         vrf.get("rd"),
+                        "rt_export":  vrf.get("rt_export", []),
+                        "rt_import":  vrf.get("rt_import", []),
+                        "description": vrf.get("description"),
+                    })
+
+            # Collect service-level metadata (topology, service RD/RT)
+            services = []
+            for svc in spec.get("services", []):
+                services.append({
+                    "name":        svc.get("name", ""),
+                    "type":        svc.get("type"),
+                    "topology":    svc.get("topology"),
+                    "rd":          svc.get("rd"),
+                    "rt_export":   svc.get("rt_export"),
+                    "rt_import":   svc.get("rt_import"),
+                    "description": svc.get("description"),
+                })
+
+            vpns.append({
+                "name":        item_dict["metadata"]["name"],
+                "phase":       status.get("phase",   "Unknown"),
+                "message":     status.get("message", ""),
+                "routers":     all_routers,
+                "underlay_ref": spec.get("underlayRef"),
+                "router_vrfs": router_vrfs,
+                "services":    services,
+            })
+
+        logger.info(f"Retrieved {len(vpns)} VyOSL3VPN resources")
+        return vpns
+
+    except Exception as e:
+        logger.error(f"Error fetching VyOSL3VPN resources: {e}", exc_info=True)
+        return []
+
+
+def fetch_traffic_tests(namespace: str = "default") -> list:
+    """
+    Fetch all TrafficTest custom resources from Kubernetes and return a
+    normalised summary list suitable for the dashboard.
+
+    Returns:
+        list of dicts with keys:
+            name, phase, message, vpn_ref, source_devices, destination_device,
+            duration, source_count, start_time, end_time, allocated_ports
+    """
+    logger.info(f"Fetching TrafficTest resources from namespace={namespace}")
+
+    try:
+        client = kubernetes.dynamic.DynamicClient(get_k8s_client())
+        api = client.resources.get(api_version="google.dev/v1", kind="TrafficTest")
+        resources = api.get(namespace=namespace)
+
+        tests = []
+        for item in resources.items:
+            item_dict = item.to_dict()
+            spec   = item_dict.get("spec",   {}) or {}
+            status = item_dict.get("status", {}) or {}
+
+            tests.append({
+                "name":               item_dict["metadata"]["name"],
+                "phase":              status.get("phase",   "Unknown"),
+                "message":            status.get("message", ""),
+                "vpn_ref":            spec.get("vpnRef"),
+                "source_devices":     spec.get("source_devices", []),
+                "destination_device": spec.get("destination_device"),
+                "protocol":           spec.get("protocol"),
+                "bandwidth":          spec.get("bandwidth"),
+                "pattern_type":       spec.get("pattern_type"),
+                "duration":           spec.get("duration", 60),
+                "bidirectional":      bool(spec.get("bidirectional", False)),
+                "source_count":       status.get("source_count", len(spec.get("source_devices", []))),
+                "start_time":         status.get("start_time"),
+                "end_time":           status.get("end_time"),
+                "allocated_ports":    status.get("allocated_ports", []),
+            })
+
+        logger.info(f"Retrieved {len(tests)} TrafficTest resources")
+        return tests
+
+    except Exception as e:
+        logger.error(f"Error fetching TrafficTest resources: {e}", exc_info=True)
+        return []
+
+
+def delete_traffic_test_crd(name: str, namespace: str = "default") -> bool:
+    """
+    Delete a single TrafficTest CRD from Kubernetes by name.
+
+    Args:
+        name:      The TrafficTest resource name to delete.
+        namespace: Kubernetes namespace (default: "default").
+
+    Returns:
+        True  – delete issued successfully (or resource already gone).
+        False – kubernetes not available or unexpected error.
+    """
+    logger.info(f"Deleting TrafficTest CRD: namespace={namespace}, name={name}")
+
+    try:
+        client = kubernetes.dynamic.DynamicClient(get_k8s_client())
+        api = client.resources.get(api_version="google.dev/v1", kind="TrafficTest")
+        api.delete(name=name, namespace=namespace)
+        logger.info(f"Issued delete for TrafficTest/{name}")
+        return True
+    except kubernetes.client.rest.ApiException as e:
+        if e.status == 404:
+            logger.info(f"TrafficTest/{name} already gone")
+            return True
+        logger.error(f"Error deleting TrafficTest/{name}: {e}", exc_info=True)
+        return False
+    except Exception as e:
+        logger.error(f"Error deleting TrafficTest/{name}: {e}", exc_info=True)
+        return False
+
+
+def delete_vpn_crd(name: str, namespace: str = "default") -> bool:
+    """
+    Delete a single VyOSL3VPN CRD from Kubernetes by name.
+
+    Args:
+        name:      The VyOSL3VPN resource name to delete.
+        namespace: Kubernetes namespace (default: "default").
+
+    Returns:
+        True  – delete issued successfully (or resource already gone).
+        False – kubernetes not available or unexpected error.
+    """
+    logger.info(f"Deleting VyOSL3VPN CRD: namespace={namespace}, name={name}")
+
+    try:
+        client = kubernetes.dynamic.DynamicClient(get_k8s_client())
+        api = client.resources.get(api_version="google.dev/v1", kind="VyOSL3VPN")
+        api.delete(name=name, namespace=namespace)
+        logger.info(f"Issued delete for VyOSL3VPN/{name}")
+        return True
+    except kubernetes.client.rest.ApiException as e:
+        if e.status == 404:
+            logger.info(f"VyOSL3VPN/{name} already gone")
+            return True
+        logger.error(f"Error deleting VyOSL3VPN/{name}: {e}", exc_info=True)
+        return False
+    except Exception as e:
+        logger.error(f"Error deleting VyOSL3VPN/{name}: {e}", exc_info=True)
+        return False
+
+
+def fetch_vyos_infrastructure(namespace: str = "default") -> list:
+    """
+    Fetch all VyosInfrastructure custom resources from Kubernetes and return a
+    normalised summary list suitable for the dashboard status card.
+
+    Returns:
+        list of dicts with keys:
+            name, phase, message, router_count, network_count, device_count
+    """
+    logger.info(f"Fetching VyosInfrastructure resources from namespace={namespace}")
+
+    try:
+        client = kubernetes.dynamic.DynamicClient(get_k8s_client())
+        api = client.resources.get(api_version="google.dev/v1", kind="VyOSInfrastructure")
+        resources = api.get(namespace=namespace)
+
+        infra_list = []
+        for item in resources.items:
+            item_dict = item.to_dict()
+            status = item_dict.get("status", {}) or {}
+
+            routers  = status.get("routers",  []) or []
+            networks = status.get("networks", []) or []
+            devices  = status.get("devices",  []) or []
+
+            infra_list.append({
+                "name":          item_dict["metadata"]["name"],
+                "phase":         status.get("phase",   "Unknown"),
+                "message":       status.get("message", ""),
+                "router_count":  len(routers),
+                "network_count": len(networks),
+                "device_count":  len(devices),
+            })
+
+        logger.info(f"Retrieved {len(infra_list)} VyosInfrastructure resources")
+        return infra_list
+
+    except Exception as e:
+        logger.error(f"Error fetching VyosInfrastructure resources: {e}", exc_info=True)
+        return []

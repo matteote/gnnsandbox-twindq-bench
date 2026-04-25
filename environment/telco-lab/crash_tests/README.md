@@ -1,19 +1,20 @@
 # Crash Tests
 
 This directory contains fault-injected variants of the baseline
-[`l3vpn-hub-spoke.yaml`](../l3vpn-hub-spoke.yaml) descriptor. Each file is a
+[`l3vpn-network/`](../l3vpn-network/) descriptors. Each file is a
 complete, self-contained topology definition with a **single targeted fault**
 introduced to simulate a real-world failure scenario.
 
-## Common differences vs the baseline
+The crash tests are kept in sync with the baseline files in `l3vpn-network/`:
 
-All fault files share two cosmetic/minor divergences from the baseline:
-
-- **YAML style**: unquoted strings and expanded block style are used throughout
-  (vs the baseline's quoted strings and inline flow style `[{...}]`). This is
-  purely formatting.
-- **`rr1` / `rr2` role**: both route reflectors carry `role: P` instead of
-  `role: RR`.
+| Crash test file | Baseline source |
+|---|---|
+| `fault1-mtu.yaml` | `l3vpn-network/infrastructure.yaml` |
+| `fault2-ce-down.yaml` | `l3vpn-network/blue-vpn.yaml` |
+| `fault3-rr1-crash.yaml` | `l3vpn-network/underlay.yaml` |
+| `fault4-rt-import.yaml` | `l3vpn-network/blue-vpn.yaml` |
+| `fault5-sfp.yaml` | `l3vpn-network/underlay.yaml` |
+| `missing-config.yaml` | `l3vpn-network/blue-vpn.yaml` |
 
 ## File-by-file fault summary
 
@@ -35,8 +36,8 @@ All fault files share two cosmetic/minor divergences from the baseline:
 pe1's uplink to p1 (`p1-pe1` network) is given a non-standard MTU:
 
 ```yaml
-- name: eth1
-  network: p1-pe1
+- name: "eth1"
+  network: "p1-pe1"
   mtu: 1400
 ```
 
@@ -147,7 +148,7 @@ pe1's VRF entry is missing its route-target policy and has no BGP section:
 ```yaml
 # Baseline pe1 VRF:
 vrfs:
-  - name: BLUE_SPOKE
+  - name: "BLUE_SPOKE"
     table: 200
     rd: "10.50.50.1:1011"
     rt_export: ["65035:1011"]   # <-- missing
@@ -155,7 +156,7 @@ vrfs:
     interfaces: ["eth2"]
 bgp:
   vrfs:
-    - name: BLUE_SPOKE
+    - name: "BLUE_SPOKE"
       neighbors: [{ peer: "10.50.50.2", remote_as: 65035 }]  # <-- missing
 
 # Fault: rt_export, rt_import and the bgp block are all absent

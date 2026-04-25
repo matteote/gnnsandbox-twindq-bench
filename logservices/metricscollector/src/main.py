@@ -8,28 +8,6 @@ from google.api import metric_pb2 as ga_metric
 from google.cloud import monitoring_v3
 from google.cloud import spanner
 
-# # Adapt logging strategy if we run on GCP
-# if os.environ.get("CLOUD_RUN_WORKER_POOL"):
-#   # Attach the Cloud Logging handler to the Python root logger 
-#   # by calling the setup_logging method. By doing so Cloud Logging
-#   # will properly report the logs severity for instance. If we do it
-#   # directly (as above) all logs are classified with ERROR severity
-#   # (see https://cloud.google.com/logging/docs/setup/python)
-#   import google.cloud.logging
-#   logging_client = google.cloud.logging.Client()
-#   import logging
-#   logging_client.setup_logging(log_level=logging.DEBUG)
-
-#   logger = logging.getLogger(__name__)
-
-#   # After importing the Python standard logging library we end up with 2 log
-#   # handlers at the root level causing duplicate log entries to appear
-#   # in Cloud Logging, one that comes from the Cloud Logging Structured
-#   # handler and the other from the standard Python StreamHandler
-#   # Logger root handlers: [<StreamHandler <stderr> (NOTSET)>, <StructuredLogHandler <stderr> (NOTSET)>]
-#   # Remove the standard Python logging handler to avoid duplicate (first handler in the list)
-#   #del logging.getLogger().handlers[0]
-# else:
 import logging
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
@@ -40,9 +18,9 @@ INSTANCE_ID = os.environ.get("GOOGLE_SPANNER_INSTANCE")
 DATABASE_ID = os.environ.get("GOOGLE_SPANNER_DATABASE")
 
 # Must be greater than the ops agent scrape interval so that we always
-# get the same number of data points at each polling interval
-# see ops agent config file for more details
-# (operator/src/vyosvm/playbooks/templates/ops-agent-config.yaml.j2)
+# get the same number of data points at each polling interval.
+# See ops agent config file for more details:
+#   operator/src/vyosvm/playbooks/templates/ops-agent-config.yaml.j2
 POLL_INTERVAL = int(os.environ.get("POLL_INTERVAL", 20))
 
 # Retention settings
@@ -50,8 +28,9 @@ RETENTION_HOURS = int(os.environ.get("RETENTION_HOURS", 3))
 # Metrics clean up frequency
 CLEANUP_INTERVAL_SECONDS = int(os.environ.get("CLEANUP_INTERVAL_SECONDS", 1200))
 # Spanner DB connection check interval
-DB_CHECK_SECONDS=int(os.environ.get("DB_CHECK_SECONDS", 60))
+DB_CHECK_SECONDS = int(os.environ.get("DB_CHECK_SECONDS", 60))
 
+# ── VyOS router metrics (job=vyos-lab) ────────────────────────────────────────
 SELECTED_METRICS = [
   # SYSTEM metrics
   'prometheus.googleapis.com/node_load1/gauge',
@@ -84,25 +63,37 @@ SELECTED_METRICS = [
   'prometheus.googleapis.com/process_network_transmit_bytes_total/counter',
 ]
 
+# ── Traffic-agent device metrics (job=traffic-agents) ─────────────────────────
+# Scraped from :9091/metrics on each device container.
+# Labels per series: flow_id, role, protocol
+# Stored in NetworkMetrics with kind="TRAFFIC", interface=flow_id.
+#
+# Note: bytes_sent_total and bytes_received_total are separate counters — there
+# is no combined traffic_agent_bytes_total metric.
+TRAFFIC_AGENT_METRICS = [
+  'prometheus.googleapis.com/traffic_agent_throughput_bps/gauge',
+  'prometheus.googleapis.com/traffic_agent_bytes_sent_total/counter',
+  'prometheus.googleapis.com/traffic_agent_bytes_received_total/counter',
+  'prometheus.googleapis.com/traffic_agent_latency_ms/gauge',
+  'prometheus.googleapis.com/traffic_agent_jitter_ms/gauge',
+  'prometheus.googleapis.com/traffic_agent_packet_loss_pct/gauge',
+  'prometheus.googleapis.com/traffic_agent_active_sessions/gauge',
+  'prometheus.googleapis.com/traffic_agent_flow_running/gauge',
+]
+
+
 def get_metric_aggregation(descriptor, window_seconds=60):
     """
     Determines the correct aligner based on the metric's Kind and Value Type.
     """
-    # 1. Fetch the Metric Descriptor to see what "Kind" it is
     kind = descriptor.metric_kind  # GAUGE, CUMULATIVE, or DELTA
-    value_type = descriptor.value_type  # DOUBLE, INT64, etc.
 
-    # 2. Logic to choose the Aligner
     if kind == descriptor.MetricKind.CUMULATIVE:
-        # Counters (like node_forks_total) need a rate or delta
-        # Here we use the rate which the delta divided by the time interval
+        # Counters need a rate (delta / time interval)
         aligner = monitoring_v3.Aggregation.Aligner.ALIGN_RATE
-        
     elif kind == descriptor.MetricKind.GAUGE:
-        # Gauges (like CPU/RAM) can be averaged
         aligner = monitoring_v3.Aggregation.Aligner.ALIGN_MEAN
     else:
-        # Fallback for DELTA or unknown types
         aligner = monitoring_v3.Aggregation.Aligner.ALIGN_NEXT_OLDER
 
     return monitoring_v3.Aggregation({
@@ -112,52 +103,45 @@ def get_metric_aggregation(descriptor, window_seconds=60):
     })
 
 
-def fetch_all_vyos_metrics(client, project_name, start_time):
-    """Fetches every metric belonging to the VyOS job."""
+def _fetch_metrics(client, project_name, metric_list, label_gate_key=None):
+    """
+    Generic helper: fetch a list of Cloud Monitoring metric types and return a
+    chained iterator of time-series results.
 
-    # Add a lookback"safety offset" to ensure the data has 
-    # actually arrived in GCP before you ask for it
-    offset = 2
-    now_timestamp = int(datetime.datetime.now(datetime.timezone.utc).timestamp()) - offset
-    start_timestamp = now_timestamp - POLL_INTERVAL
-    
+    Args:
+        metric_list: list of fully-qualified metric type strings.
+        label_gate_key: if set, skip descriptors that lack this label key.
+    """
+    offset = 2  # safety offset so data has arrived before we query
+    now_ts = int(datetime.datetime.now(datetime.timezone.utc).timestamp()) - offset
+    start_ts = now_ts - POLL_INTERVAL
+
     interval = monitoring_v3.TimeInterval({
-        "end_time": {"seconds": now_timestamp},
-        "start_time": {"seconds": start_timestamp},
+        "end_time": {"seconds": now_ts},
+        "start_time": {"seconds": start_ts},
     })
 
-    # 1. Discover all metric types matching prefix
-    # Need to list DESCRIPTORS first because list_time_series requires exact metric.type match
-    # LJ for some reason I couldn't use a filter
-    # argument in the list_metric_descriptors call below.abs
-    # descriptor_filter = 'metric.type = starts_with("prometheus/")'
-
-  # 1. Alternate approach: use a list of selected metrics instead of listing all descriptors
-    descriptor_pages = [
-        client.get_metric_descriptor(name=f"projects/{PROJECT_ID}/metricDescriptors/{metric}")
-        for metric in SELECTED_METRICS
-    ]
-    
     generators = []
-    
-    for descriptor in descriptor_pages:
-        # Skip non-prometheus metrics (I couldn't make the filter argument
-        # work properly in the list metric descriptors)
-        # and also the list of labels (list of LabelDescriptor) must contain
-        # a label with key equals to "router_name"
-        #
-        # NOTE: this test is not needed when using the list of selected metrics
-        # but as it's good to be paranoid, we keep it :-)
-        has_router_name_label = any(label.key == "router_name" for label in descriptor.labels)
-        if not descriptor.type.startswith("prometheus.googleapis.com/") or not has_router_name_label:
+
+    for metric_type in metric_list:
+        try:
+            descriptor = client.get_metric_descriptor(
+                name=f"projects/{PROJECT_ID}/metricDescriptors/{metric_type}"
+            )
+        except Exception as e:
+            logger.warning(f"Could not get descriptor for {metric_type}: {e}")
             continue
-        #logger.debug(f"Fetching series for: {descriptor.type}\nFull descriptor: {descriptor}")
-        
-        # Get the proper aggregation method for this metric
+
+        # Optional: skip descriptors that don't carry the expected label
+        if label_gate_key:
+            has_label = any(lbl.key == label_gate_key for lbl in descriptor.labels)
+            if not has_label:
+                logger.debug(f"Skipping {metric_type} — missing label '{label_gate_key}'")
+                continue
+
         aggregation = get_metric_aggregation(descriptor, POLL_INTERVAL)
-        
-        # 2. Fetch time series for each specific metric type
-        metric_filter = f"metric.type = \"{descriptor.type}\""
+        metric_filter = f'metric.type = "{descriptor.type}"'
+
         try:
             results = client.list_time_series(request={
                 "name": project_name,
@@ -165,21 +149,28 @@ def fetch_all_vyos_metrics(client, project_name, start_time):
                 "interval": interval,
                 "aggregation": aggregation,
             })
-            logger.debug(f"Results count for {descriptor.type}: {len(list(results))}")
             generators.append(results)
         except Exception as e:
             logger.error(f"Error fetching {descriptor.type}: {e}")
 
-    # Chain all the individual iterators into one stream
     return itertools.chain.from_iterable(generators)
+
+
+def fetch_all_vyos_metrics(client, project_name, _start_time):
+    """Fetches every metric belonging to the VyOS job (router_name label required)."""
+    return _fetch_metrics(client, project_name, SELECTED_METRICS, label_gate_key="router_name")
+
+
+def fetch_traffic_agent_metrics(client, project_name):
+    """Fetches traffic-agent metrics (flow_id label required)."""
+    return _fetch_metrics(client, project_name, TRAFFIC_AGENT_METRICS, label_gate_key="flow_id")
+
 
 def check_spanner_connection(db_container, lock):
     """Checks if the Spanner database exists and reconnects if necessary."""
     try:
-        # Check outside lock first
         if not db_container['db'].exists():
             with lock:
-                # Double check inside the lock to avoid multiple reconnections
                 if not db_container['db'].exists():
                     logger.warning("Spanner database not found. Attempting to reconnect...")
                     db_container['db'] = spanner_connect()
@@ -195,31 +186,30 @@ def check_spanner_connection(db_container, lock):
             except Exception as re:
                 logger.error(f"Failed to reconnect to Spanner: {re}")
 
+
 def spanner_connection_worker(db_container, lock):
-    """
-    Background worker that regularly checks the Spanner connection.
-    """
+    """Background worker that regularly checks the Spanner connection."""
     logger.info(f"Spanner connection worker started. Checking every {DB_CHECK_SECONDS} seconds.")
     while True:
         check_spanner_connection(db_container, lock)
         time.sleep(DB_CHECK_SECONDS)
 
+
 def retention_worker(db_container, lock):
-    """
-    Background worker that removes old metrics from Spanner.
-    """
-    logger.info(f"Retention thread started. Retention period: {RETENTION_HOURS} hours. Cleanup interval: {CLEANUP_INTERVAL_SECONDS}s")
+    """Background worker that removes old metrics from Spanner."""
+    logger.info(
+        f"Retention thread started. Retention period: {RETENTION_HOURS} hours. "
+        f"Cleanup interval: {CLEANUP_INTERVAL_SECONDS}s"
+    )
     while True:
         try:
             time.sleep(CLEANUP_INTERVAL_SECONDS)
-            
-            cutoff_time = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=RETENTION_HOURS)
+            cutoff_time = (
+                datetime.datetime.now(datetime.timezone.utc)
+                - datetime.timedelta(hours=RETENTION_HOURS)
+            )
             logger.debug(f"Retention thread: Cleanup started. Removing data older than {cutoff_time}")
-            
-            # Using partitioned DML for potentially large deletions
-            # Spanner SQL syntax for deletions with parameter
             dml = "DELETE FROM NetworkMetrics WHERE timestamp < @cutoff_time"
-            
             with lock:
                 logger.debug("Retention thread: Acquired lock")
                 row_count = db_container['db'].execute_partitioned_dml(
@@ -229,112 +219,169 @@ def retention_worker(db_container, lock):
                 )
                 logger.info(f"Retention thread: Deleted {row_count} old metric rows.")
                 logger.debug("Retention thread: Released lock")
-                
         except Exception as e:
             logger.error(f"Error in retention worker: {e}")
+
 
 def spanner_connect():
     span_client = spanner.Client(project=PROJECT_ID, disable_builtin_metrics=True)
     db = span_client.instance(INSTANCE_ID).database(DATABASE_ID)
     return db
 
+
 def run_worker():
     mon_client = monitoring_v3.MetricServiceClient()
     db = spanner_connect()
     db_container = {'db': db}
     project_name = f"projects/{PROJECT_ID}"
-    
-    # Concurrency lock
+
     lock = threading.Lock()
-    
+
     # Start retention thread
     retention_thread = threading.Thread(
-        target=retention_worker, 
-        args=(db_container, lock), 
+        target=retention_worker,
+        args=(db_container, lock),
         daemon=True
     )
     retention_thread.start()
-    
+
     # Start Spanner connection worker thread
     connection_thread = threading.Thread(
-        target=spanner_connection_worker, 
-        args=(db_container, lock), 
+        target=spanner_connection_worker,
+        args=(db_container, lock),
         daemon=True
     )
     connection_thread.start()
-    
-    logger.info(f"Worker Pool started. Polling all VyOS metrics every {POLL_INTERVAL}s...")
-    last_poll_time = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(seconds=POLL_INTERVAL)
+
+    logger.info(f"Worker Pool started. Polling all metrics every {POLL_INTERVAL}s...")
+    last_poll_time = (
+        datetime.datetime.now(datetime.timezone.utc)
+        - datetime.timedelta(seconds=POLL_INTERVAL)
+    )
 
     while True:
-      current_poll_time = datetime.datetime.now(datetime.timezone.utc)
-      data_to_insert = []
+        current_poll_time = datetime.datetime.now(datetime.timezone.utc)
+        data_to_insert = []
 
-      try:
-        series_data = fetch_all_vyos_metrics(mon_client, project_name, last_poll_time)
-        
-        for series in series_data:
-          #logger.debug(f"============================\nSeries metric labels: {series.metric.labels}")
-          
-          # Skip all series not coming from a vyos router
-          router_name = series.metric.labels.get("router_name")
-          job_name = series.resource.labels.get("job")
-          if not router_name or job_name != "vyos-lab":
-            continue
-
-          # log the series data structure
-          logger.debug(f"Processing series for: {series.metric.type}")
-          
-          # 1. Extract name and type from 'prometheus.googleapis.com/metric_name/type'
-          parts = series.metric.type.split('/')
-          raw_metric_name = parts[-2]
-          prom_type = parts[-1] # Extracts gauge, counter, summary, etc.
-          
-          # 2. Categorize
-          category = "SYSTEM" if raw_metric_name.startswith("node_") else "ROUTING"
-
-          # 3. Identify Node and Interface
-          iface = series.metric.labels.get("device")
-          
-          logger.debug(f"Category: {category}, Node: {router_name}, Interface: {iface}")
-          
-          for point in series.points:
-              val = point.value.double_value if point.value.double_value else float(point.value.int64_value)
-              logger.debug(f"point value: {val}")
-              data_to_insert.append((
-                point.interval.end_time,
-                router_name,
-                raw_metric_name,
-                prom_type,
-                category,
-                val,
-                json.dumps(dict(series.metric.labels)),
-                iface
-              ))
-      except Exception as e:
-          logger.error(f"Error during API poll: {e}")
-
-      # Batch write to Spanner
-      if data_to_insert:
-        #logger.debug(f"Data to insert: {data_to_insert}")
         try:
-            with lock:
-                logger.debug("Main thread: Acquired lock")
-                with db_container['db'].batch() as batch:
-                    logger.info(f"Inserting {len(data_to_insert)} metric points at {current_poll_time}")
-                    batch.insert(
-                        table="NetworkMetrics",
-                        columns=("timestamp", "node_name", "metric_name", "metric_type", "kind", "value", "labels", "interface"),
-                        values=data_to_insert
-                    )
-                logger.debug("Main thread: Released lock")
-        except Exception as e:
-            logger.error(f"Error writing to Spanner: {e}")
+            # Chain VyOS and traffic-agent series into one stream
+            series_data = itertools.chain(
+                fetch_all_vyos_metrics(mon_client, project_name, last_poll_time),
+                fetch_traffic_agent_metrics(mon_client, project_name),
+            )
 
-      last_poll_time = current_poll_time
-      logger.debug(f"Sleeping for {POLL_INTERVAL} seconds")
-      time.sleep(POLL_INTERVAL)
+            for series in series_data:
+                job_name = series.resource.labels.get("job", "")
+
+                # ── VyOS router metrics ────────────────────────────────────
+                if job_name == "vyos-lab":
+                    router_name = series.metric.labels.get("router_name")
+                    if not router_name:
+                        continue
+
+                    logger.debug(f"Processing VyOS series: {series.metric.type}")
+
+                    parts = series.metric.type.split('/')
+                    raw_metric_name = parts[-2]
+                    prom_type = parts[-1]
+                    category = "SYSTEM" if raw_metric_name.startswith("node_") else "ROUTING"
+                    iface = series.metric.labels.get("device")
+
+                    for point in series.points:
+                        val = (
+                            point.value.double_value
+                            if point.value.double_value
+                            else float(point.value.int64_value)
+                        )
+                        data_to_insert.append((
+                            point.interval.end_time,
+                            router_name,
+                            raw_metric_name,
+                            prom_type,
+                            category,
+                            val,
+                            json.dumps(dict(series.metric.labels)),
+                            iface,
+                        ))
+
+                # ── Traffic-agent device metrics ───────────────────────────
+                elif job_name == "traffic-agents":
+                    flow_id  = series.metric.labels.get("flow_id")
+                    role     = series.metric.labels.get("role")
+                    protocol = series.metric.labels.get("protocol")
+
+                    if not flow_id:
+                        continue
+
+                    # flow_id convention: "{traffictest_name}_{source_device}"
+                    # e.g. "dev1-to-hub-tcp_dev1"      → node_name = "dev1"
+                    #      "dev1-hub-tcp-bidir_dev1_rev" → node_name = "dev1"
+                    # Strip the "_rev" suffix (bidirectional reverse flows) before
+                    # splitting, so we always extract the device name correctly.
+                    clean_flow_id = flow_id[:-4] if flow_id.endswith("_rev") else flow_id
+                    node_name = clean_flow_id.rsplit("_", 1)[-1]
+
+                    logger.debug(
+                        f"Processing traffic-agent series: {series.metric.type} "
+                        f"flow={flow_id} role={role} protocol={protocol}"
+                    )
+
+                    parts = series.metric.type.split('/')
+                    raw_metric_name = parts[-2]
+                    prom_type = parts[-1]
+
+                    for point in series.points:
+                        val = (
+                            point.value.double_value
+                            if point.value.double_value
+                            else float(point.value.int64_value)
+                        )
+                        data_to_insert.append((
+                            point.interval.end_time,
+                            node_name,          # e.g. "dev1"
+                            raw_metric_name,    # e.g. "traffic_agent_throughput_bps"
+                            prom_type,          # "gauge" or "counter"
+                            "TRAFFIC",          # kind discriminant
+                            val,
+                            json.dumps({
+                                "flow_id":  flow_id,
+                                "role":     role,
+                                "protocol": protocol,
+                            }),
+                            None,               # interface column — intentionally blank for TRAFFIC
+                        ))
+
+                else:
+                    logger.debug(f"Skipping series from unknown job '{job_name}'")
+
+        except Exception as e:
+            logger.error(f"Error during API poll: {e}")
+
+        # Batch write to Spanner
+        if data_to_insert:
+            try:
+                with lock:
+                    logger.debug("Main thread: Acquired lock")
+                    with db_container['db'].batch() as batch:
+                        logger.info(
+                            f"Inserting {len(data_to_insert)} metric points at {current_poll_time}"
+                        )
+                        batch.insert(
+                            table="NetworkMetrics",
+                            columns=(
+                                "timestamp", "node_name", "metric_name",
+                                "metric_type", "kind", "value", "labels", "interface"
+                            ),
+                            values=data_to_insert,
+                        )
+                    logger.debug("Main thread: Released lock")
+            except Exception as e:
+                logger.error(f"Error writing to Spanner: {e}")
+
+        last_poll_time = current_poll_time
+        logger.debug(f"Sleeping for {POLL_INTERVAL} seconds")
+        time.sleep(POLL_INTERVAL)
+
 
 if __name__ == "__main__":
     run_worker()
-

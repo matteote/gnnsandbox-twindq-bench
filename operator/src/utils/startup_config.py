@@ -41,8 +41,35 @@ class StartupConfig:
         self.worker_exit_timeout = float(os.getenv("KOPF_WORKER_EXIT_TIMEOUT", "30.0"))
         
         # Execution Settings
-        self.max_workers_default = int(os.getenv("KOPF_MAX_WORKERS_DEFAULT", "5"))
-        self.max_workers_free5gc = int(os.getenv("KOPF_MAX_WORKERS_FREE5GC", "10"))
+        # max_workers controls how many kopf handler coroutines can be in-flight
+        # simultaneously across ALL resource types.
+        #
+        # For VPN (default) mode the handler landscape is:
+        #   Ansible-heavy (use Ansible semaphore, long-running):
+        #     linuxnetwork, vyosrouter, device, traffictest, vyosvm (install phase),
+        #     vyosinfrastructure, vyosunderlay, vyosvpn
+        #   Non-Ansible (fast K8s/GCP API calls, no semaphore):
+        #     networkfailure, graph, vyosvm (GCP provisioning phase)
+        #
+        #   Ansible operational semaphore = 7 slots, so at most 7 Ansible-heavy
+        #   handlers run at once.  The remaining slots must be available for non-Ansible
+        #   handlers that need a kopf worker to run concurrently.
+        #
+        #   Setting max_workers = 15 gives:
+        #     7  Ansible-heavy handlers actually running (semaphore limit)
+        #     3  Ansible-heavy handlers waiting on semaphore (pre-acquire, in "Creating")
+        #     5  non-Ansible handlers free to run concurrently
+        #
+        #   This balances throughput against the "stuck in Creating" risk: resources
+        #   waiting on the semaphore have already set their status to "Creating".
+        #   The thread.join(600s) timeout ensures any hung Ansible operation eventually
+        #   unblocks, and the idempotency guards ensure clean recovery on operator restart.
+        #   Avoid setting this >> 15 for VPN mode to keep the semaphore wait queue small.
+        #
+        # For FREE5GC mode:
+        #   More handlers with varied workloads; 20 gives enough headroom.
+        self.max_workers_default = int(os.getenv("KOPF_MAX_WORKERS_DEFAULT", "25"))
+        self.max_workers_free5gc = int(os.getenv("KOPF_MAX_WORKERS_FREE5GC", "25"))
         
         # Networking Settings
         self.request_timeout = int(os.getenv("KOPF_REQUEST_TIMEOUT", "60"))
