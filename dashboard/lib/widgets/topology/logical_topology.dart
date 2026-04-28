@@ -504,24 +504,6 @@ class _LogicalTopologyWidgetState extends State<LogicalTopologyWidget>
                 },
               ),
             ),
-            // Floating restart physics button
-            Positioned(
-               bottom: 16,
-               right: 16,
-               child: FloatingActionButton(
-                  mini: true,
-                  backgroundColor: Colors.blueGrey,
-                  onPressed: () {
-                     setState(() {
-                       _isSettled = false;
-                     });
-                     _controller.stop();
-                     _initializePositions();
-                     _precomputeLayout();
-                  },
-                  child: const Icon(Icons.refresh),
-               )
-            )
          ],
        ),
     );
@@ -557,6 +539,7 @@ class _LogicalTopologyWidgetState extends State<LogicalTopologyWidget>
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
+          // Infrastructure CR row
           Row(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -597,6 +580,39 @@ class _LogicalTopologyWidgetState extends State<LogicalTopologyWidget>
                 ),
               ),
             ),
+          // Underlay CR rows (same indentation as the infrastructure row)
+          ...infra.underlays.map((underlay) => Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 12,
+                  height: 12,
+                  decoration: BoxDecoration(
+                    color: underlay.phaseColor,
+                    shape: BoxShape.circle,
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  underlay.name,
+                  style: const TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+                const SizedBox(width: 4),
+                Text(
+                  underlay.phase,
+                  style: TextStyle(
+                    fontSize: 10,
+                    color: underlay.phaseColor,
+                  ),
+                ),
+              ],
+            ),
+          )),
         ],
       ),
     );

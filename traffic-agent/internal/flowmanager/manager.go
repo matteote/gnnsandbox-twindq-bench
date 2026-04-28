@@ -248,6 +248,11 @@ func (m *Manager) runDestination(ctx context.Context, f *flow, protocol string, 
 
 // logDestinationStats periodically logs bytes received by a destination flow.
 // A sustained bytes_received of 0 indicates traffic is not arriving.
+//
+// Uses Counters() (read-only) for the periodic ticks so that lastSnapshot
+// inside the Collector is not disturbed — same reasoning as logStats in the
+// session package: calling Snapshot() here every 10 s would zero-out the
+// throughput_bps gauge seen by a Prometheus scrape 1 ms later.
 func (m *Manager) logDestinationStats(ctx context.Context, f *flow, protocol string, port int) {
 	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
@@ -258,6 +263,7 @@ func (m *Manager) logDestinationStats(ctx context.Context, f *flow, protocol str
 	for {
 		select {
 		case <-ctx.Done():
+			// Final summary — safe to call Snapshot() once the flow is done.
 			snap := f.metrics.Snapshot()
 			m.logger.Info("destination flow final stats",
 				"flow_id", f.id,
@@ -269,20 +275,19 @@ func (m *Manager) logDestinationStats(ctx context.Context, f *flow, protocol str
 			)
 			return
 		case <-ticker.C:
-			snap := f.metrics.Snapshot()
-			delta := snap.BytesReceived - lastBytesReceived
-			lastBytesReceived = snap.BytesReceived
+			// Use Counters() — does NOT update lastSnapshot.
+			_, recv, _ := f.metrics.Counters()
+			delta := recv - lastBytesReceived
+			lastBytesReceived = recv
 			m.logger.Info("destination traffic stats",
 				"flow_id", f.id,
 				"protocol", protocol,
 				"port", port,
 				"elapsed_sec", time.Since(start).Round(time.Second).Seconds(),
-				"bytes_received_total", snap.BytesReceived,
+				"bytes_received_total", recv,
 				"bytes_received_interval", delta,
-				"throughput_mbps", fmt.Sprintf("%.2f", snap.ThroughputBps/1e6),
-				"packets_received", snap.PacketsReceived,
 			)
-			if snap.BytesReceived == 0 {
+			if recv == 0 {
 				m.logger.Warn("no traffic received on destination",
 					"flow_id", f.id,
 					"protocol", protocol,

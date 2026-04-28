@@ -27,6 +27,8 @@ from tools.metrics import (
     fetch_last_metrics_for_id,
     fetch_all_metrics_for_id,
     clear_network_metrics,
+    fetch_traffic_test_metrics,
+    fetch_routing_metrics,
 )
 from tools.agents import get_available_agents
 from tools.logs import delete_logs
@@ -91,6 +93,9 @@ class RestEndpoint:
         resetMetricsRoute = self.app.router.add_post("/metrics/reset", self.resetMetrics)
         self.cors.add(resetMetricsRoute, corsConfig)
 
+        getRoutingMetricsRoute = self.app.router.add_get("/metrics/routing/{node_id}", self.getRoutingMetrics)
+        self.cors.add(getRoutingMetricsRoute, corsConfig)
+
         deleteLogsRoute = self.app.router.add_post("/logs/delete", self.deleteLogs)
         self.cors.add(deleteLogsRoute, corsConfig)
 
@@ -134,6 +139,9 @@ class RestEndpoint:
 
         deleteTrafficTestRoute = self.app.router.add_post("/traffictests/{name}/delete", self.deleteTrafficTest)
         self.cors.add(deleteTrafficTestRoute, corsConfig)
+
+        getTrafficTestMetricsRoute = self.app.router.add_get("/traffictests/{name}/metrics", self.getTrafficTestMetrics)
+        self.cors.add(getTrafficTestMetricsRoute, corsConfig)
 
         # VyosInfrastructure endpoint
         getInfrastructureRoute = self.app.router.add_get("/infrastructure", self.getVyosInfrastructure)
@@ -626,6 +634,35 @@ class RestEndpoint:
                 status=500
             )
     
+    async def getRoutingMetrics(self, request):
+        """
+        Get the latest underlay (Layer 2) routing-protocol metrics for a router.
+
+        GET /metrics/routing/{node_id}
+
+        Reads from Spanner NetworkMetrics (kind='ROUTING') for the given node,
+        preserving per-label context so that per-interface OSPF counts, per-peer
+        BGP uptimes, per-AFI route totals, and per-collector health are all
+        returned correctly.
+
+        Returns:
+            JSON object with ospf, bgp_peers, routes, collectors, bfd_peers fields.
+        """
+        logger.info("REST endpoint: get routing metrics for node")
+        try:
+            node_id = request.match_info.get("node_id")
+            if not node_id:
+                return web.json_response({"error": "No node_id provided"}, status=400)
+
+            data = fetch_routing_metrics(node_id)
+            return web.json_response(data)
+        except Exception as e:
+            logger.error(f"Error fetching routing metrics: {str(e)}", exc_info=True)
+            return web.json_response(
+                {"error": f"Error fetching routing metrics: {str(e)}"},
+                status=500,
+            )
+
     async def resetMetrics(self, request):
         """
         Reset all metrics
@@ -826,6 +863,34 @@ class RestEndpoint:
         except Exception as e:
             logger.error(f"Error deleting TrafficTest: {str(e)}", exc_info=True)
             return web.json_response({"error": f"Error deleting TrafficTest: {str(e)}"}, status=500)
+
+    async def getTrafficTestMetrics(self, request):
+        """
+        Get the latest traffic-agent flow metrics for a single TrafficTest.
+
+        GET /traffictests/{name}/metrics
+
+        Reads from Spanner NetworkMetrics (kind='TRAFFIC') for all flows whose
+        flow_id starts with ``{name}_``.  Returns an empty list when no data has
+        been scraped yet (test not started or metrics collector not running).
+
+        Returns:
+            JSON array of flow-metric objects, one per (flow_id, role, protocol).
+        """
+        logger.info("REST endpoint: get TrafficTest metrics")
+        try:
+            test_name = request.match_info.get("name")
+            if not test_name:
+                return web.json_response({"error": "No test name provided"}, status=400)
+
+            flows = fetch_traffic_test_metrics(test_name)
+            return web.json_response(flows)
+        except Exception as e:
+            logger.error(f"Error fetching TrafficTest metrics: {str(e)}", exc_info=True)
+            return web.json_response(
+                {"error": f"Error fetching TrafficTest metrics: {str(e)}"},
+                status=500,
+            )
 
     async def getVyosInfrastructure(self, request):
         """

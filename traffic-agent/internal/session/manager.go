@@ -13,6 +13,7 @@ package session
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
 	"log/slog"
 	"math/rand"
@@ -25,6 +26,11 @@ import (
 	"gitlab.com/tme4/gnnsandbox/traffic-agent/internal/patterns"
 	"gitlab.com/tme4/gnnsandbox/traffic-agent/internal/ratelimit"
 )
+
+// udpPayloadBytes is the UDP payload size used when sending UDP datagrams.
+// Set to 1300 bytes so the total datagram (16-byte header + 1284-byte payload)
+// stays well within the effective MTU of most VPN-encapsulated links (~1400 B).
+const udpPayloadBytes = 1300
 
 // Manager runs a fixed pool of concurrent sessions against a single
 // (destIP:port, protocol) target.  All sessions share one rate limiter whose
@@ -39,6 +45,10 @@ type Manager struct {
 
 	// activeSessions is the live count read by the pattern controller.
 	activeSessions atomic.Int32
+
+	// seqCounter is a flow-wide monotonically increasing sequence number
+	// embedded in every UDP datagram header for loss / jitter tracking.
+	seqCounter atomic.Uint64
 }
 
 // New creates a Manager.  Call Run to start traffic.
@@ -108,6 +118,12 @@ func (m *Manager) Run(ctx context.Context, duration time.Duration) error {
 
 // logStats emits periodic throughput/session metrics to the structured log.
 // It runs for the lifetime of ctxWithTimeout and also emits a final summary.
+//
+// Uses Counters() (read-only) for the periodic ticks so that lastSnapshot
+// inside the Collector is not disturbed.  If Snapshot() were called here
+// every 10 s, a Prometheus scrape happening 1 ms later would compute
+// throughput over a 1 ms window → ~0 bps even under heavy load.
+// Snapshot() is only called once at the very end for the final summary.
 func (m *Manager) logStats(ctx context.Context, start time.Time) {
 	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
@@ -117,7 +133,8 @@ func (m *Manager) logStats(ctx context.Context, start time.Time) {
 	for {
 		select {
 		case <-ctx.Done():
-			// Emit final summary regardless of elapsed time.
+			// Final summary — Snapshot() here is safe; no more Prometheus scrapes
+			// will race with it after the flow context is cancelled.
 			snap := m.metrics.Snapshot()
 			m.logger.Info("traffic session final stats",
 				"dest", m.destAddr,
@@ -129,27 +146,19 @@ func (m *Manager) logStats(ctx context.Context, start time.Time) {
 			)
 			return
 		case <-ticker.C:
-			snap := m.metrics.Snapshot()
-			delta := snap.BytesSent - lastBytesSent
-			lastBytesSent = snap.BytesSent
+			// Use Counters() — does NOT update lastSnapshot, so throughput_bps
+			// in subsequent Prometheus scrapes is computed over the correct window.
+			sent, _, sessions := m.metrics.Counters()
+			delta := sent - lastBytesSent
+			lastBytesSent = sent
 			m.logger.Info("traffic stats",
 				"dest", m.destAddr,
 				"protocol", m.protocol,
 				"elapsed_sec", time.Since(start).Round(time.Second).Seconds(),
-				"bytes_sent_total", snap.BytesSent,
+				"bytes_sent_total", sent,
 				"bytes_sent_interval", delta,
-				"throughput_mbps", fmt.Sprintf("%.2f", snap.ThroughputBps/1e6),
-				"active_sessions", snap.ActiveSessions,
+				"active_sessions", sessions,
 			)
-			if snap.PacketsDropped > 0 {
-				m.logger.Warn("packet drops detected",
-					"dest", m.destAddr,
-					"protocol", m.protocol,
-					"packets_dropped", snap.PacketsDropped,
-					"packets_sent", snap.PacketsSent,
-					"loss_pct", fmt.Sprintf("%.2f%%", snap.PacketLossPct),
-				)
-			}
 		}
 	}
 }
@@ -229,8 +238,22 @@ func (m *Manager) runPoisson(ctx context.Context, pp *patterns.PoissonPattern, l
 // runSession is the inner send loop for a single connection.
 // It connects to destAddr and writes chunks of random data at the rate
 // controlled by lim.  It reconnects automatically if the connection drops.
+//
+// For UDP flows the buffer includes a 16-byte header that is updated on every
+// datagram: [seq uint64 BE][send_timestamp_ns uint64 BE][random payload...].
+// The header enables the receiver to compute one-way latency, inter-packet
+// jitter, and sequence-number-based packet loss without cross-device state.
 func (m *Manager) runSession(ctx context.Context, id int, lim *ratelimit.Limiter) error {
-	buf := makePayload(lim.ChunkSize())
+	var buf []byte
+	if m.protocol == "udp" {
+		// Allocate once per session: 16-byte header + fixed-size payload.
+		// The payload is filled with random bytes to prevent compression on
+		// intermediate devices.  Only the header changes per datagram.
+		buf = make([]byte, 16+udpPayloadBytes)
+		rand.Read(buf[16:]) //nolint:gosec
+	} else {
+		buf = makePayload(lim.ChunkSize())
+	}
 
 	for {
 		select {
@@ -252,8 +275,14 @@ func (m *Manager) runSession(ctx context.Context, id int, lim *ratelimit.Limiter
 		}
 
 		m.logger.Debug("session connected", "id", id, "addr", m.destAddr)
-		if err := m.sendLoop(ctx, conn, buf, lim); err != nil {
-			m.logger.Debug("session send loop ended", "id", id, "err", err)
+		var loopErr error
+		if m.protocol == "udp" {
+			loopErr = m.udpSendLoop(ctx, conn, buf, lim)
+		} else {
+			loopErr = m.sendLoop(ctx, conn, buf, lim)
+		}
+		if loopErr != nil {
+			m.logger.Debug("session send loop ended", "id", id, "err", loopErr)
 		}
 		conn.Close()
 
@@ -267,8 +296,8 @@ func (m *Manager) runSession(ctx context.Context, id int, lim *ratelimit.Limiter
 	}
 }
 
-// sendLoop writes data to conn at the rate allowed by lim until ctx is done
-// or an error occurs.
+// sendLoop writes TCP data to conn at the rate allowed by lim until ctx is
+// done or an error occurs.
 func (m *Manager) sendLoop(ctx context.Context, conn net.Conn, buf []byte, lim *ratelimit.Limiter) error {
 	for {
 		select {
@@ -285,6 +314,41 @@ func (m *Manager) sendLoop(ctx context.Context, conn net.Conn, buf []byte, lim *
 		n, err := conn.Write(buf)
 		if n > 0 {
 			m.metrics.AddBytesSent(int64(n))
+		}
+		if err != nil {
+			return fmt.Errorf("write: %w", err)
+		}
+	}
+}
+
+// udpSendLoop writes UDP datagrams with a 16-byte measurement header at the
+// rate allowed by lim until ctx is done or an error occurs.
+//
+// Header layout (all big-endian):
+//
+//	bytes 0–7:  uint64  per-flow sequence number (starts at 1, never wraps in practice)
+//	bytes 8–15: uint64  send timestamp in nanoseconds since Unix epoch
+func (m *Manager) udpSendLoop(ctx context.Context, conn net.Conn, buf []byte, lim *ratelimit.Limiter) error {
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		default:
+		}
+
+		if err := lim.WaitBytes(ctx, len(buf)); err != nil {
+			return err
+		}
+
+		// Stamp the header with current seq and send time (buf is per-goroutine).
+		seq := m.seqCounter.Add(1)
+		binary.BigEndian.PutUint64(buf[0:8], seq)
+		binary.BigEndian.PutUint64(buf[8:16], uint64(time.Now().UnixNano()))
+
+		n, err := conn.Write(buf)
+		if n > 0 {
+			m.metrics.AddBytesSent(int64(n))
+			m.metrics.AddPacketSent()
 		}
 		if err != nil {
 			return fmt.Errorf("write: %w", err)

@@ -7,6 +7,7 @@ import '../../models/network_node.dart';
 import '../../utils/APIService.dart';
 import '../../utils/node_visuals.dart';
 import '../performance/node_performance_card.dart';
+import '../performance/underlay_metrics_card.dart';
 
 class NodeDetailsDialog extends StatefulWidget {
   final NetworkNode node;
@@ -26,12 +27,14 @@ class _NodeDetailsDialogState extends State<NodeDetailsDialog> {
   String? _error;
   final APIService _apiService = APIService();
   Map<String, dynamic>? _embeddingsData;
+  Map<String, dynamic>? _routingMetrics;
 
   @override
   void initState() {
     super.initState();
     _fetchNodeDetails();
     _fetchEmbeddings();
+    _fetchRoutingMetrics();
   }
 
   Future<void> _fetchEmbeddings() async {
@@ -49,6 +52,25 @@ class _NodeDetailsDialogState extends State<NodeDetailsDialog> {
     } catch (e) {
       print('Error fetching embeddings: $e');
       // Don't set error state, just continue without embeddings
+    }
+  }
+
+  Future<void> _fetchRoutingMetrics() async {
+    try {
+      final bool isRouter =
+          widget.node.properties['kind'] == 'Router' ||
+          widget.node.properties['kind'] == 'PhysicalRouter';
+      if (!isRouter) return;
+
+      final metrics =
+          await _apiService.fetchRoutingMetrics(widget.node.name);
+      if (mounted) {
+        setState(() {
+          _routingMetrics = metrics.isEmpty ? null : metrics;
+        });
+      }
+    } catch (e) {
+      print('Error fetching routing metrics: $e');
     }
   }
 
@@ -350,6 +372,12 @@ class _NodeDetailsDialogState extends State<NodeDetailsDialog> {
                                 }
                               },
                             ),
+                            // Underlay Network (Layer 2) metrics card — shown for P/PE routers
+                            if (_routingMetrics != null)
+                              Container(
+                                margin: const EdgeInsets.symmetric(vertical: 8),
+                                child: UnderlayMetricsCard(data: _routingMetrics!),
+                              ),
                             // Embeddings Card (if available)
                             if (_embeddingsData != null && 
                                 (_embeddingsData!['router_embedding'] != null || 

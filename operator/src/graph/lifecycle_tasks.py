@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import kopf
 import logging
 from utils.compute import *
 # from utils.request_throttler import throttled, throttled_call
@@ -1436,31 +1437,42 @@ async def sync_device(body, spec, name, uid, logger):
     # directly where the interface-level metrics (tx_bytes, rx_bytes, etc.) live.
     interface_id = None
 
-    if gateway:
-        sql_find_interface = """
-            SELECT i.id
-            FROM PhysicalInterface i
-            WHERE i.ip_address = @gateway_ip
-              AND i.valid_end_ts IS NULL
-            LIMIT 1
-        """
-        try:
-            with db_container['db'].snapshot() as snapshot:
-                results = snapshot.execute_sql(
-                    sql_find_interface,
-                    params={'gateway_ip': gateway},
-                    param_types={'gateway_ip': spanner.param_types.STRING}
+    if not gateway:
+        raise kopf.PermanentError(
+            f"Device {name} has no gateway in spec — cannot resolve connected interface"
+        )
+
+    sql_find_interface = """
+        SELECT i.id
+        FROM PhysicalInterface i
+        WHERE i.ip_address = @gateway_ip
+          AND i.valid_end_ts IS NULL
+        LIMIT 1
+    """
+    try:
+        with db_container['db'].snapshot() as snapshot:
+            results = snapshot.execute_sql(
+                sql_find_interface,
+                params={'gateway_ip': gateway},
+                param_types={'gateway_ip': spanner.param_types.STRING}
+            )
+            row = results.one_or_none()
+            if row:
+                interface_id = row[0]
+                logger.debug(f"Found interface {interface_id} for device {name} via gateway {gateway}")
+            else:
+                raise kopf.TemporaryError(
+                    f"No PhysicalInterface with ip_address={gateway} found for device {name} — "
+                    f"CE router may not be synced to Spanner yet; will retry",
+                    delay=30
                 )
-                row = results.one_or_none()
-                if row:
-                    interface_id = row[0]
-                    logger.debug(f"Found interface {interface_id} for device {name} via gateway {gateway}")
-                else:
-                    logger.warning(f"No interface found with IP {gateway} for device {name}")
-        except Exception as e:
-            logger.warning(f"Could not find interface for device {name} via gateway {gateway}: {e}")
-    else:
-        logger.warning(f"Device {name} has no gateway specified, cannot determine connected interface")
+    except (kopf.TemporaryError, kopf.PermanentError):
+        raise
+    except Exception as e:
+        raise kopf.TemporaryError(
+            f"Spanner lookup failed for device {name} gateway {gateway}: {e}; will retry",
+            delay=30
+        )
 
     def sql_upsert_device(transaction):
         # 1. Get active device

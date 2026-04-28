@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../appstate.dart';
 import '../models/vpn_info.dart';
+import '../utils/APIService.dart';
 
 // ── Phase → colour mapping ───────────────────────────────────────────────────
 
@@ -95,6 +98,24 @@ class _VpnTrafficPanelState extends State<VpnTrafficPanel> {
   /// force them back open on subsequent rebuilds.
   final Set<String> _seenVpns = {};
 
+  // ── Performance section state ──────────────────────────────────────────
+
+  /// VPN names whose "Performance" sub-section is expanded.
+  final Set<String> _expandedPerf = {};
+
+  /// VPN names currently fetching flow metrics (spinner shown in toggle).
+  final Set<String> _loadingPerf = {};
+
+  /// Latest flow metrics keyed by VPN name (all linked tests combined).
+  final Map<String, List<TrafficFlowMetrics>> _perfMetrics = {};
+
+  /// Cache of linked tests per VPN updated each build — lets the poll timer
+  /// re-fetch without needing a BuildContext.
+  Map<String, List<TrafficTestInfo>> _currentLinkedTests = {};
+
+  /// 20-second poll timer; active only while ≥1 perf section is expanded.
+  Timer? _perfTimer;
+
   /// Per-VPN horizontal scroll controllers for the Route Info table.
   final Map<String, ScrollController> _routeScrollControllers = {};
 
@@ -106,6 +127,7 @@ class _VpnTrafficPanelState extends State<VpnTrafficPanel> {
 
   @override
   void dispose() {
+    _perfTimer?.cancel();
     for (final c in _routeScrollControllers.values) {
       c.dispose();
     }
@@ -151,6 +173,9 @@ class _VpnTrafficPanelState extends State<VpnTrafficPanel> {
             unlinkedTests.add(test);
           }
         }
+
+        // Keep the linked-tests cache in sync so the poll timer can re-fetch.
+        _currentLinkedTests = linkedTests;
 
         final deletingVpn = appState.deletingVpnName;
 
@@ -441,6 +466,14 @@ class _VpnTrafficPanelState extends State<VpnTrafficPanel> {
               for (final test in relatedTests)
                 _buildTestCard(test, appState, indent: true),
             const SizedBox(height: 4),
+          ],
+
+          // ── Performance sub-section ──────────────────────────────────────
+          if (relatedTests.isNotEmpty) ...[
+            const Divider(height: 1, thickness: 1, indent: 10, endIndent: 10),
+            _buildPerfToggle(vpn.name, relatedTests),
+            if (_expandedPerf.contains(vpn.name))
+              _buildPerfSection(vpn.name, relatedTests),
           ],
         ],
       ),
@@ -998,6 +1031,392 @@ class _VpnTrafficPanelState extends State<VpnTrafficPanel> {
         ],
       ),
     );
+  }
+
+  // ── Performance section ───────────────────────────────────────────────────
+
+  /// Toggle row for the Performance sub-section.
+  Widget _buildPerfToggle(String vpnName, List<TrafficTestInfo> tests) {
+    final expanded = _expandedPerf.contains(vpnName);
+    final isLoading = _loadingPerf.contains(vpnName);
+    final flows = _perfMetrics[vpnName] ?? [];
+    final runningCount = flows.where((f) => f.isRunning).length;
+
+    return InkWell(
+      onTap: () => _togglePerfSection(vpnName, tests),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        child: Row(
+          children: [
+            Icon(Icons.analytics_outlined,
+                size: 13, color: const Color(0xFF0D47A1)),
+            const SizedBox(width: 5),
+            Text('Performance', style: _sectionHeaderStyle),
+            if (isLoading) ...[
+              const SizedBox(width: 6),
+              const SizedBox(
+                width: 10,
+                height: 10,
+                child: CircularProgressIndicator(
+                  strokeWidth: 1.5,
+                  color: Color(0xFF0D47A1),
+                ),
+              ),
+            ] else if (runningCount > 0) ...[
+              const SizedBox(width: 5),
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                decoration: BoxDecoration(
+                  color: Colors.green.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  '$runningCount active',
+                  style: const TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.green,
+                  ),
+                ),
+              ),
+            ],
+            const Spacer(),
+            Icon(
+              expanded ? Icons.expand_less : Icons.expand_more,
+              size: 16,
+              color: Colors.black38,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Body of the Performance sub-section.
+  Widget _buildPerfSection(String vpnName, List<TrafficTestInfo> tests) {
+    final flows = _perfMetrics[vpnName] ?? [];
+    final isLoading = _loadingPerf.contains(vpnName);
+
+    if (isLoading && flows.isEmpty) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 12),
+        child: Center(
+          child: SizedBox(
+            width: 18,
+            height: 18,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+        ),
+      );
+    }
+
+    if (flows.isEmpty) {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(14, 4, 14, 10),
+        child: Text(
+          'No flow metrics yet — tests may still be starting.',
+          style: _labelStyle.copyWith(fontStyle: FontStyle.italic),
+        ),
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(10, 0, 10, 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // Aggregate stat bar
+          _buildPerfAggregateBar(flows),
+          const SizedBox(height: 6),
+          // Per-test rows
+          for (final test in tests) ...[
+            _buildPerfTestRow(
+              test,
+              flows
+                  .where((f) => f.flowId.startsWith('${test.name}_'))
+                  .toList(),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  /// Aggregate 4-stat bar across all source flows for a VPN.
+  Widget _buildPerfAggregateBar(List<TrafficFlowMetrics> flows) {
+    // Only source-role flows for throughput to avoid double-counting bidir.
+    final srcFlows = flows.where((f) => f.role == 'source').toList();
+    final allFlows = flows; // use all flows for latency/loss/jitter
+
+    double? sumThroughput;
+    for (final f in srcFlows) {
+      if (f.throughputBps != null) {
+        sumThroughput = (sumThroughput ?? 0) + f.throughputBps!;
+      }
+    }
+
+    double? avgLatency;
+    final latVals =
+        allFlows.map((f) => f.latencyMs).whereType<double>().toList();
+    if (latVals.isNotEmpty) {
+      avgLatency = latVals.reduce((a, b) => a + b) / latVals.length;
+    }
+
+    double? avgLoss;
+    final lossVals =
+        allFlows.map((f) => f.packetLossPct).whereType<double>().toList();
+    if (lossVals.isNotEmpty) {
+      avgLoss = lossVals.reduce((a, b) => a + b) / lossVals.length;
+    }
+
+    double? avgJitter;
+    final jitterVals =
+        allFlows.map((f) => f.jitterMs).whereType<double>().toList();
+    if (jitterVals.isNotEmpty) {
+      avgJitter = jitterVals.reduce((a, b) => a + b) / jitterVals.length;
+    }
+
+    // Throughput label helper (same as model but applied to nullable sum)
+    String throughputLabel(double? bps) {
+      if (bps == null) return '—';
+      if (bps >= 1e9) return '${(bps / 1e9).toStringAsFixed(1)} Gbps';
+      if (bps >= 1e6) return '${(bps / 1e6).toStringAsFixed(1)} Mbps';
+      if (bps >= 1e3) return '${(bps / 1e3).toStringAsFixed(0)} Kbps';
+      return '${bps.toStringAsFixed(0)} bps';
+    }
+
+    Color latencyColor(double? ms) {
+      if (ms == null) return Colors.black54;
+      if (ms < 10) return Colors.green.shade700;
+      if (ms < 50) return Colors.orange.shade700;
+      return Colors.red.shade700;
+    }
+
+    Color lossColor(double? pct) {
+      if (pct == null) return Colors.black54;
+      if (pct < 0.5) return Colors.green.shade700;
+      if (pct < 2) return Colors.orange.shade700;
+      return Colors.red.shade700;
+    }
+
+    Color jitterColor(double? ms) {
+      if (ms == null) return Colors.black54;
+      if (ms < 5) return Colors.green.shade700;
+      if (ms < 20) return Colors.orange.shade700;
+      return Colors.red.shade700;
+    }
+
+    Widget statCell(String label, String value, Color valueColor) {
+      return Expanded(
+        child: Column(
+          children: [
+            Text(
+              value,
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.bold,
+                color: valueColor,
+              ),
+            ),
+            Text(label, style: _labelStyle),
+          ],
+        ),
+      );
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 7, horizontal: 6),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF0F4FF),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: Colors.blue.shade100),
+      ),
+      child: Row(
+        children: [
+          statCell(
+            'Throughput',
+            throughputLabel(sumThroughput),
+            const Color(0xFF0D47A1),
+          ),
+          statCell(
+            'Latency',
+            avgLatency != null
+                ? '${avgLatency.toStringAsFixed(1)} ms'
+                : '—',
+            latencyColor(avgLatency),
+          ),
+          statCell(
+            'Pkt Loss',
+            avgLoss != null ? '${avgLoss.toStringAsFixed(2)}%' : '—',
+            lossColor(avgLoss),
+          ),
+          statCell(
+            'Jitter',
+            avgJitter != null
+                ? '${avgJitter.toStringAsFixed(1)} ms'
+                : '—',
+            jitterColor(avgJitter),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Compact per-test row: name • throughput • latency • loss • phase badge.
+  Widget _buildPerfTestRow(
+    TrafficTestInfo test,
+    List<TrafficFlowMetrics> flows,
+  ) {
+    if (flows.isEmpty) return const SizedBox.shrink();
+
+    final srcFlows = flows.where((f) => f.role == 'source').toList();
+
+    // Sum throughput from source flows
+    double? sumThroughput;
+    for (final f in srcFlows) {
+      if (f.throughputBps != null) {
+        sumThroughput = (sumThroughput ?? 0) + f.throughputBps!;
+      }
+    }
+
+    // Average latency across all flows
+    final latVals = flows.map((f) => f.latencyMs).whereType<double>().toList();
+    final avgLatency = latVals.isNotEmpty
+        ? latVals.reduce((a, b) => a + b) / latVals.length
+        : null;
+
+    // Average loss across all flows
+    final lossVals =
+        flows.map((f) => f.packetLossPct).whereType<double>().toList();
+    final avgLoss = lossVals.isNotEmpty
+        ? lossVals.reduce((a, b) => a + b) / lossVals.length
+        : null;
+
+    Color latencyColor(double? ms) {
+      if (ms == null) return Colors.black38;
+      if (ms < 10) return Colors.green.shade600;
+      if (ms < 50) return Colors.orange.shade700;
+      return Colors.red.shade700;
+    }
+
+    Color lossColor(double? pct) {
+      if (pct == null) return Colors.black38;
+      if (pct < 0.5) return Colors.green.shade600;
+      if (pct < 2) return Colors.orange.shade700;
+      return Colors.red.shade700;
+    }
+
+    // Throughput label
+    String tpLabel(double? bps) {
+      if (bps == null) return '—';
+      if (bps >= 1e9) return '${(bps / 1e9).toStringAsFixed(1)} Gbps';
+      if (bps >= 1e6) return '${(bps / 1e6).toStringAsFixed(1)} Mbps';
+      if (bps >= 1e3) return '${(bps / 1e3).toStringAsFixed(0)} Kbps';
+      return '${bps.toStringAsFixed(0)} bps';
+    }
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 4),
+      child: Row(
+        children: [
+          const Icon(Icons.bar_chart, size: 11, color: Colors.black38),
+          const SizedBox(width: 4),
+          Expanded(
+            child: Text(
+              test.name,
+              style: _labelStyle.copyWith(color: Colors.black87),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          const SizedBox(width: 4),
+          Text(
+            tpLabel(sumThroughput),
+            style: const TextStyle(
+              fontSize: 10,
+              fontWeight: FontWeight.w600,
+              color: Color(0xFF0D47A1),
+            ),
+          ),
+          const SizedBox(width: 6),
+          Text(
+            avgLatency != null
+                ? '${avgLatency.toStringAsFixed(1)} ms'
+                : '—',
+            style: TextStyle(
+              fontSize: 10,
+              color: latencyColor(avgLatency),
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+          const SizedBox(width: 6),
+          Text(
+            avgLoss != null ? '${avgLoss.toStringAsFixed(2)}%' : '—',
+            style: TextStyle(
+              fontSize: 10,
+              color: lossColor(avgLoss),
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+          const SizedBox(width: 4),
+          _PhaseBadge(phase: test.phase),
+        ],
+      ),
+    );
+  }
+
+  // ── Performance polling logic ─────────────────────────────────────────────
+
+  void _togglePerfSection(String vpnName, List<TrafficTestInfo> tests) {
+    setState(() {
+      if (_expandedPerf.contains(vpnName)) {
+        _expandedPerf.remove(vpnName);
+        if (_expandedPerf.isEmpty) {
+          _perfTimer?.cancel();
+          _perfTimer = null;
+        }
+      } else {
+        _expandedPerf.add(vpnName);
+        _fetchPerfForVpn(vpnName, tests);
+        // Start the 20s timer if it's not already running.
+        if (_perfTimer == null || !_perfTimer!.isActive) {
+          _perfTimer = Timer.periodic(
+            const Duration(seconds: 20),
+            (_) => _refreshExpandedPerf(),
+          );
+        }
+      }
+    });
+  }
+
+  Future<void> _fetchPerfForVpn(
+    String vpnName,
+    List<TrafficTestInfo> tests,
+  ) async {
+    if (!mounted) return;
+    setState(() => _loadingPerf.add(vpnName));
+
+    final api = APIService();
+    final allFlows = <TrafficFlowMetrics>[];
+
+    for (final test in tests) {
+      final flows = await api.fetchTrafficTestMetrics(test.name);
+      allFlows.addAll(flows);
+    }
+
+    if (mounted) {
+      setState(() {
+        _perfMetrics[vpnName] = allFlows;
+        _loadingPerf.remove(vpnName);
+      });
+    }
+  }
+
+  void _refreshExpandedPerf() {
+    for (final vpnName in _expandedPerf.toList()) {
+      final tests = _currentLinkedTests[vpnName] ?? [];
+      _fetchPerfForVpn(vpnName, tests);
+    }
   }
 
   // ── Helpers ───────────────────────────────────────────────────────────────

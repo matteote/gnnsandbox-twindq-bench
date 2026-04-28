@@ -889,12 +889,35 @@ def build_graph(database, edge_label=None):
 def fetch_snapshots():
     """
     Fetch available snapshots from the Spanner database.
+
+    Timestamps are derived from two sources and merged into a single sorted list:
+      1. SCD2 topology entries  – distinct ``valid_start_ts`` values from
+         ``PhysicalRouter`` (each value represents a point in time when the
+         physical topology was written / updated).
+      2. Network-metrics entries – distinct ``timestamp`` values from the
+         ``NetworkMetrics`` table.
+
+    NodeEmbedding timestamps are intentionally excluded; the timeslot slider
+    should reflect when observable data (topology changes or metrics) was
+    recorded, not when GNN embeddings were computed.
     """
-    logger.info("Fetching snapshots")
+    logger.info("Fetching snapshots from SCD2 (PhysicalRouter) and NetworkMetrics")
     try:
         database = spanner_connect()
-        query = "SELECT DISTINCT timestamp FROM NodeEmbedding ORDER BY timestamp DESC LIMIT 100"
-        
+
+        # UNION of SCD2 valid_start timestamps and NetworkMetrics timestamps.
+        # The outer SELECT DISTINCT deduplicates any coinciding values.
+        query = """
+            SELECT DISTINCT ts
+            FROM (
+                SELECT valid_start_ts AS ts FROM PhysicalRouter WHERE valid_start_ts IS NOT NULL
+                UNION ALL
+                SELECT timestamp    AS ts FROM NetworkMetrics   WHERE timestamp       IS NOT NULL
+            )
+            ORDER BY ts DESC
+            LIMIT 100
+        """
+
         snapshots = []
         with database.snapshot() as snapshot:
             results = snapshot.execute_sql(query)
@@ -902,7 +925,8 @@ def fetch_snapshots():
                 ts = row[0]
                 if ts:
                     snapshots.append(ts.isoformat())
-                    
+
+        logger.info(f"Returning {len(snapshots)} snapshot timestamps")
         return {"snapshots": snapshots}
     except Exception as e:
         logger.error(f"Failed to fetch snapshots: {e}", exc_info=True)
@@ -1171,14 +1195,54 @@ def delete_vpn_crd(name: str, namespace: str = "default") -> bool:
         return False
 
 
+def fetch_vyos_underlay(namespace: str = "default") -> list:
+    """
+    Fetch all VyOSUnderlay custom resources from Kubernetes and return a
+    normalised summary list suitable for the dashboard status card.
+
+    Returns:
+        list of dicts with keys:
+            name, phase, message, infrastructure_ref
+    """
+    logger.info(f"Fetching VyOSUnderlay resources from namespace={namespace}")
+
+    try:
+        client = kubernetes.dynamic.DynamicClient(get_k8s_client())
+        api = client.resources.get(api_version="google.dev/v1", kind="VyOSUnderlay")
+        resources = api.get(namespace=namespace)
+
+        underlay_list = []
+        for item in resources.items:
+            item_dict = item.to_dict()
+            spec   = item_dict.get("spec",   {}) or {}
+            status = item_dict.get("status", {}) or {}
+
+            underlay_list.append({
+                "name":               item_dict["metadata"]["name"],
+                "phase":              status.get("phase",   "Unknown"),
+                "message":            status.get("message", ""),
+                "infrastructure_ref": spec.get("infrastructureRef"),
+            })
+
+        logger.info(f"Retrieved {len(underlay_list)} VyOSUnderlay resources")
+        return underlay_list
+
+    except Exception as e:
+        logger.error(f"Error fetching VyOSUnderlay resources: {e}", exc_info=True)
+        return []
+
+
 def fetch_vyos_infrastructure(namespace: str = "default") -> list:
     """
     Fetch all VyosInfrastructure custom resources from Kubernetes and return a
     normalised summary list suitable for the dashboard status card.
 
+    Each infra item includes an 'underlays' list containing the status of any
+    VyOSUnderlay CRs that reference this infrastructure via spec.infrastructureRef.
+
     Returns:
         list of dicts with keys:
-            name, phase, message, router_count, network_count, device_count
+            name, phase, message, router_count, network_count, device_count, underlays
     """
     logger.info(f"Fetching VyosInfrastructure resources from namespace={namespace}")
 
@@ -1186,6 +1250,18 @@ def fetch_vyos_infrastructure(namespace: str = "default") -> list:
         client = kubernetes.dynamic.DynamicClient(get_k8s_client())
         api = client.resources.get(api_version="google.dev/v1", kind="VyOSInfrastructure")
         resources = api.get(namespace=namespace)
+
+        # Fetch all underlays once and group them by their infrastructureRef
+        all_underlays = fetch_vyos_underlay(namespace=namespace)
+        underlays_by_infra: dict = {}
+        for u in all_underlays:
+            ref = u.get("infrastructure_ref")
+            if ref:
+                underlays_by_infra.setdefault(ref, []).append({
+                    "name":    u["name"],
+                    "phase":   u["phase"],
+                    "message": u["message"],
+                })
 
         infra_list = []
         for item in resources.items:
@@ -1196,13 +1272,15 @@ def fetch_vyos_infrastructure(namespace: str = "default") -> list:
             networks = status.get("networks", []) or []
             devices  = status.get("devices",  []) or []
 
+            infra_name = item_dict["metadata"]["name"]
             infra_list.append({
-                "name":          item_dict["metadata"]["name"],
+                "name":          infra_name,
                 "phase":         status.get("phase",   "Unknown"),
                 "message":       status.get("message", ""),
                 "router_count":  len(routers),
                 "network_count": len(networks),
                 "device_count":  len(devices),
+                "underlays":     underlays_by_infra.get(infra_name, []),
             })
 
         logger.info(f"Retrieved {len(infra_list)} VyosInfrastructure resources")

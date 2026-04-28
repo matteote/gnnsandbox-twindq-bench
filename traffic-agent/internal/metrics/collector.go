@@ -86,6 +86,26 @@ func (c *Collector) AddPacketReceived() {
 	c.packetsReceived.Add(1)
 }
 
+// Counters returns the current raw cumulative counters as a non-destructive
+// read — it does NOT update lastSnapshot and therefore does NOT affect
+// subsequent throughput calculations in Snapshot().
+//
+// Use this in periodic log helpers (logStats, logDestinationStats) so that
+// only the Prometheus scraper updates lastSnapshot.  If logStats called
+// Snapshot() every 10 s and Prometheus scraped 1 ms later, the throughput
+// delta window would be 1 ms → effectively 0 bps even under heavy load.
+func (c *Collector) Counters() (bytesSent, bytesReceived int64, activeSessions int32) {
+	return c.bytesSent.Load(), c.bytesReceived.Load(), c.activeSessions.Load()
+}
+
+// AddPacketsSent records n packets as "expected" in bulk.
+// Used by the UDP receiver to account for both received packets and
+// detected sequence-number gaps so the Collector's loss formula gives the
+// correct result without needing cross-device coordination.
+func (c *Collector) AddPacketsSent(n int64) {
+	c.packetsSent.Add(n)
+}
+
 // IncrSessions increments the active session count.
 func (c *Collector) IncrSessions() {
 	c.activeSessions.Add(1)
@@ -154,6 +174,26 @@ func (c *Collector) Snapshot() Snapshot {
 		JitterMs:        jitterMs,
 		ActiveSessions:  c.activeSessions.Load(),
 	}
+
+	// Reset per-window accumulators so the next Snapshot() (next Prometheus
+	// scrape) sees only samples collected in the subsequent interval.
+	// This gives latency, jitter, and packet-loss the same rolling-window
+	// semantics as throughput_bps.
+	//
+	// bytesSent / bytesReceived are intentionally NOT reset — they are
+	// cumulative counters used for bytes_*_total and for the lastSnapshot
+	// throughput delta.
+	//
+	// Note: Add* methods use bare atomics without this mutex, so there is
+	// a benign race between the Load above and the Store(0) below: any
+	// sample arriving in that gap is simply counted in the next window
+	// rather than the current one.
+	c.latencySumMs.Store(0)
+	c.latencySamples.Store(0)
+	c.jitterSumMs.Store(0)
+	c.jitterSamples.Store(0)
+	c.packetsSent.Store(0)
+	c.packetsReceived.Store(0)
 
 	c.lastSnapshot = s
 	return s

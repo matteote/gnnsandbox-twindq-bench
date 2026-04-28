@@ -1,5 +1,41 @@
 import 'package:flutter/material.dart';
 
+/// Summary of a deployed VyOSUnderlay custom resource.
+class VyosUnderlayInfo {
+  final String name;
+  final String phase;
+  final String message;
+
+  const VyosUnderlayInfo({
+    required this.name,
+    required this.phase,
+    required this.message,
+  });
+
+  factory VyosUnderlayInfo.fromJson(Map<String, dynamic> json) {
+    return VyosUnderlayInfo(
+      name:    json['name']    as String? ?? '',
+      phase:   json['phase']   as String? ?? 'Unknown',
+      message: json['message'] as String? ?? '',
+    );
+  }
+
+  /// Returns a color representing the current phase.
+  Color get phaseColor {
+    switch (phase.toLowerCase()) {
+      case 'ready':
+        return Colors.green;
+      case 'processing':
+      case 'waiting':
+        return Colors.orange;
+      case 'error':
+        return Colors.red;
+      default:
+        return Colors.grey;
+    }
+  }
+}
+
 /// Summary of a deployed VyosInfrastructure custom resource.
 class VyosInfrastructureInfo {
   final String name;
@@ -8,6 +44,7 @@ class VyosInfrastructureInfo {
   final int routerCount;
   final int networkCount;
   final int deviceCount;
+  final List<VyosUnderlayInfo> underlays;
 
   const VyosInfrastructureInfo({
     required this.name,
@@ -16,9 +53,15 @@ class VyosInfrastructureInfo {
     required this.routerCount,
     required this.networkCount,
     required this.deviceCount,
+    this.underlays = const [],
   });
 
   factory VyosInfrastructureInfo.fromJson(Map<String, dynamic> json) {
+    final underlaysList = (json['underlays'] as List<dynamic>? ?? [])
+        .whereType<Map<String, dynamic>>()
+        .map(VyosUnderlayInfo.fromJson)
+        .toList();
+
     return VyosInfrastructureInfo(
       name:         json['name']          as String? ?? '',
       phase:        json['phase']         as String? ?? 'Unknown',
@@ -26,6 +69,7 @@ class VyosInfrastructureInfo {
       routerCount:  json['router_count']  as int?    ?? 0,
       networkCount: json['network_count'] as int?    ?? 0,
       deviceCount:  json['device_count']  as int?    ?? 0,
+      underlays:    underlaysList,
     );
   }
 

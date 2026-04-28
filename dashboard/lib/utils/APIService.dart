@@ -767,6 +767,61 @@ class APIService{
     }
   }
 
+  Future<Map<String, dynamic>> fetchRoutingMetrics(String nodeId) async {
+    try {
+      final encoded = Uri.encodeComponent(nodeId);
+      final url = Uri.parse(
+          '${config.EnvironmentConfig.agentUrl}/metrics/routing/$encoded');
+      print('Fetching routing metrics for: $nodeId at $url');
+
+      final http.Response response =
+          await http.get(url, headers: getRequestHeaders);
+
+      if (response.statusCode == 200) {
+        final dynamic decoded = jsonDecode(response.body);
+        if (decoded is Map<String, dynamic>) return decoded;
+        return {};
+      } else {
+        print(
+            'Failed to load routing metrics for $nodeId: ${response.statusCode}');
+        return {};
+      }
+    } catch (e) {
+      print('Error fetching routing metrics for $nodeId: $e');
+      return {};
+    }
+  }
+
+  Future<List<TrafficFlowMetrics>> fetchTrafficTestMetrics(String testName) async {
+    try {
+      final encoded = Uri.encodeComponent(testName);
+      final url = Uri.parse(
+          '${config.EnvironmentConfig.agentUrl}/traffictests/$encoded/metrics');
+      print('Fetching traffic metrics for: $testName at $url');
+
+      final http.Response response =
+          await http.get(url, headers: getRequestHeaders);
+
+      if (response.statusCode == 200) {
+        final dynamic decoded = jsonDecode(response.body);
+        if (decoded is List) {
+          return decoded
+              .whereType<Map<String, dynamic>>()
+              .map(TrafficFlowMetrics.fromJson)
+              .toList();
+        }
+        return [];
+      } else {
+        print(
+            'Failed to load traffic metrics for $testName: ${response.statusCode}');
+        return [];
+      }
+    } catch (e) {
+      print('Error fetching traffic metrics for $testName: $e');
+      return [];
+    }
+  }
+
   Future<List<Map<String, dynamic>>> getAnomalies({String? timestamp}) async {
     try {
       String urlStr = '${config.EnvironmentConfig.agentUrl}/anomalies';

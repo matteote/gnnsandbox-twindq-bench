@@ -288,11 +288,12 @@ def run_worker():
                     iface = series.metric.labels.get("device")
 
                     for point in series.points:
-                        val = (
-                            point.value.double_value
-                            if point.value.double_value
-                            else float(point.value.int64_value)
-                        )
+                        # After ALIGN_MEAN (gauge) or ALIGN_RATE (counter), Cloud
+                        # Monitoring always returns a DOUBLE value regardless of the
+                        # original metric's value type.  Using double_value directly
+                        # avoids the proto-plus incompatibility with WhichOneof and
+                        # correctly stores genuine zero readings (0.0 ≠ "no value").
+                        val = float(point.value.double_value)
                         data_to_insert.append((
                             point.interval.end_time,
                             router_name,
@@ -331,11 +332,7 @@ def run_worker():
                     prom_type = parts[-1]
 
                     for point in series.points:
-                        val = (
-                            point.value.double_value
-                            if point.value.double_value
-                            else float(point.value.int64_value)
-                        )
+                        val = float(point.value.double_value)
                         data_to_insert.append((
                             point.interval.end_time,
                             node_name,          # e.g. "dev1"

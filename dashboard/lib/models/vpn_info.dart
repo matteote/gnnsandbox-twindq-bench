@@ -269,3 +269,94 @@ class TrafficTestInfo {
     return parts.join(' • ');
   }
 }
+
+// ---------------------------------------------------------------------------
+// TrafficFlowMetrics — latest traffic-agent measurements for one flow
+// ---------------------------------------------------------------------------
+
+/// Latest traffic-agent metrics for a single flow (one entry per flow_id).
+///
+/// Returned by  GET /traffictests/{name}/metrics  and stored in Spanner's
+/// NetworkMetrics table with  kind = 'TRAFFIC'.
+class TrafficFlowMetrics {
+  final String flowId;
+  final String device;
+  final String role;
+  final String protocol;
+
+  /// Throughput in bits-per-second (gauge).
+  final double? throughputBps;
+
+  /// One-way latency in milliseconds (gauge).
+  final double? latencyMs;
+
+  /// Jitter in milliseconds (gauge).
+  final double? jitterMs;
+
+  /// Packet-loss percentage 0–100 (gauge).
+  final double? packetLossPct;
+
+  /// Number of active TCP/UDP sessions (gauge).
+  final double? activeSessions;
+
+  /// Cumulative bytes sent (counter, reported as a rate by the collector).
+  final double? bytesSentTotal;
+
+  /// Cumulative bytes received (counter, reported as a rate by the collector).
+  final double? bytesReceivedTotal;
+
+  /// 1 = flow is running, 0 = stopped (gauge).
+  final double? flowRunning;
+
+  /// ISO-8601 timestamp of the most recent data point.
+  final String? timestamp;
+
+  const TrafficFlowMetrics({
+    required this.flowId,
+    required this.device,
+    required this.role,
+    required this.protocol,
+    this.throughputBps,
+    this.latencyMs,
+    this.jitterMs,
+    this.packetLossPct,
+    this.activeSessions,
+    this.bytesSentTotal,
+    this.bytesReceivedTotal,
+    this.flowRunning,
+    this.timestamp,
+  });
+
+  factory TrafficFlowMetrics.fromJson(Map<String, dynamic> json) {
+    double? _d(dynamic v) =>
+        v == null ? null : (v as num).toDouble();
+    return TrafficFlowMetrics(
+      flowId:            json['flow_id']    as String? ?? '',
+      device:            json['device']     as String? ?? '',
+      role:              json['role']       as String? ?? '',
+      protocol:          json['protocol']   as String? ?? '',
+      throughputBps:     _d(json['throughput_bps']),
+      latencyMs:         _d(json['latency_ms']),
+      jitterMs:          _d(json['jitter_ms']),
+      packetLossPct:     _d(json['packet_loss_pct']),
+      activeSessions:    _d(json['active_sessions']),
+      bytesSentTotal:    _d(json['bytes_sent_total']),
+      bytesReceivedTotal: _d(json['bytes_received_total']),
+      flowRunning:       _d(json['flow_running']),
+      timestamp:         json['timestamp']  as String?,
+    );
+  }
+
+  /// True when the flow_running gauge is 1.
+  bool get isRunning => (flowRunning ?? 0) >= 0.5;
+
+  /// Throughput formatted for display (e.g. "82.3 Mbps", "1.2 Gbps").
+  String get throughputLabel {
+    if (throughputBps == null) return '—';
+    final bps = throughputBps!;
+    if (bps >= 1e9) return '${(bps / 1e9).toStringAsFixed(1)} Gbps';
+    if (bps >= 1e6) return '${(bps / 1e6).toStringAsFixed(1)} Mbps';
+    if (bps >= 1e3) return '${(bps / 1e3).toStringAsFixed(0)} Kbps';
+    return '${bps.toStringAsFixed(0)} bps';
+  }
+}

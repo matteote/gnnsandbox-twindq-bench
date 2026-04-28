@@ -90,7 +90,7 @@ class SpannerDataset:
             self.client = spanner.Client(
                 project=effective_project,
                 credentials=credentials,
-                disable_builtin_metrics=True,
+                # disable_builtin_metrics=True,
             )
         else:
             credentials, detected_project = google.auth.default(
@@ -134,7 +134,7 @@ class SpannerDataset:
                     return ts
         except Exception as e:
             logger.warning(f"Exception: Could not determine latest timestamp, falling back: {e}")
-        logger.debug(f"Could not determine latest timestamp, falling back: {e}")
+        logger.debug("Could not determine latest timestamp (no data rows), falling back to utcnow()")
         return datetime.datetime.utcnow()
 
     def _get_timestamps(self) -> List[datetime.datetime]:

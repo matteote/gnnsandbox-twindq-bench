@@ -12,7 +12,7 @@ import '../widgets/log_widget.dart';
 import '../widgets/trace/trace_widget.dart';
 import '../widgets/performance/performance_graph_widget.dart';
 import '../widgets/anomaly_panel.dart';
-import '../widgets/timeslot_slider.dart';
+import '../widgets/timeslot/timeslot_slider.dart';
 import '../widgets/vpn_traffic_panel.dart';
 import 'settings_screen.dart';
 
@@ -40,7 +40,8 @@ class _NetworkDashboardState extends State<NetworkDashboard>
   bool _showLogs = false;
   bool _showTrace = false;
   bool _showAnomalies = false;
-  bool _showVpnPanel = false;
+  bool _showVpnPanel = true;
+  bool _showTimeslot = false; // Timeslot slider hidden by default
 
   // Control the horizontal split view ratios
   double _chatPanelRatio = 0.3; // 30% for chat panel
@@ -122,6 +123,12 @@ class _NetworkDashboardState extends State<NetworkDashboard>
   void _toggleVpnPanel() {
     setState(() {
       _showVpnPanel = !_showVpnPanel;
+    });
+  }
+
+  void _toggleTimeslot() {
+    setState(() {
+      _showTimeslot = !_showTimeslot;
     });
   }
 
@@ -574,18 +581,35 @@ class _NetworkDashboardState extends State<NetworkDashboard>
                 ),
               ),
 
-            // Overlay for the timeslot slider (now correctly inside Stack)
+            // Timeslot toggle button (bottom-right of topology area)
             Positioned(
               bottom: 16,
-              left: 0,
-              right: 0,
-              child: Center(
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 500),
-                  child: const TimeslotSlider(),
+              right: 16,
+              child: FloatingActionButton(
+                mini: true,
+                backgroundColor: _showTimeslot ? Colors.amber.shade700 : Colors.blueGrey,
+                onPressed: _toggleTimeslot,
+                tooltip: _showTimeslot ? 'Hide Timeline' : 'Show Timeline',
+                child: Icon(
+                  Icons.schedule,
+                  color: Colors.white,
                 ),
               ),
             ),
+
+            // Overlay for the timeslot slider (conditionally shown)
+            if (_showTimeslot)
+              Positioned(
+                bottom: 16,
+                left: 0,
+                right: 56, // leave room for the toggle FAB on the right
+                child: Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 500),
+                    child: const TimeslotSlider(),
+                  ),
+                ),
+              ),
           ],
         ),
       ),
