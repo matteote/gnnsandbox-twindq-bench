@@ -237,6 +237,10 @@ class Appstate extends ChangeNotifier {
       if (_isLiveMode) {
         _fetchLiveTopology();
         _loadAvailableSnapshots(); // Refresh snapshots to pick up new ones
+        // Re-request latest metrics so the link overlay stays fresh.
+        if (_socket != null && _socket!.connected) {
+          _socket!.emit('get_all_last_metrics');
+        }
       }
     });
   }
@@ -287,7 +291,11 @@ class Appstate extends ChangeNotifier {
       // Request initial topology data when connected
       // _socket!.emit('get_topology', {'view': NetworkTopologyWidget.defaultView});
       _fetchPhysicalTopology();
-      
+
+      // Request initial metrics data.  The supervisor responds with the
+      // 'all_last_metrics_update' event which our listener below handles.
+      _socket!.emit('get_all_last_metrics');
+
       // Reset trace cursor to current time to avoid receiving old events
       final currentTimestamp = DateTime.now().toUtc().toIso8601String();
       _socket!.emit('reset_traces', {'timestamp': currentTimestamp});
@@ -350,10 +358,11 @@ class Appstate extends ChangeNotifier {
       }
     });
 
-    // Listen for metrics updates
-    _socket!.on('metrics_update', (data) {
+    // Listen for metrics updates.
+    // The supervisor responds to 'get_all_last_metrics' with this event name.
+    _socket!.on('all_last_metrics_update', (data) {
       if (data != null) {
-        _updateMetrics(data);        
+        _updateMetrics(data);
       }
     });
     
@@ -584,7 +593,19 @@ class Appstate extends ChangeNotifier {
             sourceId: sourceId,
             targetId: targetId,
             label: name,
-            properties: {'type': connType},
+            properties: {
+              'type': connType,
+              // Interface names on each end of the physical link, used by
+              // TopologyPainter to look up per-interface throughput metrics
+              // from appState.metrics for the link utilisation overlay.
+              'sourceInterface': connData['source_interface'] ?? '',
+              'targetInterface': connData['target_interface'] ?? '',
+              // Router names (e.g. "ce1-hub") used as the NetworkMetrics
+              // node_name key.  The router IDs in the graph have a "router:"
+              // prefix that does NOT appear in NetworkMetrics node_name.
+              'sourceRouterName': connData['source_router_name'] ?? '',
+              'targetRouterName': connData['target_router_name'] ?? '',
+            },
           ));
         }
       }
@@ -856,10 +877,12 @@ class Appstate extends ChangeNotifier {
 
   Future<void> _refreshVpnsAndTests() async {
     try {
-      final vpns = await _apiService.fetchVpns();
-      final tests = await _apiService.fetchTrafficTests();
-      final infras = await _apiService.fetchVyosInfrastructure();
-      _vpns = vpns;
+      // Single round-trip to GET /infrastructure/state replaces the previous
+      // three sequential calls to /vpns, /traffictests, and /infrastructure.
+      final state = await _apiService.fetchInfrastructureState();
+      _vpns = state.vpns;
+
+      final tests = state.trafficTests;
 
       // Determine which previously-deleting tests are now truly gone from K8s.
       // Those can be removed from the pending set.
@@ -875,7 +898,7 @@ class Appstate extends ChangeNotifier {
         _trafficTests = tests;
       }
 
-      _vyosInfrastructures = infras;
+      _vyosInfrastructures = state.infrastructure;
       notifyListeners();
     } catch (e) {
       print('Error refreshing VPNs/TrafficTests/Infrastructure: $e');

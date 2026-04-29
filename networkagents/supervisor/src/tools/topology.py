@@ -127,7 +127,8 @@ def fetch_physical_topology(timestamp_str: str = None):
                 link.id AS link_id,
                 link.name AS link_name,
                 remote_router.id AS remote_router_id,
-                remote_router.name AS remote_router_name
+                remote_router.name AS remote_router_name,
+                remote_interface.name AS remote_interface_name
         """
         
         logger.info("Executing GQL query for physical topology")
@@ -152,6 +153,7 @@ def fetch_physical_topology(timestamp_str: str = None):
                 link_name = row[10]
                 remote_router_id = row[11]
                 remote_router_name = row[12]
+                remote_interface_name = row[13]
                 
                 # Add router to nodes if not already present
                 if router_id not in routers:
@@ -190,8 +192,10 @@ def fetch_physical_topology(timestamp_str: str = None):
                             'name': link_name if link_name else f"link-{link_id[:8]}",
                             'source_router_id': router_id,
                             'source_router_name': router_name,
+                            'source_interface': interface_name,
                             'target_router_id': remote_router_id,
-                            'target_router_name': remote_router_name
+                            'target_router_name': remote_router_name,
+                            'target_interface': remote_interface_name,
                         })
         
         # Now fetch embeddings for all routers and their interfaces
@@ -1289,3 +1293,23 @@ def fetch_vyos_infrastructure(namespace: str = "default") -> list:
     except Exception as e:
         logger.error(f"Error fetching VyosInfrastructure resources: {e}", exc_info=True)
         return []
+
+
+def fetch_infrastructure_state(namespace: str = "default") -> dict:
+    """Return VPNs, TrafficTests, and VyosInfrastructure in a single call.
+
+    Replaces three sequential REST calls from the dashboard VPN refresh timer
+    (GET /vpns + GET /traffictests + GET /infrastructure) with one round-trip.
+
+    Returns:
+        dict with keys:
+            vpns           — list of VPN summaries (from fetch_vpns)
+            traffic_tests  — list of TrafficTest summaries (from fetch_traffic_tests)
+            infrastructure — list of VyosInfrastructure summaries (from fetch_vyos_infrastructure)
+    """
+    logger.info(f"Fetching combined infrastructure state for namespace={namespace}")
+    return {
+        "vpns":           fetch_vpns(namespace=namespace),
+        "traffic_tests":  fetch_traffic_tests(namespace=namespace),
+        "infrastructure": fetch_vyos_infrastructure(namespace=namespace),
+    }

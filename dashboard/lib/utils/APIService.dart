@@ -767,6 +767,52 @@ class APIService{
     }
   }
 
+  /// Fetch VPNs, TrafficTests, and VyosInfrastructure in a single round-trip.
+  ///
+  /// Calls GET /infrastructure/state which replaces three separate calls
+  /// (GET /vpns + GET /traffictests + GET /infrastructure).
+  ///
+  /// Returns a record with three typed lists.  Falls back gracefully: if the
+  /// server returns an error the individual lists are empty.
+  Future<({List<VpnInfo> vpns, List<TrafficTestInfo> trafficTests, List<VyosInfrastructureInfo> infrastructure})>
+      fetchInfrastructureState() async {
+    const empty = (vpns: <VpnInfo>[], trafficTests: <TrafficTestInfo>[], infrastructure: <VyosInfrastructureInfo>[]);
+    try {
+      var url = Uri.parse('${config.EnvironmentConfig.agentUrl}/infrastructure/state');
+      print('Fetching infrastructure state from: $url');
+
+      final http.Response response = await http.get(url, headers: getRequestHeaders);
+
+      if (response.statusCode == 200) {
+        final dynamic decoded = jsonDecode(response.body);
+        if (decoded is! Map<String, dynamic>) return empty;
+
+        final vpns = (decoded['vpns'] as List? ?? [])
+            .whereType<Map<String, dynamic>>()
+            .map(VpnInfo.fromJson)
+            .toList();
+
+        final trafficTests = (decoded['traffic_tests'] as List? ?? [])
+            .whereType<Map<String, dynamic>>()
+            .map(TrafficTestInfo.fromJson)
+            .toList();
+
+        final infrastructure = (decoded['infrastructure'] as List? ?? [])
+            .whereType<Map<String, dynamic>>()
+            .map(VyosInfrastructureInfo.fromJson)
+            .toList();
+
+        return (vpns: vpns, trafficTests: trafficTests, infrastructure: infrastructure);
+      } else {
+        print('Failed to load infrastructure state: ${response.statusCode}');
+        return empty;
+      }
+    } catch (e) {
+      print('Error fetching infrastructure state: $e');
+      return empty;
+    }
+  }
+
   Future<Map<String, dynamic>> fetchRoutingMetrics(String nodeId) async {
     try {
       final encoded = Uri.encodeComponent(nodeId);

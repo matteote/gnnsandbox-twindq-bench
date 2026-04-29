@@ -181,6 +181,8 @@ spec:
         interface STRING(MAX)
     ) PRIMARY KEY (id, timestamp)"
   - "CREATE INDEX NetworkMetricsIdx1 ON NetworkMetrics(timestamp DESC) STORING (node_name, metric_name, metric_type, kind, value, labels, interface)"
+  - "CREATE INDEX NetworkMetricsByNodeTime ON NetworkMetrics(node_name, metric_name, interface, timestamp DESC) STORING (value, labels, kind)"
+  - "CREATE INDEX NetworkMetricsByKindNodeTime ON NetworkMetrics(kind, node_name, metric_name, timestamp DESC) STORING (value, labels, interface)"
   - "CREATE TABLE AgentTrace (
        id STRING(36) NOT NULL,
        event_type STRING(MAX) NOT NULL,

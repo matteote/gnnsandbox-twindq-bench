@@ -20,7 +20,7 @@ import aiohttp_cors
 from aiohttp import web
 from agent.host_agent import HostAgent
 from endpoints.socketendpoint import SocketEndpoint
-from tools.topology import fetch_physical_topology, fetch_router_details, fetch_device_details, fetch_node_embeddings, fetch_snapshots, fetch_anomalies, fetch_vpns, fetch_traffic_tests, fetch_vyos_infrastructure, clear_topology, delete_traffic_test_crd
+from tools.topology import fetch_physical_topology, fetch_router_details, fetch_device_details, fetch_node_embeddings, fetch_snapshots, fetch_anomalies, fetch_vpns, fetch_traffic_tests, fetch_vyos_infrastructure, fetch_infrastructure_state, clear_topology, delete_traffic_test_crd
 from tools.metrics import (
     fetch_all_last_metrics,
     fetch_all_metrics,
@@ -146,6 +146,10 @@ class RestEndpoint:
         # VyosInfrastructure endpoint
         getInfrastructureRoute = self.app.router.add_get("/infrastructure", self.getVyosInfrastructure)
         self.cors.add(getInfrastructureRoute, corsConfig)
+
+        # Combined infrastructure state endpoint (vpns + traffic_tests + infrastructure in one call)
+        getInfrastructureStateRoute = self.app.router.add_get("/infrastructure/state", self.getInfrastructureState)
+        self.cors.add(getInfrastructureStateRoute, corsConfig)
 
         # Network descriptor endpoints
         listNetworksRoute = self.app.router.add_get("/networks", self.listNetworkDescriptors)
@@ -911,6 +915,31 @@ class RestEndpoint:
             return web.json_response(
                 {"error": f"Error fetching VyosInfrastructure: {str(e)}"},
                 status=500
+            )
+
+    async def getInfrastructureState(self, request):
+        """
+        Return VPNs, TrafficTests, and VyosInfrastructure in a single response.
+
+        GET /infrastructure/state?namespace=default
+
+        Replaces three sequential REST calls from the dashboard VPN refresh timer
+        (GET /vpns + GET /traffictests + GET /infrastructure) with one round-trip,
+        reducing Kubernetes API fan-out by 2/3 on every 15-second poll cycle.
+
+        Returns:
+            JSON object with keys: vpns, traffic_tests, infrastructure
+        """
+        logger.info("REST endpoint: get combined infrastructure state")
+        try:
+            namespace = request.query.get("namespace", "default")
+            state = fetch_infrastructure_state(namespace=namespace)
+            return web.json_response(state)
+        except Exception as e:
+            logger.error(f"Error fetching infrastructure state: {str(e)}", exc_info=True)
+            return web.json_response(
+                {"error": f"Error fetching infrastructure state: {str(e)}"},
+                status=500,
             )
 
     #################################################################

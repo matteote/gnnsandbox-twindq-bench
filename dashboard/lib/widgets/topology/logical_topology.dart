@@ -31,6 +31,9 @@ class _LogicalTopologyWidgetState extends State<LogicalTopologyWidget>
   Map<String, Offset> _velocities = {};
   String? _draggedNodeId;
   bool _isSettled = false;
+
+  /// Whether the per-link throughput overlay is shown on the canvas.
+  bool _showMetricOverlay = true;
   
   // Physics parameters
   final double kRepulsion = 10000.0;
@@ -246,6 +249,51 @@ class _LogicalTopologyWidgetState extends State<LogicalTopologyWidget>
     super.dispose();
   }
 
+  // ── Link-metric overlay helpers ────────────────────────────────────────────
+
+  /// Builds a map from connection ID → {txBps, rxBps} (bytes/s) sourced from
+  /// the per-interface VyOS system metrics held in [Appstate.metrics].
+  /// Only router-to-router links whose [sourceInterface] property is non-empty
+  /// are included; device connections are skipped.
+  Map<String, Map<String, double>> _buildLinkMetrics(Appstate appState) {
+    final result = <String, Map<String, double>>{};
+    for (final conn in widget.topology.connections) {
+      // Only overlay router-to-router links (device edges have non-empty type).
+      if ((conn.properties['type'] as String? ?? '').isNotEmpty) continue;
+
+      // Use the router NAME (e.g. "ce1-hub") as the metrics key, not the
+      // graph node ID (e.g. "router:ce1-hub").  The NetworkMetrics table
+      // stores node_name = router_name (no "router:" prefix).
+      final routerName = conn.properties['sourceRouterName'] as String? ?? '';
+      final metricsKey = routerName.isNotEmpty ? routerName : conn.sourceId;
+      final nodeMetricsList = appState.metrics.data[metricsKey];
+      if (nodeMetricsList == null || nodeMetricsList.isEmpty) continue;
+      final entry = nodeMetricsList.last;
+
+      final srcIface = conn.properties['sourceInterface'] as String? ?? '';
+      if (srcIface.isNotEmpty) {
+        // ── Exact lookup ──────────────────────────────────────────────────
+        // Strip any VLAN subinterface suffix so we always read the physical
+        // interface counter (eth1.301 → eth1).  node_network_*_total for the
+        // physical interface already includes all VLAN traffic on that wire,
+        // so using the subinterface counter would be both inaccurate and
+        // potentially double-counted if parent and child are both present.
+        final physIface = srcIface.contains('.')
+            ? srcIface.split('.').first
+            : srcIface;
+        final ifaceData = entry.interfaces[physIface];
+        if (ifaceData == null) continue;
+        final tx = (ifaceData['byte_sent_throughput'] as num?)?.toDouble() ?? 0.0;
+        final rx = (ifaceData['byte_recv_throughput'] as num?)?.toDouble() ?? 0.0;
+        result[conn.id] = {'txBps': tx, 'rxBps': rx};
+      }
+      // No sourceInterface → skip.  Summing all interfaces on the router and
+      // assigning the total to every connection from that node is misleading
+      // (all links from p1 would show identical numbers).  Gray is honest.
+    }
+    return result;
+  }
+
   @override
   Widget build(BuildContext context) {
     // Show loading indicator while computing layout
@@ -281,12 +329,18 @@ class _LogicalTopologyWidgetState extends State<LogicalTopologyWidget>
                    child: Stack(
                       clipBehavior: Clip.none, // Also allow Stack children to draw freely if they slightly exceed
                       children: [
-                        // Draw lines FIRST so they appear behind nodes
+                        // Draw lines FIRST so they appear behind nodes.
+                        // Consumer<Appstate> provides the latest metrics so the
+                        // overlay repaints whenever metrics arrive (every ~20 s).
                         Positioned.fill(
-                          child: CustomPaint(
-                            painter: TopologyPainter(
-                              topology: widget.topology,
-                              positions: _positions,
+                          child: Consumer<Appstate>(
+                            builder: (context, appState, _) => CustomPaint(
+                              painter: TopologyPainter(
+                                topology: widget.topology,
+                                positions: _positions,
+                                linkMetrics: _buildLinkMetrics(appState),
+                                overlayEnabled: _showMetricOverlay,
+                              ),
                             ),
                           ),
                         ),
@@ -438,6 +492,38 @@ class _LogicalTopologyWidgetState extends State<LogicalTopologyWidget>
                    ),
                 ),
               ),
+            // Metric overlay toggle button — top-right corner of the canvas.
+            Positioned(
+              top: 12,
+              right: 12,
+              child: Tooltip(
+                message: _showMetricOverlay
+                    ? 'Hide link throughput overlay'
+                    : 'Show link throughput overlay',
+                child: Material(
+                  color: _showMetricOverlay
+                      ? const Color(0xFF0D47A1)
+                      : Colors.white,
+                  borderRadius: BorderRadius.circular(6),
+                  elevation: 2,
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(6),
+                    onTap: () =>
+                        setState(() => _showMetricOverlay = !_showMetricOverlay),
+                    child: Padding(
+                      padding: const EdgeInsets.all(7),
+                      child: Icon(
+                        Icons.analytics_outlined,
+                        size: 18,
+                        color: _showMetricOverlay
+                            ? Colors.white
+                            : Colors.black54,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
             // Legend positioned in bottom-left corner
             Positioned(
               bottom: 16,
@@ -463,24 +549,7 @@ class _LogicalTopologyWidgetState extends State<LogicalTopologyWidget>
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         const Text(
-                          'Status',
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 12,
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        _buildLegendItem(Colors.green, 'Operational'),
-                        _buildLegendItem(Colors.orange, 'Degraded'),
-                        _buildLegendItem(Colors.red, 'Failed'),
-                        _buildLegendItem(Colors.grey, 'Unknown'),
-                        // VyosInfrastructure section
-                        const Padding(
-                          padding: EdgeInsets.symmetric(vertical: 6),
-                          child: Divider(height: 1, thickness: 1),
-                        ),
-                        const Text(
-                          'Infrastructure',
+                          'Infrastructure Status',
                           style: TextStyle(
                             fontWeight: FontWeight.bold,
                             fontSize: 12,
@@ -623,29 +692,116 @@ class TopologyPainter extends CustomPainter {
   final NetworkTopology topology;
   final Map<String, Offset> positions;
 
+  /// Per-link throughput data used by the metric overlay.
+  /// Key: connection ID → {txBps, rxBps} in bytes/s from the source-side
+  /// interface metrics already held in [Appstate.metrics].
+  final Map<String, Map<String, double>> linkMetrics;
+
+  /// When true the painter colours links by throughput and draws midpoint labels.
+  final bool overlayEnabled;
+
   TopologyPainter({
     required this.topology,
     required this.positions,
+    this.linkMetrics = const {},
+    this.overlayEnabled = false,
   });
+
+  // ── Colour encoding ────────────────────────────────────────────────────────
+
+  /// Line colour based on combined TX+RX throughput.
+  Color _linkColor(double totalBps) {
+    if (totalBps <= 0) return Colors.blueGrey.withValues(alpha: 0.4);
+    if (totalBps < 1e6) return Colors.green.withValues(alpha: 0.80);   // < 1 Mbps
+    if (totalBps < 10e6) return Colors.orange.withValues(alpha: 0.90); // < 10 Mbps
+    return Colors.red.shade600.withValues(alpha: 0.9);                 // ≥ 10 Mbps
+  }
+
+  /// Compact human-readable bit rate string.
+  String _bpsLabel(double bps) {
+    if (bps >= 1e9) return '${(bps / 1e9).toStringAsFixed(1)} G';
+    if (bps >= 1e6) return '${(bps / 1e6).toStringAsFixed(1)} M';
+    if (bps >= 1e3) return '${(bps / 1e3).toStringAsFixed(0)} K';
+    return '${bps.toStringAsFixed(0)} bps';
+  }
 
   @override
   void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = Colors.blueGrey.withOpacity(0.5)
-      ..strokeWidth = 2.0
-      ..style = PaintingStyle.stroke;
-
     for (var conn in topology.connections) {
       final p1 = positions[conn.sourceId];
       final p2 = positions[conn.targetId];
-      if (p1 != null && p2 != null) {
-         canvas.drawLine(p1, p2, paint);
+      if (p1 == null || p2 == null) continue;
+
+      final metrics = overlayEnabled ? linkMetrics[conn.id] : null;
+      // Router-to-router links have an empty 'type' property; device connections
+      // use 'device_to_interface' / 'device_to_router' and are not overlaid.
+      final isRouterLink =
+          (conn.properties['type'] as String? ?? '').isEmpty;
+
+      final Color lineColor;
+      final double strokeWidth;
+
+      if (metrics != null && isRouterLink) {
+        final totalBps = (metrics['txBps'] ?? 0) + (metrics['rxBps'] ?? 0);
+        lineColor = _linkColor(totalBps);
+        strokeWidth = totalBps > 0 ? 3.0 : 1.5;
+      } else {
+        lineColor = Colors.blueGrey.withValues(alpha: 0.5);
+        strokeWidth = 2.0;
+      }
+
+      canvas.drawLine(
+        p1,
+        p2,
+        Paint()
+          ..color = lineColor
+          ..strokeWidth = strokeWidth
+          ..style = PaintingStyle.stroke,
+      );
+
+      // Throughput label at the midpoint, router links only.
+      if (metrics != null && isRouterLink) {
+        final totalBps = (metrics['txBps'] ?? 0) + (metrics['rxBps'] ?? 0);
+        final mid = Offset((p1.dx + p2.dx) / 2, (p1.dy + p2.dy) / 2);
+        _drawLinkLabel(canvas, _bpsLabel(totalBps), mid, lineColor);
       }
     }
   }
 
+  void _drawLinkLabel(Canvas canvas, String text, Offset center, Color color) {
+    final tp = TextPainter(
+      text: TextSpan(
+        text: text,
+        style: TextStyle(
+          color: color,
+          fontSize: 9.0,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout();
+
+    // White pill background so the label is readable over the canvas.
+    final bgRect = RRect.fromRectAndRadius(
+      Rect.fromCenter(
+        center: center,
+        width: tp.width + 6,
+        height: tp.height + 3,
+      ),
+      const Radius.circular(3),
+    );
+    canvas.drawRRect(
+      bgRect,
+      Paint()..color = Colors.white.withValues(alpha: 0.82),
+    );
+
+    tp.paint(canvas, center.translate(-tp.width / 2, -tp.height / 2));
+  }
+
   @override
   bool shouldRepaint(covariant TopologyPainter oldDelegate) {
-    return oldDelegate.positions != positions;
+    return oldDelegate.positions != positions ||
+        oldDelegate.linkMetrics != linkMetrics ||
+        oldDelegate.overlayEnabled != overlayEnabled;
   }
 }

@@ -82,6 +82,77 @@ TRAFFIC_AGENT_METRICS = [
 ]
 
 
+# ── Metric descriptor cache ────────────────────────────────────────────────────
+# Cloud Monitoring metric descriptors are static (they only change when a new
+# metric is registered). Fetching them on every 20-second poll cycle wastes
+# 24+ API calls per cycle. We cache them here and refresh hourly.
+#
+# _descriptor_cache maps metric_type (str) → descriptor object.
+# _descriptor_cache_lock guards the dict for thread-safe refresh.
+# _descriptor_cache_updated_at is a monotonic timestamp (time.monotonic()).
+
+DESCRIPTOR_CACHE_TTL_SECONDS = int(os.environ.get("DESCRIPTOR_CACHE_TTL", 3600))
+
+_descriptor_cache: dict = {}
+_descriptor_cache_updated_at: float = 0.0
+# RLock (reentrant) is required because _get_descriptor() acquires this lock
+# and then calls _refresh_descriptor_cache() which also acquires it.  A plain
+# threading.Lock() would deadlock when the TTL fires after 1 hour.
+_descriptor_cache_lock = threading.RLock()
+
+
+def _refresh_descriptor_cache(client) -> None:
+    """Fetch all metric descriptors for known metric types and populate the cache.
+
+    Called once at startup and whenever the cache TTL has expired.  Any metric
+    that cannot be fetched is silently omitted (it will be skipped at poll time).
+    """
+    all_metrics = SELECTED_METRICS + TRAFFIC_AGENT_METRICS
+    new_cache: dict = {}
+    logger.info(
+        "Refreshing metric descriptor cache for %d metric types …", len(all_metrics)
+    )
+    for metric_type in all_metrics:
+        try:
+            descriptor = client.get_metric_descriptor(
+                name=f"projects/{PROJECT_ID}/metricDescriptors/{metric_type}"
+            )
+            new_cache[metric_type] = descriptor
+        except Exception as e:
+            logger.warning("Could not get descriptor for %s: %s", metric_type, e)
+
+    with _descriptor_cache_lock:
+        _descriptor_cache.clear()
+        _descriptor_cache.update(new_cache)
+        global _descriptor_cache_updated_at
+        _descriptor_cache_updated_at = time.monotonic()
+
+    logger.info(
+        "Descriptor cache refreshed: %d/%d metrics cached.",
+        len(new_cache), len(all_metrics),
+    )
+
+
+def _get_descriptor(client, metric_type: str):
+    """Return the cached descriptor for *metric_type*, refreshing if stale."""
+    global _descriptor_cache_updated_at
+
+    age = time.monotonic() - _descriptor_cache_updated_at
+    if age >= DESCRIPTOR_CACHE_TTL_SECONDS or metric_type not in _descriptor_cache:
+        # Only one thread should refresh; others fall through to whatever is
+        # already in the cache so they are not blocked.
+        if _descriptor_cache_lock.acquire(blocking=False):
+            try:
+                # Re-check inside the lock (another thread may have refreshed).
+                age = time.monotonic() - _descriptor_cache_updated_at
+                if age >= DESCRIPTOR_CACHE_TTL_SECONDS or metric_type not in _descriptor_cache:
+                    _refresh_descriptor_cache(client)
+            finally:
+                _descriptor_cache_lock.release()
+
+    return _descriptor_cache.get(metric_type)
+
+
 def get_metric_aggregation(descriptor, window_seconds=60):
     """
     Determines the correct aligner based on the metric's Kind and Value Type.
@@ -108,6 +179,9 @@ def _fetch_metrics(client, project_name, metric_list, label_gate_key=None):
     Generic helper: fetch a list of Cloud Monitoring metric types and return a
     chained iterator of time-series results.
 
+    Descriptors are resolved from the module-level cache (_descriptor_cache)
+    instead of calling get_metric_descriptor() on every poll cycle.
+
     Args:
         metric_list: list of fully-qualified metric type strings.
         label_gate_key: if set, skip descriptors that lack this label key.
@@ -124,12 +198,9 @@ def _fetch_metrics(client, project_name, metric_list, label_gate_key=None):
     generators = []
 
     for metric_type in metric_list:
-        try:
-            descriptor = client.get_metric_descriptor(
-                name=f"projects/{PROJECT_ID}/metricDescriptors/{metric_type}"
-            )
-        except Exception as e:
-            logger.warning(f"Could not get descriptor for {metric_type}: {e}")
+        descriptor = _get_descriptor(client, metric_type)
+        if descriptor is None:
+            logger.warning("No cached descriptor for %s — skipping", metric_type)
             continue
 
         # Optional: skip descriptors that don't carry the expected label
@@ -236,6 +307,10 @@ def run_worker():
     project_name = f"projects/{PROJECT_ID}"
 
     lock = threading.Lock()
+
+    # Warm the descriptor cache before starting the poll loop so the very first
+    # iteration does not incur individual get_metric_descriptor() calls.
+    _refresh_descriptor_cache(mon_client)
 
     # Start retention thread
     retention_thread = threading.Thread(

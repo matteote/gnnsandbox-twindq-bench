@@ -1145,9 +1145,15 @@ class _VpnTrafficPanelState extends State<VpnTrafficPanel> {
 
   /// Aggregate 4-stat bar across all source flows for a VPN.
   Widget _buildPerfAggregateBar(List<TrafficFlowMetrics> flows) {
-    // Only source-role flows for throughput to avoid double-counting bidir.
+    // Throughput: sum source-role flows only (avoids double-counting bidir).
+    // Latency / jitter / loss: destination-role flows only.
+    //   Source devices count every packet they send as "sent" but receive none
+    //   back, so their packet_loss_pct is always ~100 %.  The real loss is
+    //   observed exclusively at the destination (receiver counts gaps in
+    //   sequence numbers).  Same logic applies to latency/jitter — OWD is
+    //   stamped at the receiver, not the sender.
     final srcFlows = flows.where((f) => f.role == 'source').toList();
-    final allFlows = flows; // use all flows for latency/loss/jitter
+    final dstFlows = flows.where((f) => f.role == 'destination').toList();
 
     double? sumThroughput;
     for (final f in srcFlows) {
@@ -1158,21 +1164,21 @@ class _VpnTrafficPanelState extends State<VpnTrafficPanel> {
 
     double? avgLatency;
     final latVals =
-        allFlows.map((f) => f.latencyMs).whereType<double>().toList();
+        dstFlows.map((f) => f.latencyMs).whereType<double>().toList();
     if (latVals.isNotEmpty) {
       avgLatency = latVals.reduce((a, b) => a + b) / latVals.length;
     }
 
     double? avgLoss;
     final lossVals =
-        allFlows.map((f) => f.packetLossPct).whereType<double>().toList();
+        dstFlows.map((f) => f.packetLossPct).whereType<double>().toList();
     if (lossVals.isNotEmpty) {
       avgLoss = lossVals.reduce((a, b) => a + b) / lossVals.length;
     }
 
     double? avgJitter;
     final jitterVals =
-        allFlows.map((f) => f.jitterMs).whereType<double>().toList();
+        dstFlows.map((f) => f.jitterMs).whereType<double>().toList();
     if (jitterVals.isNotEmpty) {
       avgJitter = jitterVals.reduce((a, b) => a + b) / jitterVals.length;
     }
@@ -1271,6 +1277,10 @@ class _VpnTrafficPanelState extends State<VpnTrafficPanel> {
     if (flows.isEmpty) return const SizedBox.shrink();
 
     final srcFlows = flows.where((f) => f.role == 'source').toList();
+    // Loss / latency / jitter from destination-role flows only — source devices
+    // always report ~100 % loss (they send but never receive) so including them
+    // would corrupt the average.
+    final dstFlows = flows.where((f) => f.role == 'destination').toList();
 
     // Sum throughput from source flows
     double? sumThroughput;
@@ -1280,15 +1290,15 @@ class _VpnTrafficPanelState extends State<VpnTrafficPanel> {
       }
     }
 
-    // Average latency across all flows
-    final latVals = flows.map((f) => f.latencyMs).whereType<double>().toList();
+    // Average latency from destination flows only
+    final latVals = dstFlows.map((f) => f.latencyMs).whereType<double>().toList();
     final avgLatency = latVals.isNotEmpty
         ? latVals.reduce((a, b) => a + b) / latVals.length
         : null;
 
-    // Average loss across all flows
+    // Average loss from destination flows only
     final lossVals =
-        flows.map((f) => f.packetLossPct).whereType<double>().toList();
+        dstFlows.map((f) => f.packetLossPct).whereType<double>().toList();
     final avgLoss = lossVals.isNotEmpty
         ? lossVals.reduce((a, b) => a + b) / lossVals.length
         : null;

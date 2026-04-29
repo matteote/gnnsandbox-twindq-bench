@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'dart:async';
 import '../../../appstate.dart';
 import 'package:intl/intl.dart';
 import 'package:pointer_interceptor/pointer_interceptor.dart';
@@ -14,25 +13,19 @@ class TimeslotSlider extends StatefulWidget {
 
 class _TimeslotSliderState extends State<TimeslotSlider> {
   double _currentIndex = 0;
-  Timer? _refreshTimer;
   int _lastSnapshotCount = 0;
-  
+
+  // No local refresh timer needed: this widget is wrapped in Consumer<Appstate>
+  // and rebuilds automatically whenever appState.availableSnapshots changes,
+  // which happens on the 10-second topology polling timer in appstate.dart.
+
   @override
   void initState() {
     super.initState();
-    // Refresh the slider every 10 seconds to update available snapshots
-    _refreshTimer = Timer.periodic(const Duration(seconds: 10), (_) {
-      if (mounted) {
-        setState(() {
-          // Force rebuild to pick up new snapshots
-        });
-      }
-    });
   }
 
   @override
   void dispose() {
-    _refreshTimer?.cancel();
     super.dispose();
   }
 

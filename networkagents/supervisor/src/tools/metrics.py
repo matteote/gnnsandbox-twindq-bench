@@ -13,6 +13,8 @@
 # limitations under the License.
 
 import logging
+import threading
+import time
 from agent_library import get_credentials
 import json
 from google.cloud import spanner
@@ -21,6 +23,26 @@ SPANNER_INSTANCE = 'networktopology-instance'
 SPANNER_DATABASE = 'networktopology-db'
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# How far back to look when fetching the "latest" value for each metric.
+# The metrics collector writes every 20 s, so 120 s guarantees we always
+# have at least one data point while keeping the scan window tiny compared
+# to the full 3-hour retention period.
+# ---------------------------------------------------------------------------
+_LATEST_WINDOW_SECONDS = 120
+
+# ---------------------------------------------------------------------------
+# In-memory cache for fetch_all_last_metrics.
+# Avoids rescanning the entire NetworkMetrics table on every call when the
+# supervisor topology endpoint is hit concurrently (metrics change only every
+# ~20 s so a 15-second TTL is safe).
+# ---------------------------------------------------------------------------
+_cache_lock = threading.Lock()
+_cache_value: dict = {}
+_cache_ts: float = 0.0
+_CACHE_TTL_SECONDS = 15.0
+
 
 # Connect to Spanner database
 def spanner_connect():
@@ -66,28 +88,49 @@ def _format_metrics_results(results):
         }]
     return last_metrics
 
+
 def fetch_last_metrics_for_id(node_id):
-  with database.snapshot() as snapshot:
-    try:
-      sql = f"""SELECT t1.node_name, t1.interface, t1.metric_name, t1.value, t1.timestamp 
-      FROM NetworkMetrics t1 
-      JOIN (
-        SELECT node_name, interface, metric_name, MAX(timestamp) as max_ts 
-        FROM NetworkMetrics 
-        WHERE node_name = @node_id
-        GROUP BY node_name, interface, metric_name
-      ) t2 
-      ON t1.node_name = t2.node_name AND t1.interface = t2.interface AND t1.metric_name = t2.metric_name AND t1.timestamp = t2.max_ts"""
-      
-      results = snapshot.execute_sql(
-          sql, 
-          params={"node_id": node_id}, 
-          param_types={"node_id": spanner.param_types.STRING}
-      )
-      return {"node_metrics": _format_metrics_results(results)}
-    except Exception as e:
-      logger.error("Metrics SQL error: {}".format(e))
-      return {}
+    """Fetch the most recent value for every (metric_name, interface) pair for
+    a single node.
+
+    Uses a time-bounded window query scoped to a short window
+    (default 120 s).  A MAX(timestamp) GROUP BY + self-join selects the single
+    latest row per (node_name, interface, metric_name) group without a
+    full-table scan.  Spanner does not support QUALIFY or ROW_NUMBER().
+    """
+    with database.snapshot() as snapshot:
+        try:
+            sql = """
+                SELECT nm.node_name, nm.interface, nm.metric_name, nm.value, nm.timestamp
+                FROM NetworkMetrics AS nm
+                JOIN (
+                    SELECT node_name, interface, metric_name, MAX(timestamp) AS max_ts
+                    FROM NetworkMetrics
+                    WHERE node_name = @node_id
+                      AND timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL @window_seconds SECOND)
+                    GROUP BY node_name, interface, metric_name
+                ) AS latest
+                  ON nm.node_name   = latest.node_name
+                 AND nm.metric_name = latest.metric_name
+                 AND nm.timestamp   = latest.max_ts
+                 AND (nm.interface = latest.interface
+                      OR (nm.interface IS NULL AND latest.interface IS NULL))
+                WHERE nm.node_name = @node_id
+                  AND nm.timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL @window_seconds SECOND)
+            """
+            results = snapshot.execute_sql(
+                sql,
+                params={"node_id": node_id, "window_seconds": _LATEST_WINDOW_SECONDS},
+                param_types={
+                    "node_id": spanner.param_types.STRING,
+                    "window_seconds": spanner.param_types.INT64,
+                },
+            )
+            return {"node_metrics": _format_metrics_results(results)}
+        except Exception as e:
+            logger.error("Metrics SQL error: {}".format(e))
+            return {}
+
 
 def fetch_all_metrics_for_id(node_id):
   # Legacy support fallback mapping to last metrics to prevent query explosion
@@ -95,136 +138,216 @@ def fetch_all_metrics_for_id(node_id):
 
 
 def fetch_all_last_metrics():
-  with database.snapshot() as snapshot:
-    try:
-      sql = """SELECT t1.node_name, t1.interface, t1.metric_name, t1.value, t1.timestamp 
-      FROM NetworkMetrics t1 
-      JOIN (
-        SELECT node_name, interface, metric_name, MAX(timestamp) as max_ts 
-        FROM NetworkMetrics 
-        GROUP BY node_name, interface, metric_name
-      ) t2 
-      ON t1.node_name = t2.node_name AND t1.interface = t2.interface AND t1.metric_name = t2.metric_name AND t1.timestamp = t2.max_ts"""
-      
-      results = snapshot.execute_sql(sql)
-      return {"node_metrics": _format_metrics_results(results)}
-    except Exception as e:
-      logger.error("Metrics SQL error: {}".format(e))
-      return {}
-    
+    """Fetch the most recent value for every (node_name, metric_name, interface)
+    across all nodes.
+
+    Optimisations vs. the original implementation:
+    1. Time-bounded WHERE clause: restricts the scan to a small recent window
+       (default 120 s) instead of the full 3-hour retention table.
+    2. MAX(timestamp) GROUP BY + self-join: picks the latest row per
+       (node_name, interface, metric_name) group without a full-table scan.
+       Spanner does not support QUALIFY or ROW_NUMBER() analytic functions.
+    3. In-memory cache with a 15-second TTL: avoids re-scanning Spanner when
+       the topology endpoint is hit concurrently (data changes only every 20 s).
+    """
+    global _cache_value, _cache_ts
+
+    now = time.monotonic()
+    with _cache_lock:
+        if now - _cache_ts < _CACHE_TTL_SECONDS and _cache_value:
+            logger.debug("fetch_all_last_metrics: cache hit (age=%.1fs)", now - _cache_ts)
+            return _cache_value
+
+    with database.snapshot() as snapshot:
+        try:
+            sql = """
+                SELECT nm.node_name, nm.interface, nm.metric_name, nm.value, nm.timestamp
+                FROM NetworkMetrics AS nm
+                JOIN (
+                    SELECT node_name, interface, metric_name, MAX(timestamp) AS max_ts
+                    FROM NetworkMetrics
+                    WHERE timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL @window_seconds SECOND)
+                    GROUP BY node_name, interface, metric_name
+                ) AS latest
+                  ON nm.node_name   = latest.node_name
+                 AND nm.metric_name = latest.metric_name
+                 AND nm.timestamp   = latest.max_ts
+                 AND (nm.interface = latest.interface
+                      OR (nm.interface IS NULL AND latest.interface IS NULL))
+                WHERE nm.timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL @window_seconds SECOND)
+            """
+            results = snapshot.execute_sql(
+                sql,
+                params={"window_seconds": _LATEST_WINDOW_SECONDS},
+                param_types={"window_seconds": spanner.param_types.INT64},
+            )
+            result = {"node_metrics": _format_metrics_results(results)}
+
+            with _cache_lock:
+                _cache_value = result
+                _cache_ts = time.monotonic()
+
+            return result
+        except Exception as e:
+            logger.error("Metrics SQL error: {}".format(e))
+            return {}
+
+
 def fetch_all_metrics():
   # Legacy support fallback mapping to last metrics to prevent query explosion
   return fetch_all_last_metrics()
 
+
 def fetch_traffic_test_metrics(test_name: str) -> list:
-  """
-  Fetch the latest traffic-agent metrics for all flows belonging to a TrafficTest.
+    """
+    Fetch the latest traffic-agent metrics for all flows belonging to a TrafficTest.
 
-  Flow IDs follow the naming convention  {test_name}_{source_device}  and
-  {test_name}_{source_device}_rev  (bidirectional reverse).  We match all of
-  them by looking for flow_id values that start with  "{test_name}_".
+    Flow IDs follow the naming convention  {test_name}_{source_device}  and
+    {test_name}_{source_device}_rev  (bidirectional reverse).  We match all of
+    them by looking for flow_id values that start with  "{test_name}_".
 
-  Returns a list of dicts — one per (flow_id, role, protocol) group — each
-  containing the latest value for every traffic-agent metric scraped into
-  NetworkMetrics (kind='TRAFFIC').
-  """
-  prefix = f"{test_name}_"
-  with database.snapshot() as snapshot:
+    Returns a list of dicts — one per (flow_id, role, protocol) group — each
+    containing the latest value for every traffic-agent metric scraped into
+    NetworkMetrics (kind='TRAFFIC').
+
+    Uses a time-bounded window + a MAX(timestamp) GROUP BY + self-join to
+    select the latest row per (node_name, metric_name, labels) group.
+    Spanner does not support QUALIFY or ROW_NUMBER() analytic functions.
+    """
+    prefix = f"{test_name}_"
+    logger.info("fetch_traffic_test_metrics: test_name=%r  prefix=%r", test_name, prefix)
+
+    # Diagnostic: count TRAFFIC rows in the window (separate snapshot — Spanner
+    # single-use snapshots allow only one execute_sql call per context).
     try:
-      # NOTE: labels is a Spanner JSON type.  Spanner JSON does NOT support
-      # GROUP BY or equality (=) operators.  We use TO_JSON_STRING() to convert
-      # to STRING first, which allows both GROUP BY and equality comparisons.
-      # JSON_VALUE() returns STRING so STARTS_WITH is safe.
-      sql = """
-        SELECT t1.node_name, t1.metric_name, t1.value, t1.labels, t1.timestamp
-        FROM NetworkMetrics t1
-        JOIN (
-          SELECT
-            node_name,
-            metric_name,
-            TO_JSON_STRING(labels) AS labels_str,
-            MAX(timestamp)         AS max_ts
-          FROM NetworkMetrics
-          WHERE kind = 'TRAFFIC'
-            AND STARTS_WITH(JSON_VALUE(labels, '$.flow_id'), @prefix)
-          GROUP BY node_name, metric_name, TO_JSON_STRING(labels)
-        ) t2
-        ON  t1.node_name              = t2.node_name
-        AND t1.metric_name            = t2.metric_name
-        AND TO_JSON_STRING(t1.labels) = t2.labels_str
-        AND t1.timestamp              = t2.max_ts
-        WHERE t1.kind = 'TRAFFIC'
-      """
-      results = snapshot.execute_sql(
-          sql,
-          params={"prefix": prefix},
-          param_types={"prefix": spanner.param_types.STRING},
-      )
-
-      # Group by (flow_id, role) — both the source device and destination
-      # device emit metrics under the SAME flow_id but with different role
-      # labels.  Using flow_id alone would cause one to overwrite the other,
-      # making the role field non-deterministic (dependent on SQL row order).
-      # A key of (flow_id, role) keeps them as separate flow entries so the
-      # dashboard can correctly filter source-role flows for throughput.
-      _METRIC_MAP = {
-        "traffic_agent_throughput_bps":       "throughput_bps",
-        "traffic_agent_latency_ms":           "latency_ms",
-        "traffic_agent_jitter_ms":            "jitter_ms",
-        "traffic_agent_packet_loss_pct":      "packet_loss_pct",
-        "traffic_agent_active_sessions":      "active_sessions",
-        "traffic_agent_bytes_sent_total":     "bytes_sent_total",
-        "traffic_agent_bytes_received_total": "bytes_received_total",
-        "traffic_agent_flow_running":         "flow_running",
-      }
-
-      flows: dict = {}
-      for node_name, metric_name, value, labels_json, timestamp in results:
-        try:
-          labels = json.loads(labels_json) if isinstance(labels_json, str) else (labels_json or {})
-        except Exception:
-          labels = {}
-
-        flow_id  = labels.get("flow_id", "")
-        role     = labels.get("role", "")
-        protocol = labels.get("protocol", "")
-
-        if not flow_id:
-          continue
-
-        key = (flow_id, role)
-        if key not in flows:
-          flows[key] = {
-            "flow_id":  flow_id,
-            "device":   node_name or "",
-            "role":     role,
-            "protocol": protocol,
-            "timestamp": timestamp.isoformat() if timestamp else None,
-            # metric fields initialised to None
-            "throughput_bps":       None,
-            "latency_ms":           None,
-            "jitter_ms":            None,
-            "packet_loss_pct":      None,
-            "active_sessions":      None,
-            "bytes_sent_total":     None,
-            "bytes_received_total": None,
-            "flow_running":         None,
-          }
-
-        # Keep the most recent timestamp for the group.
-        if timestamp and flows[key]["timestamp"]:
-          if timestamp.isoformat() > flows[key]["timestamp"]:
-            flows[key]["timestamp"] = timestamp.isoformat()
-
-        field = _METRIC_MAP.get(metric_name)
-        if field:
-          flows[key][field] = value
-
-      return list(flows.values())
-
+        with database.snapshot() as diag_snap:
+            diag_sql = """
+                SELECT COUNT(*) AS total,
+                       COUNTIF(STARTS_WITH(JSON_VALUE(labels, '$.flow_id'), @prefix)) AS matching
+                FROM NetworkMetrics
+                WHERE kind = 'TRAFFIC'
+                  AND timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL @window_seconds SECOND)
+            """
+            diag = list(diag_snap.execute_sql(
+                diag_sql,
+                params={"prefix": prefix, "window_seconds": _LATEST_WINDOW_SECONDS},
+                param_types={
+                    "prefix": spanner.param_types.STRING,
+                    "window_seconds": spanner.param_types.INT64,
+                },
+            ))
+        total_traffic = diag[0][0] if diag else 0
+        matching_traffic = diag[0][1] if diag else 0
+        logger.info(
+            "fetch_traffic_test_metrics: TRAFFIC rows in window=%d  matching prefix=%d",
+            total_traffic, matching_traffic,
+        )
     except Exception as e:
-      logger.error("fetch_traffic_test_metrics SQL error: {}".format(e))
-      return []
+        logger.warning("fetch_traffic_test_metrics diagnostic failed: %s", e)
+
+    with database.snapshot() as snapshot:
+        try:
+            # NOTE: labels is a Spanner JSON type.  Spanner JSON does NOT support
+            # GROUP BY or equality (=) operators.  We use TO_JSON_STRING() to convert
+            # to STRING first, which allows both GROUP BY and equality comparisons.
+            # JSON_VALUE() returns STRING so STARTS_WITH is safe.
+            #
+            # MAX(timestamp) GROUP BY subquery + self-join selects the latest
+            # row per (node_name, metric_name, labels) group without needing
+            # QUALIFY or ROW_NUMBER(), which Spanner does not support.
+            sql = """
+                SELECT nm.node_name, nm.metric_name, nm.value, nm.labels, nm.timestamp
+                FROM NetworkMetrics AS nm
+                JOIN (
+                    SELECT node_name, metric_name, TO_JSON_STRING(labels) AS labels_str,
+                           MAX(timestamp) AS max_ts
+                    FROM NetworkMetrics
+                    WHERE kind = 'TRAFFIC'
+                      AND STARTS_WITH(JSON_VALUE(labels, '$.flow_id'), @prefix)
+                      AND timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL @window_seconds SECOND)
+                    GROUP BY node_name, metric_name, TO_JSON_STRING(labels)
+                ) AS latest
+                  ON nm.node_name   = latest.node_name
+                 AND nm.metric_name = latest.metric_name
+                 AND nm.timestamp   = latest.max_ts
+                 AND TO_JSON_STRING(nm.labels) = latest.labels_str
+                WHERE nm.kind = 'TRAFFIC'
+                  AND STARTS_WITH(JSON_VALUE(nm.labels, '$.flow_id'), @prefix)
+                  AND nm.timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL @window_seconds SECOND)
+            """
+            results = snapshot.execute_sql(
+                sql,
+                params={"prefix": prefix, "window_seconds": _LATEST_WINDOW_SECONDS},
+                param_types={
+                    "prefix": spanner.param_types.STRING,
+                    "window_seconds": spanner.param_types.INT64,
+                },
+            )
+
+            # Group by (flow_id, role) — both the source device and destination
+            # device emit metrics under the SAME flow_id but with different role
+            # labels.  Using flow_id alone would cause one to overwrite the other,
+            # making the role field non-deterministic (dependent on SQL row order).
+            # A key of (flow_id, role) keeps them as separate flow entries so the
+            # dashboard can correctly filter source-role flows for throughput.
+            _METRIC_MAP = {
+                "traffic_agent_throughput_bps":       "throughput_bps",
+                "traffic_agent_latency_ms":           "latency_ms",
+                "traffic_agent_jitter_ms":            "jitter_ms",
+                "traffic_agent_packet_loss_pct":      "packet_loss_pct",
+                "traffic_agent_active_sessions":      "active_sessions",
+                "traffic_agent_bytes_sent_total":     "bytes_sent_total",
+                "traffic_agent_bytes_received_total": "bytes_received_total",
+                "traffic_agent_flow_running":         "flow_running",
+            }
+
+            flows: dict = {}
+            for node_name, metric_name, value, labels_json, timestamp in results:
+                try:
+                    labels = json.loads(labels_json) if isinstance(labels_json, str) else (labels_json or {})
+                except Exception:
+                    labels = {}
+
+                flow_id  = labels.get("flow_id", "")
+                role     = labels.get("role", "")
+                protocol = labels.get("protocol", "")
+
+                if not flow_id:
+                    continue
+
+                key = (flow_id, role)
+                if key not in flows:
+                    flows[key] = {
+                        "flow_id":  flow_id,
+                        "device":   node_name or "",
+                        "role":     role,
+                        "protocol": protocol,
+                        "timestamp": timestamp.isoformat() if timestamp else None,
+                        # metric fields initialised to None
+                        "throughput_bps":       None,
+                        "latency_ms":           None,
+                        "jitter_ms":            None,
+                        "packet_loss_pct":      None,
+                        "active_sessions":      None,
+                        "bytes_sent_total":     None,
+                        "bytes_received_total": None,
+                        "flow_running":         None,
+                    }
+
+                # Keep the most recent timestamp for the group.
+                if timestamp and flows[key]["timestamp"]:
+                    if timestamp.isoformat() > flows[key]["timestamp"]:
+                        flows[key]["timestamp"] = timestamp.isoformat()
+
+                field = _METRIC_MAP.get(metric_name)
+                if field:
+                    flows[key][field] = value
+
+            return list(flows.values())
+
+        except Exception as e:
+            logger.error("fetch_traffic_test_metrics SQL error: {}".format(e))
+            return []
 
 
 def fetch_routing_metrics(node_id: str) -> dict:
@@ -237,34 +360,43 @@ def fetch_routing_metrics(node_id: str) -> dict:
 
     Returns a structured dict with OSPF, BGP peer, routing-table, collector,
     and BFD sections ready to be JSON-serialised and sent to the dashboard.
+
+    Uses a time-bounded window + a MAX(timestamp) GROUP BY + self-join to
+    select the latest row per (metric_name, labels) group.
+    Spanner does not support QUALIFY or ROW_NUMBER() analytic functions.
     """
     with database.snapshot() as snapshot:
         try:
             # NOTE: labels is a Spanner JSON type.  Use TO_JSON_STRING() for
             # GROUP BY and equality comparisons (JSON doesn't support either).
+            # MAX(timestamp) GROUP BY subquery + self-join selects the latest
+            # row per (metric_name, labels) group without QUALIFY/ROW_NUMBER.
             sql = """
-                SELECT t1.metric_name, t1.value, t1.labels, t1.timestamp
-                FROM NetworkMetrics t1
+                SELECT nm.metric_name, nm.value, nm.labels, nm.timestamp
+                FROM NetworkMetrics AS nm
                 JOIN (
-                    SELECT
-                        metric_name,
-                        TO_JSON_STRING(labels) AS labels_str,
-                        MAX(timestamp)         AS max_ts
+                    SELECT metric_name, TO_JSON_STRING(labels) AS labels_str,
+                           MAX(timestamp) AS max_ts
                     FROM NetworkMetrics
-                    WHERE node_name = @node_id
-                      AND kind = 'ROUTING'
+                    WHERE kind = 'ROUTING'
+                      AND node_name = @node_id
+                      AND timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL @window_seconds SECOND)
                     GROUP BY metric_name, TO_JSON_STRING(labels)
-                ) t2
-                ON  t1.metric_name            = t2.metric_name
-                AND TO_JSON_STRING(t1.labels) = t2.labels_str
-                AND t1.timestamp              = t2.max_ts
-                WHERE t1.node_name = @node_id
-                  AND t1.kind = 'ROUTING'
+                ) AS latest
+                  ON nm.metric_name = latest.metric_name
+                 AND nm.timestamp   = latest.max_ts
+                 AND TO_JSON_STRING(nm.labels) = latest.labels_str
+                WHERE nm.kind = 'ROUTING'
+                  AND nm.node_name = @node_id
+                  AND nm.timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL @window_seconds SECOND)
             """
             results = snapshot.execute_sql(
                 sql,
-                params={"node_id": node_id},
-                param_types={"node_id": spanner.param_types.STRING},
+                params={"node_id": node_id, "window_seconds": _LATEST_WINDOW_SECONDS},
+                param_types={
+                    "node_id": spanner.param_types.STRING,
+                    "window_seconds": spanner.param_types.INT64,
+                },
             )
 
             ospf_neighbors   = 0
@@ -341,21 +473,25 @@ def fetch_routing_metrics(node_id: str) -> dict:
 
 
 def clear_network_metrics():
-  """
-  Clears all records from the NetworkMetrics table using Partitioned DML,
-  which bypasses the 20,000 mutation-per-transaction limit and is safe for
-  tables with large numbers of rows.
-  
-  Returns:
-    bool: True if the operation was successful, False otherwise.
-  """
-  try:
-    row_count = database.execute_partitioned_dml(
-      "DELETE FROM NetworkMetrics WHERE TRUE"
-    )
-    logger.info(f"Successfully cleared ~{row_count} records from NetworkMetrics table")
-    return True
-  except Exception as e:
-    logger.error(f"Failed to clear NetworkMetrics table: {e}")
-    return False
+    """
+    Clears all records from the NetworkMetrics table using Partitioned DML,
+    which bypasses the 20,000 mutation-per-transaction limit and is safe for
+    tables with large numbers of rows.
 
+    Returns:
+        bool: True if the operation was successful, False otherwise.
+    """
+    try:
+        row_count = database.execute_partitioned_dml(
+            "DELETE FROM NetworkMetrics WHERE TRUE"
+        )
+        logger.info(f"Successfully cleared ~{row_count} records from NetworkMetrics table")
+        # Invalidate the in-memory cache so the next read doesn't serve stale data.
+        with _cache_lock:
+            global _cache_value, _cache_ts
+            _cache_value = {}
+            _cache_ts = 0.0
+        return True
+    except Exception as e:
+        logger.error(f"Failed to clear NetworkMetrics table: {e}")
+        return False
