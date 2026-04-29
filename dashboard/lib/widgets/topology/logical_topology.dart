@@ -742,9 +742,13 @@ class TopologyPainter extends CustomPainter {
       final double strokeWidth;
 
       if (metrics != null && isRouterLink) {
-        final totalBps = (metrics['txBps'] ?? 0) + (metrics['rxBps'] ?? 0);
-        lineColor = _linkColor(totalBps);
-        strokeWidth = totalBps > 0 ? 3.0 : 1.5;
+        // txBps / rxBps are in bytes/sec (from node_network_*_bytes_total via
+        // ALIGN_RATE).  Multiply by 8 to convert to bits/sec so that
+        // _linkColor thresholds and _bpsLabel suffixes (K/M/G) correctly
+        // represent Kbps / Mbps / Gbps.
+        final totalBitps = ((metrics['txBps'] ?? 0) + (metrics['rxBps'] ?? 0)) * 8;
+        lineColor = _linkColor(totalBitps);
+        strokeWidth = totalBitps > 0 ? 3.0 : 1.5;
       } else {
         lineColor = Colors.blueGrey.withValues(alpha: 0.5);
         strokeWidth = 2.0;
@@ -761,9 +765,9 @@ class TopologyPainter extends CustomPainter {
 
       // Throughput label at the midpoint, router links only.
       if (metrics != null && isRouterLink) {
-        final totalBps = (metrics['txBps'] ?? 0) + (metrics['rxBps'] ?? 0);
+        final totalBitps = ((metrics['txBps'] ?? 0) + (metrics['rxBps'] ?? 0)) * 8;
         final mid = Offset((p1.dx + p2.dx) / 2, (p1.dy + p2.dy) / 2);
-        _drawLinkLabel(canvas, _bpsLabel(totalBps), mid, lineColor);
+        _drawLinkLabel(canvas, _bpsLabel(totalBitps), mid, lineColor);
       }
     }
   }
