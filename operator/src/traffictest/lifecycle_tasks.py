@@ -150,12 +150,21 @@ async def create_traffic_test(
                 networkvm_ip_address, dest_mgmt_ip, "POST", "/v1/flows", dest_body
             )
             if not dest_result["success"]:
-                logger.error(
-                    "Failed to start destination flow %s on %s: %s",
-                    flow_id, destination_device, dest_result.get("error"),
-                )
-                failed_sources.append(source_device)
-                continue
+                if dest_result.get("http_code") == 409:
+                    # Flow is already running on the destination (e.g. from a
+                    # previous attempt that was retried).  Treat as success so
+                    # the create is idempotent — the listener is ready.
+                    logger.info(
+                        "Destination flow %s already running on %s — continuing (idempotent)",
+                        flow_id, destination_device,
+                    )
+                else:
+                    logger.error(
+                        "Failed to start destination flow %s on %s: %s",
+                        flow_id, destination_device, dest_result.get("error"),
+                    )
+                    failed_sources.append(source_device)
+                    continue
             # Give the destination a moment to bind the port
             await asyncio.sleep(1)
         else:
