@@ -176,6 +176,7 @@ async def delete_vyosinfrastructure(body, spec, name, namespace, logger, **kwarg
          asynchronously and may take time).
     """
     logger.info(f"Deleting VyOSInfrastructure: {name}")
+    await update_status(name, namespace, "VyOSInfrastructure", "Deleting", "Deleting VyOSInfrastructure")
 
     # Step 1 — clear OpsAgent scrape targets immediately.
     await update_opsagent_config(namespace, [], [])

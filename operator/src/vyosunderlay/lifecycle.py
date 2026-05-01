@@ -229,6 +229,7 @@ async def delete_vyosunderlay(body, spec, name, namespace, logger, **kwargs):
     Kubernetes even if a router fails mid-cleanup.
     """
     logger.info(f"Deleting VyOSUnderlay: {name} — clearing underlay config from routers")
+    await update_status(name, namespace, "VyOSUnderlay", "Deleting", "Deleting VyOSUnderlay")
 
     routers = spec.get('routers', [])
     if not routers:

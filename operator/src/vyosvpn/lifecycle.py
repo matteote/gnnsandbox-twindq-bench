@@ -377,6 +377,7 @@ async def delete_vyosl3vpn(body, spec, name, namespace, logger, **kwargs):
     import json
 
     logger.info(f"Deleting VyOSL3VPN: {name} — removing router VRF/BGP config")
+    await update_status(name, namespace, "VyOSL3VPN", "Deleting", "Deleting VyOSL3VPN")
 
     # Names of VRFs owned by this VPN, keyed by router name.
     # Used to identify which VRFs to remove and which interfaces to un-assign.
