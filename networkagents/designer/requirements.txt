@@ -1,0 +1,7 @@
+google-adk==1.18.0
+a2a-sdk==0.3.11
+kubernetes==33.1.0
+google-cloud-container==2.61.0
+google-api-python-client==2.183.0
+ruamel.yaml==0.18.15
+pydantic==2.11.9

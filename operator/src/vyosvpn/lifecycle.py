@@ -46,13 +46,15 @@ async def _wait_for_routers_leave_running(
                 r = api.get(name=rname, namespace=namespace)
                 phase = r.get('status', {}).get('phase', 'Unknown')
                 if phase == 'Failed':
-                    raise kopf.PermanentError(
-                        f"Router {rname} entered Failed state while applying VPN configuration"
+                    raise kopf.TemporaryError(
+                        f"Router {rname} entered Failed state while applying VPN configuration; "
+                        f"will retry after router is recovered",
+                        delay=60
                     )
                 if phase == 'Running':
                     next_still_running.append(rname)
                 # Any non-Running, non-Failed phase means the handler picked it up — good.
-            except kopf.PermanentError:
+            except (kopf.TemporaryError, kopf.PermanentError):
                 raise
             except Exception as e:
                 # If we can't read the router, conservatively assume still Running.
@@ -97,12 +99,14 @@ async def _wait_for_routers_running(
                 r = api.get(name=rname, namespace=namespace)
                 phase = r.get('status', {}).get('phase', 'Unknown')
                 if phase == 'Failed':
-                    raise kopf.PermanentError(
-                        f"Router {rname} entered Failed state while applying VPN configuration"
+                    raise kopf.TemporaryError(
+                        f"Router {rname} entered Failed state while applying VPN configuration; "
+                        f"will retry after router is recovered",
+                        delay=60
                     )
                 if phase != 'Running':
                     not_running.append(f"{rname}({phase})")
-            except kopf.PermanentError:
+            except (kopf.TemporaryError, kopf.PermanentError):
                 raise
             except Exception as e:
                 not_running.append(f"{rname}(error:{e})")

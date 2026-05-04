@@ -520,12 +520,24 @@ class HostAgent:
                     # if task is waiting for info update the state
                     if taskStatus.state == TaskState.input_required:
                         await self.updateState(session_id=session_id,task_status="input_needed")
-                        # Return the message content with require_user_input flag
-                        return {
-                            "status" : "Input Required from User",
-                            "text": taskStatus.message.parts[0].root.text,
-                            "require_user_input": True
-                        }
+                        text = taskStatus.message.parts[0].root.text
+                        # Distinguish plan approval ([PLAN] prefix) from clarification
+                        # questions ([QUESTION] prefix).  The supervisor prompt uses
+                        # different keys to route each case:
+                        #   require_user_approval → call requestTaskApproval widget
+                        #   require_user_input    → display question text to user
+                        if text.startswith('[PLAN]'):
+                            return {
+                                "status": "Plan Approval Required",
+                                "text": text,
+                                "require_user_approval": True,
+                            }
+                        else:
+                            return {
+                                "status": "Input Required from User",
+                                "text": text,
+                                "require_user_input": True,
+                            }
                     elif taskStatus.state == TaskState.completed:
                         # task is done so remove the agent from the state and reset back to "None"
                         await self.updateState(session_id=session_id, agent_name="None", task_status="None", task_id="None")

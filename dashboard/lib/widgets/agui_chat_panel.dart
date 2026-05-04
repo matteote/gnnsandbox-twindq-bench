@@ -27,6 +27,13 @@ class AGUIChatPanel extends StatefulWidget {
 
 class _AGUIChatPanelState extends State<AGUIChatPanel> {
   late AGUISocketProvider _aguiProvider;
+
+  static const List<String> _quickQuestions = [
+    'Create a new vyos network with 4 p routers, 8 pe routers, 16 ce routers and 2 devices per ce router',
+    'Add a new PE router called pe5 to core router P3 and update the underlay and router reflectors to include the new PE router',
+    'Add a new CE router called ce2-spoke to pe5, attach a device to ce2-spoke and extend BLUE_SPOKE VPN to pe25 and ce2-spoke',
+    'Add a new mesh vpn called GREEN to pe2 and pe5'
+  ];
   
   @override
   void initState() {
@@ -156,56 +163,12 @@ class _AGUIChatPanelState extends State<AGUIChatPanel> {
                   // Send the selected question directly through AG-UI
                   _aguiProvider.generateStream(value);
                 },
-                itemBuilder: (BuildContext context) => <PopupMenuEntry<String>>[
-                  const PopupMenuItem<String>(
-                    value: 'What network services can i deploy?',
-                    child: Text('What network services can i deploy?'),
-                  ),
-                  const PopupMenuItem<String>(
-                    value: 'Give me more detail about the UERanSIM network service',
-                    child: Text('Give me more detail about the UERanSIM network service'),
-                  ),
-                  const PopupMenuItem<String>(
-                    value: 'What network services are already deployed?',
-                    child: Text('What network services are already deployed?'),
-                  ),
-                  const PopupMenuItem<String>(
-                    value: 'What is the status of the control plane network service?',
-                    child: Text('What is the status of the control plane network service?'),
-                  ),
-                  const PopupMenuItem<String>(
-                    value: 'What locations are there?',
-                    child: Text('What locations are there?'),
-                  ),
-                  const PopupMenuItem<String>(
-                    value: 'Propose a plan to deploy a 5G core',
-                    child: Text('Propose a plan to deploy a 5G core'),
-                  ),
-                  const PopupMenuItem<String>(
-                    value: 'Create a plan to deploy a new network location called cellsite1 with CIDR  10.0.40.0/24',
-                    child: Text('Create a plan to deploy a new network location called cellsite1 with CIDR 10.0.40.0/24'),
-                  ),
-                  const PopupMenuItem<String>(
-                    value: 'Can you add a radio simulator to cellsite1 and create a plan for a working 5G network',
-                    child: Text('Can you add a radio simulator to cellsite1 and create a plan for a working 5G network'),
-                  ),
-                  const PopupMenuItem<String>(
-                    value: 'Create a test called test1 between cellsite1-ueransim and DNN dnn',
-                    child: Text('Create a test called test1 between cellsite1-ueransim and DNN dnn'),
-                  ),
-                  const PopupMenuItem<String>(
-                    value: 'Create a plan to delete the ueransim network service, the ptp network connectivity service and the cellsite1 network location',
-                    child: Text('Create a plan to delete the ueransim network service, the ptp network connectivity service and the cellsite1 network location'),
-                  ),
-                  const PopupMenuItem<String>(
-                    value: 'Were there any error logs in the last 2 hours?',
-                    child: Text('Were there any error logs in the last 2 hours?'),
-                  ),
-                  const PopupMenuItem<String>(
-                    value: 'Delete all the network resources currently deployed except dataplane',
-                    child: Text('Delete all the network resources currently deployed except dataplane'),
-                  ),
-                ],
+                itemBuilder: (BuildContext context) => _quickQuestions
+                    .map((question) => PopupMenuItem<String>(
+                          value: question,
+                          child: Text(question),
+                        ))
+                    .toList(),
               ),
               // Center title
               Expanded(

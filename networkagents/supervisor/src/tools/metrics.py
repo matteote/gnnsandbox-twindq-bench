@@ -215,7 +215,7 @@ def fetch_traffic_test_metrics(test_name: str) -> list:
     Spanner does not support QUALIFY or ROW_NUMBER() analytic functions.
     """
     prefix = f"{test_name}_"
-    logger.info("fetch_traffic_test_metrics: test_name=%r  prefix=%r", test_name, prefix)
+    logger.debug("fetch_traffic_test_metrics: test_name=%r  prefix=%r", test_name, prefix)
 
     # Diagnostic: count TRAFFIC rows in the window (separate snapshot — Spanner
     # single-use snapshots allow only one execute_sql call per context).
@@ -238,7 +238,7 @@ def fetch_traffic_test_metrics(test_name: str) -> list:
             ))
         total_traffic = diag[0][0] if diag else 0
         matching_traffic = diag[0][1] if diag else 0
-        logger.info(
+        logger.debug(
             "fetch_traffic_test_metrics: TRAFFIC rows in window=%d  matching prefix=%d",
             total_traffic, matching_traffic,
         )
@@ -485,7 +485,7 @@ def clear_network_metrics():
         row_count = database.execute_partitioned_dml(
             "DELETE FROM NetworkMetrics WHERE TRUE"
         )
-        logger.info(f"Successfully cleared ~{row_count} records from NetworkMetrics table")
+        logger.debug(f"Successfully cleared ~{row_count} records from NetworkMetrics table")
         # Invalidate the in-memory cache so the next read doesn't serve stale data.
         with _cache_lock:
             global _cache_value, _cache_ts
