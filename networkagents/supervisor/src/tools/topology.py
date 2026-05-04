@@ -40,6 +40,12 @@ def spanner_connect():
   database = instance.database(SPANNER_DATABASE)
   return database
 
+# Module-level singleton — created once at import time and reused for the
+# lifetime of the process.  This avoids creating a new gRPC channel and a new
+# Spanner session pool on every polling call (the same pattern already used in
+# metrics.py).
+_database = spanner_connect()
+
 #####################################################################################
 # Physical Topology
 #####################################################################################
@@ -57,7 +63,7 @@ def fetch_physical_topology(timestamp_str: str = None):
         dict: Physical topology with nodes (routers) and connections (links),
               including embeddings data (MSE and RCA) for each router and interface
     """
-    logger.info(f"Fetching physical network topology (timestamp={timestamp_str})")
+    logger.debug(f"Fetching physical network topology (timestamp={timestamp_str})")
     
     topology = {
         'nodes': [],
@@ -65,8 +71,8 @@ def fetch_physical_topology(timestamp_str: str = None):
     }
     
     try:
-        database = spanner_connect()
-        
+        database = _database
+
         # Determine the timestamp to use for queries
         target_timestamp = None
         if timestamp_str:
@@ -74,7 +80,7 @@ def fetch_physical_topology(timestamp_str: str = None):
                 if timestamp_str.endswith('Z'):
                     timestamp_str = timestamp_str[:-1] + '+00:00'
                 target_timestamp = datetime.datetime.fromisoformat(timestamp_str)
-                logger.info(f"Using historical timestamp: {target_timestamp}")
+                logger.debug(f"Using historical timestamp: {target_timestamp}")
             except ValueError as e:
                 logger.error(f"Invalid timestamp format: {e}")
                 return {'nodes': [], 'connections': [], 'error': 'Invalid timestamp format'}
@@ -131,7 +137,7 @@ def fetch_physical_topology(timestamp_str: str = None):
                 remote_interface.name AS remote_interface_name
         """
         
-        logger.info("Executing GQL query for physical topology")
+        logger.debug("Executing GQL query for physical topology")
         
         routers = {}
         connections_set = set()
@@ -199,17 +205,17 @@ def fetch_physical_topology(timestamp_str: str = None):
                         })
         
         # Now fetch embeddings for all routers and their interfaces
-        logger.info(f"Fetching embeddings for {len(routers)} routers")
+        logger.debug(f"Fetching embeddings for {len(routers)} routers")
         _add_embeddings_to_routers(database, routers, target_timestamp)
         
         # Convert routers dict to list
         topology['nodes'] = list(routers.values())
         
         # Now fetch devices connected to routers
-        logger.info("Fetching devices connected to routers")
+        logger.debug("Fetching devices connected to routers")
         _add_devices_to_topology(database, topology, target_timestamp)
         
-        logger.info(f"Retrieved {len(topology['nodes'])} nodes (routers + devices) and {len(topology['connections'])} connections with embeddings")
+        logger.debug(f"Retrieved {len(topology['nodes'])} nodes (routers + devices) and {len(topology['connections'])} connections with embeddings")
         return topology
         
     except Exception as e:
@@ -356,7 +362,7 @@ def _add_embeddings_to_routers(database, routers, target_timestamp=None):
                         'rca': anomaly_explanation
                     }
         
-        logger.info(f"Added embeddings to {len([r for r in routers.values() if 'stgnn_score' in r])} routers")
+        logger.debug(f"Added embeddings to {len([r for r in routers.values() if 'stgnn_score' in r])} routers")
         
     except Exception as e:
         logger.error(f"Error fetching embeddings: {e}", exc_info=True)
@@ -462,7 +468,7 @@ def _add_devices_to_topology(database, topology, target_timestamp=None):
                         'type': 'device_to_interface'
                     })
         
-        logger.info(f"Added {len([n for n in topology['nodes'] if n.get('type') == 'device'])} devices to topology")
+        logger.debug(f"Added {len([n for n in topology['nodes'] if n.get('type') == 'device'])} devices to topology")
         
     except Exception as e:
         logger.error(f"Error fetching devices: {e}", exc_info=True)
@@ -479,11 +485,11 @@ def fetch_router_details(router_id):
     Returns:
         dict: Router details including interfaces, config, and location
     """
-    logger.info(f"Fetching router details for router_id: {router_id}")
+    logger.debug(f"Fetching router details for router_id: {router_id}")
     
     try:
-        database = spanner_connect()
-        
+        database = _database
+
         # GQL query to get router details with all its interfaces
         gql_query = f"""
             GRAPH {GRAPH_NAME}
@@ -511,7 +517,7 @@ def fetch_router_details(router_id):
                 interface.status AS interface_status
         """
         
-        logger.info("Executing GQL query for router details")
+        logger.debug("Executing GQL query for router details")
         
         router_detail = None
         interfaces = []
@@ -568,7 +574,7 @@ def fetch_router_details(router_id):
         # Add unique interfaces to router details
         router_detail['interfaces'] = interfaces
         
-        logger.info(f"Retrieved details for router {router_id} with {len(interfaces)} interfaces")
+        logger.debug(f"Retrieved details for router {router_id} with {len(interfaces)} interfaces")
         return router_detail
         
     except Exception as e:
@@ -586,11 +592,11 @@ def fetch_device_details(device_id):
     Returns:
         dict: Device details including network info, connected router, and config
     """
-    logger.info(f"Fetching device details for device_id: {device_id}")
+    logger.debug(f"Fetching device details for device_id: {device_id}")
     
     try:
-        database = spanner_connect()
-        
+        database = _database
+
         # Query to get device details, joining through PhysicalInterface to resolve
         # the parent router (Device now stores interface_id, not router_id directly).
         device_query = """
@@ -613,7 +619,7 @@ def fetch_device_details(device_id):
               AND d.valid_end_ts IS NULL
         """
         
-        logger.info("Executing query for device details")
+        logger.debug("Executing query for device details")
         
         params = {"device_id": device_id}
         param_types = {"device_id": spanner.param_types.STRING}
@@ -651,7 +657,7 @@ def fetch_device_details(device_id):
             logger.warning(f"Device with ID {device_id} not found")
             return {'error': f'Device with ID {device_id} not found'}
         
-        logger.info(f"Retrieved details for device {device_id}")
+        logger.debug(f"Retrieved details for device {device_id}")
         return device_detail
         
     except Exception as e:
@@ -669,11 +675,11 @@ def fetch_node_embeddings(node_id):
     Returns:
         dict: Embeddings data including router embedding and interface embeddings with all 3 model scores
     """
-    logger.info(f"Fetching embeddings for node_id: {node_id}")
+    logger.debug(f"Fetching embeddings for node_id: {node_id}")
     
     try:
-        database = spanner_connect()
-        
+        database = _database
+
         # Query to get the latest embedding for the router (hetgnn model)
         router_embedding_query = """
             SELECT 
@@ -778,7 +784,7 @@ def fetch_node_embeddings(node_id):
                     'anomaly_explanation': anomaly_explanation
                 })
         
-        logger.info(f"Retrieved embeddings for node {node_id}: router={result['router_embedding'] is not None}, interfaces={len(result['interface_embeddings'])}")
+        logger.debug(f"Retrieved embeddings for node {node_id}: router={result['router_embedding'] is not None}, interfaces={len(result['interface_embeddings'])}")
         return result
         
     except Exception as e:
@@ -821,17 +827,17 @@ def clear_topology():
     ]
 
     try:
-        database = spanner_connect()
+        database = _database
         for table in tables:
             try:
                 row_count = database.execute_partitioned_dml(
                     f"DELETE FROM {table} WHERE TRUE"
                 )
-                logger.info(f"Cleared ~{row_count} rows from {table}")
+                logger.debug(f"Cleared ~{row_count} rows from {table}")
             except Exception as e:
                 logger.error(f"Failed to clear table {table}: {e}", exc_info=True)
                 return False
-        logger.info("Successfully cleared all topology tables")
+        logger.debug("Successfully cleared all topology tables")
         return True
     except Exception as e:
         logger.error(f"Error clearing topology: {e}", exc_info=True)
@@ -905,9 +911,9 @@ def fetch_snapshots():
     should reflect when observable data (topology changes or metrics) was
     recorded, not when GNN embeddings were computed.
     """
-    logger.info("Fetching snapshots from SCD2 (PhysicalRouter) and NetworkMetrics")
+    logger.debug("Fetching snapshots from SCD2 (PhysicalRouter) and NetworkMetrics")
     try:
-        database = spanner_connect()
+        database = _database
 
         # UNION of SCD2 valid_start timestamps and NetworkMetrics timestamps.
         # The outer SELECT DISTINCT deduplicates any coinciding values.
@@ -930,7 +936,7 @@ def fetch_snapshots():
                 if ts:
                     snapshots.append(ts.isoformat())
 
-        logger.info(f"Returning {len(snapshots)} snapshot timestamps")
+        logger.debug(f"Returning {len(snapshots)} snapshot timestamps")
         return {"snapshots": snapshots}
     except Exception as e:
         logger.error(f"Failed to fetch snapshots: {e}", exc_info=True)
@@ -940,10 +946,10 @@ def fetch_anomalies(limit: int = 50, timestamp_str: str = None):
     """
     Fetch top anomalies from NodeEmbedding (using average of 3 model scores for ranking).
     """
-    logger.info(f"Fetching anomalies (limit={limit}, timestamp={timestamp_str})")
+    logger.debug(f"Fetching anomalies (limit={limit}, timestamp={timestamp_str})")
     try:
-        database = spanner_connect()
-        
+        database = _database
+
         params = {"limit": limit}
         param_types = {"limit": spanner.param_types.INT64}
         
@@ -1025,7 +1031,7 @@ def fetch_vpns(namespace: str = "default") -> list:
         list of dicts with keys:
             name, phase, message, routers (list of str), underlay_ref
     """
-    logger.info(f"Fetching VyOSL3VPN resources from namespace={namespace}")
+    logger.debug(f"Fetching VyOSL3VPN resources from namespace={namespace}")
 
     try:
         client = kubernetes.dynamic.DynamicClient(get_k8s_client())
@@ -1080,7 +1086,7 @@ def fetch_vpns(namespace: str = "default") -> list:
                 "services":    services,
             })
 
-        logger.info(f"Retrieved {len(vpns)} VyOSL3VPN resources")
+        logger.debug(f"Retrieved {len(vpns)} VyOSL3VPN resources")
         return vpns
 
     except Exception as e:
@@ -1098,7 +1104,7 @@ def fetch_traffic_tests(namespace: str = "default") -> list:
             name, phase, message, vpn_ref, source_devices, destination_device,
             duration, source_count, start_time, end_time, allocated_ports
     """
-    logger.info(f"Fetching TrafficTest resources from namespace={namespace}")
+    logger.debug(f"Fetching TrafficTest resources from namespace={namespace}")
 
     try:
         client = kubernetes.dynamic.DynamicClient(get_k8s_client())
@@ -1129,7 +1135,7 @@ def fetch_traffic_tests(namespace: str = "default") -> list:
                 "allocated_ports":    status.get("allocated_ports", []),
             })
 
-        logger.info(f"Retrieved {len(tests)} TrafficTest resources")
+        logger.debug(f"Retrieved {len(tests)} TrafficTest resources")
         return tests
 
     except Exception as e:
@@ -1149,17 +1155,17 @@ def delete_traffic_test_crd(name: str, namespace: str = "default") -> bool:
         True  – delete issued successfully (or resource already gone).
         False – kubernetes not available or unexpected error.
     """
-    logger.info(f"Deleting TrafficTest CRD: namespace={namespace}, name={name}")
+    logger.debug(f"Deleting TrafficTest CRD: namespace={namespace}, name={name}")
 
     try:
         client = kubernetes.dynamic.DynamicClient(get_k8s_client())
         api = client.resources.get(api_version="google.dev/v1", kind="TrafficTest")
         api.delete(name=name, namespace=namespace)
-        logger.info(f"Issued delete for TrafficTest/{name}")
+        logger.debug(f"Issued delete for TrafficTest/{name}")
         return True
     except kubernetes.client.rest.ApiException as e:
         if e.status == 404:
-            logger.info(f"TrafficTest/{name} already gone")
+            logger.debug(f"TrafficTest/{name} already gone")
             return True
         logger.error(f"Error deleting TrafficTest/{name}: {e}", exc_info=True)
         return False
@@ -1180,17 +1186,17 @@ def delete_vpn_crd(name: str, namespace: str = "default") -> bool:
         True  – delete issued successfully (or resource already gone).
         False – kubernetes not available or unexpected error.
     """
-    logger.info(f"Deleting VyOSL3VPN CRD: namespace={namespace}, name={name}")
+    logger.debug(f"Deleting VyOSL3VPN CRD: namespace={namespace}, name={name}")
 
     try:
         client = kubernetes.dynamic.DynamicClient(get_k8s_client())
         api = client.resources.get(api_version="google.dev/v1", kind="VyOSL3VPN")
         api.delete(name=name, namespace=namespace)
-        logger.info(f"Issued delete for VyOSL3VPN/{name}")
+        logger.debug(f"Issued delete for VyOSL3VPN/{name}")
         return True
     except kubernetes.client.rest.ApiException as e:
         if e.status == 404:
-            logger.info(f"VyOSL3VPN/{name} already gone")
+            logger.debug(f"VyOSL3VPN/{name} already gone")
             return True
         logger.error(f"Error deleting VyOSL3VPN/{name}: {e}", exc_info=True)
         return False
@@ -1208,7 +1214,7 @@ def fetch_vyos_underlay(namespace: str = "default") -> list:
         list of dicts with keys:
             name, phase, message, infrastructure_ref
     """
-    logger.info(f"Fetching VyOSUnderlay resources from namespace={namespace}")
+    logger.debug(f"Fetching VyOSUnderlay resources from namespace={namespace}")
 
     try:
         client = kubernetes.dynamic.DynamicClient(get_k8s_client())
@@ -1228,7 +1234,7 @@ def fetch_vyos_underlay(namespace: str = "default") -> list:
                 "infrastructure_ref": spec.get("infrastructureRef"),
             })
 
-        logger.info(f"Retrieved {len(underlay_list)} VyOSUnderlay resources")
+        logger.debug(f"Retrieved {len(underlay_list)} VyOSUnderlay resources")
         return underlay_list
 
     except Exception as e:
@@ -1248,7 +1254,7 @@ def fetch_vyos_infrastructure(namespace: str = "default") -> list:
         list of dicts with keys:
             name, phase, message, router_count, network_count, device_count, underlays
     """
-    logger.info(f"Fetching VyosInfrastructure resources from namespace={namespace}")
+    logger.debug(f"Fetching VyosInfrastructure resources from namespace={namespace}")
 
     try:
         client = kubernetes.dynamic.DynamicClient(get_k8s_client())
@@ -1287,7 +1293,7 @@ def fetch_vyos_infrastructure(namespace: str = "default") -> list:
                 "underlays":     underlays_by_infra.get(infra_name, []),
             })
 
-        logger.info(f"Retrieved {len(infra_list)} VyosInfrastructure resources")
+        logger.debug(f"Retrieved {len(infra_list)} VyosInfrastructure resources")
         return infra_list
 
     except Exception as e:
@@ -1307,7 +1313,7 @@ def fetch_infrastructure_state(namespace: str = "default") -> dict:
             traffic_tests  — list of TrafficTest summaries (from fetch_traffic_tests)
             infrastructure — list of VyosInfrastructure summaries (from fetch_vyos_infrastructure)
     """
-    logger.info(f"Fetching combined infrastructure state for namespace={namespace}")
+    logger.debug(f"Fetching combined infrastructure state for namespace={namespace}")
     return {
         "vpns":           fetch_vpns(namespace=namespace),
         "traffic_tests":  fetch_traffic_tests(namespace=namespace),

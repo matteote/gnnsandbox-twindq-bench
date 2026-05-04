@@ -17,7 +17,7 @@ import datetime
 import json
 from uuid import uuid4
 from agent.host_agent import HostAgent
-from tools.topology import build_graph, spanner_connect
+from tools.topology import build_graph
 from tools.logs import fetch_log_entries, delete_logs
 from tools.metrics import *
 from utils.error_handler import (
@@ -157,18 +157,17 @@ class SocketEndpoint:
         async def get_topology(sid, data):
             logger.info(f"get_topology for {sid}: {data}")
             try:
-                # Connect to the database
-                database = spanner_connect()
-
                 # Update the client topology preferences
                 if sid not in clients_state: clients_state[sid] = {}
                 clients_state[sid]['topology'] = data
 
                 # map dashboard view dropdown menu entries to graph labels
-                edge_label = view_to_edge_label_map[data['view']] 
-                
-                # Build the graph with selected edge label
-                elements, success = build_graph(database, edge_label)
+                edge_label = view_to_edge_label_map[data['view']]
+
+                # Build the graph with selected edge label.
+                # build_graph uses the module-level _database singleton internally;
+                # the database argument is kept for signature compatibility only.
+                elements, success = build_graph(None, edge_label)
                 
                 if success:
                     # Prepare response

@@ -417,6 +417,7 @@ Create()
         cp networkagent.json tools/src
         cp networkagent.json gnn/src
         cp networkagent.json networkagents/supervisor/src
+        cp networkagent.json networkagents/designer/src
         cp networkagent.json networkagents/tester/src
         cp networkagent.json networkagents/logs/src
         cp networkagent.json logservices/metricscollector/src
@@ -444,6 +445,7 @@ Create()
     jinja -E GOOGLE_VM_USER -E GOOGLE_PROJECT -E GOOGLE_REGION -E GOOGLE_ZONE -E GOOGLE_REPO operator/cloudbuild.j2 > operator/cloudbuild.yaml
     jinja -E GOOGLE_VM_USER -E GOOGLE_PROJECT -E GOOGLE_REGION -E GOOGLE_ZONE -E GOOGLE_REPO tools/cloudbuild.j2 > tools/cloudbuild.yaml
     jinja -E GOOGLE_VM_USER -E GOOGLE_PROJECT -E GOOGLE_REGION -E GOOGLE_ZONE -E GOOGLE_REPO gnn/cloudbuild.j2 > gnn/cloudbuild.yaml
+    jinja -E GOOGLE_VM_USER -E GOOGLE_PROJECT -E GOOGLE_REGION -E GOOGLE_ZONE -E GOOGLE_REPO networkagents/designer/cloudbuild.j2 > networkagents/designer/cloudbuild.yaml
     jinja -E GOOGLE_VM_USER -E GOOGLE_PROJECT -E GOOGLE_REGION -E GOOGLE_ZONE -E GOOGLE_REPO networkagents/tester/cloudbuild.j2 > networkagents/tester/cloudbuild.yaml
     jinja -E GOOGLE_VM_USER -E GOOGLE_PROJECT -E GOOGLE_REGION -E GOOGLE_ZONE -E GOOGLE_REPO networkagents/logs/cloudbuild.j2 > networkagents/logs/cloudbuild.yaml
     jinja -E GOOGLE_VM_USER -E GOOGLE_PROJECT -E GOOGLE_REGION -E GOOGLE_ZONE -E GOOGLE_REPO networkagents/supervisor/cloudbuild.j2 > networkagents/supervisor/cloudbuild.yaml
@@ -728,6 +730,8 @@ Delete()
         gnn/cloudbuild.yaml \
         networkagents/supervisor/src/networkagent.json \
         networkagents/supervisor/cloudbuild.yaml \
+        networkagents/designer/src/networkagent.json \
+        networkagents/designer/cloudbuild.yaml \
         networkagents/tester/src/networkagent.json \
         networkagents/tester/cloudbuild.yaml \
         networkagents/logs/src/networkagent.json \
@@ -1288,22 +1292,22 @@ Networkagent()
         fi
     fi
 
-    # deploy the tester agent
-    if [[ "$AGENT_NAMES" == "all" ]] || [[ "$AGENT_NAMES" == *"test"* ]]; then 
+    # deploy the designer agent
+    if [[ "$AGENT_NAMES" == "all" ]] || [[ "$AGENT_NAMES" == *"designer"* ]]; then 
         agent_processed=true
-        IMAGE_URI="$GOOGLE_REGION-docker.pkg.dev/$GOOGLE_PROJECT/$GOOGLE_REPO/testagent:latest"
+        IMAGE_URI="$GOOGLE_REGION-docker.pkg.dev/$GOOGLE_PROJECT/$GOOGLE_REPO/designeragent:latest"
         if [[ $YES_FLAG != "y" ]] && [[ $NO_FLAG != "y" ]] && $(gcloud artifacts docker images describe $IMAGE_URI >/dev/null 2>&1); then
-            read -p "Tester agent image already exists. Rebuild? (y/n) " -n 1 -r
+            read -p "Designer agent image already exists. Rebuild? (y/n) " -n 1 -r
             echo
             if [[ $REPLY =~ ^[Yy]$ ]]; then
-                gcloud builds submit --region=$GOOGLE_REGION --config=networkagents/tester/cloudbuild.yaml .
+                gcloud builds submit --region=$GOOGLE_REGION --config=networkagents/designer/cloudbuild.yaml .
             fi
         elif [[ $NO_FLAG == "y" ]] && $(gcloud artifacts docker images describe $IMAGE_URI >/dev/null 2>&1); then
-            echo "Tester agent image already exists - not building the image (NO_FLAG set)"
+            echo "Designer agent image already exists - not building the image (NO_FLAG set)"
         elif [[ $NO_FLAG != "y" ]]; then
-            gcloud builds submit --region=$GOOGLE_REGION --config=networkagents/tester/cloudbuild.yaml .
+            gcloud builds submit --region=$GOOGLE_REGION --config=networkagents/designer/cloudbuild.yaml .
         fi
-        gcloud run deploy testagent \
+        gcloud run deploy designeragent \
         --image $IMAGE_URI \
         --region $GOOGLE_REGION \
         --service-account $GOOGLE_SERVICE_ACCOUNT \
@@ -1316,33 +1320,61 @@ Networkagent()
         --allow-unauthenticated 
     fi
 
-    # deploy the logs agent
-    if [[ "$AGENT_NAMES" == "all" ]] || [[ "$AGENT_NAMES" == *"logs"* ]]; then
-        agent_processed=true
-        IMAGE_URI="$GOOGLE_REGION-docker.pkg.dev/$GOOGLE_PROJECT/$GOOGLE_REPO/logsagent:latest"
-        if [[ $YES_FLAG != "y" ]] && [[ $NO_FLAG != "y" ]] && $(gcloud artifacts docker images describe $IMAGE_URI >/dev/null 2>&1); then
-            read -p "Logs agent image already exists. Rebuild? (y/n) " -n 1 -r
-            echo
-            if [[ $REPLY =~ ^[Yy]$ ]]; then
-                gcloud builds submit --region=$GOOGLE_REGION --config=networkagents/logs/cloudbuild.yaml .
-            fi
-        elif [[ $NO_FLAG == "y" ]] && $(gcloud artifacts docker images describe $IMAGE_URI >/dev/null 2>&1); then
-            echo "Logs agent image already exists - not building the image (NO_FLAG set)"
-        elif [[ $NO_FLAG != "y" ]]; then
-            gcloud builds submit --region=$GOOGLE_REGION --config=networkagents/logs/cloudbuild.yaml .
-        fi
-        gcloud run deploy logsagent \
-        --image $IMAGE_URI \
-        --region $GOOGLE_REGION \
-        --service-account $GOOGLE_SERVICE_ACCOUNT \
-        --min 1 \
-        --update-env-vars GOOGLE_CLOUD_PROJECT=$GOOGLE_PROJECT \
-        --update-env-vars GOOGLE_CLOUD_LOCATION=$GOOGLE_REGION \
-        --update-env-vars GOOGLE_GENAI_USE_VERTEXAI=1 \
-        --update-env-vars AGENT_MCP_TOOLS_ADDRESS=$TOOLS_URL/sse \
-        --update-env-vars GOOGLE_APPLICATION_CREDENTIALS="/agent/networkagent.json" \
-        --allow-unauthenticated 
-    fi
+    # # deploy the tester agent
+    # if [[ "$AGENT_NAMES" == "all" ]] || [[ "$AGENT_NAMES" == *"test"* ]]; then 
+    #     agent_processed=true
+    #     IMAGE_URI="$GOOGLE_REGION-docker.pkg.dev/$GOOGLE_PROJECT/$GOOGLE_REPO/testagent:latest"
+    #     if [[ $YES_FLAG != "y" ]] && [[ $NO_FLAG != "y" ]] && $(gcloud artifacts docker images describe $IMAGE_URI >/dev/null 2>&1); then
+    #         read -p "Tester agent image already exists. Rebuild? (y/n) " -n 1 -r
+    #         echo
+    #         if [[ $REPLY =~ ^[Yy]$ ]]; then
+    #             gcloud builds submit --region=$GOOGLE_REGION --config=networkagents/tester/cloudbuild.yaml .
+    #         fi
+    #     elif [[ $NO_FLAG == "y" ]] && $(gcloud artifacts docker images describe $IMAGE_URI >/dev/null 2>&1); then
+    #         echo "Tester agent image already exists - not building the image (NO_FLAG set)"
+    #     elif [[ $NO_FLAG != "y" ]]; then
+    #         gcloud builds submit --region=$GOOGLE_REGION --config=networkagents/tester/cloudbuild.yaml .
+    #     fi
+    #     gcloud run deploy testagent \
+    #     --image $IMAGE_URI \
+    #     --region $GOOGLE_REGION \
+    #     --service-account $GOOGLE_SERVICE_ACCOUNT \
+    #     --min 1 \
+    #     --update-env-vars GOOGLE_CLOUD_PROJECT=$GOOGLE_PROJECT \
+    #     --update-env-vars GOOGLE_CLOUD_LOCATION=$GOOGLE_REGION \
+    #     --update-env-vars GOOGLE_GENAI_USE_VERTEXAI=1 \
+    #     --update-env-vars AGENT_MCP_TOOLS_ADDRESS=$TOOLS_URL/sse \
+    #     --update-env-vars GOOGLE_APPLICATION_CREDENTIALS="/agent/networkagent.json" \
+    #     --allow-unauthenticated 
+    # fi
+
+    # # deploy the logs agent
+    # if [[ "$AGENT_NAMES" == "all" ]] || [[ "$AGENT_NAMES" == *"logs"* ]]; then
+    #     agent_processed=true
+    #     IMAGE_URI="$GOOGLE_REGION-docker.pkg.dev/$GOOGLE_PROJECT/$GOOGLE_REPO/logsagent:latest"
+    #     if [[ $YES_FLAG != "y" ]] && [[ $NO_FLAG != "y" ]] && $(gcloud artifacts docker images describe $IMAGE_URI >/dev/null 2>&1); then
+    #         read -p "Logs agent image already exists. Rebuild? (y/n) " -n 1 -r
+    #         echo
+    #         if [[ $REPLY =~ ^[Yy]$ ]]; then
+    #             gcloud builds submit --region=$GOOGLE_REGION --config=networkagents/logs/cloudbuild.yaml .
+    #         fi
+    #     elif [[ $NO_FLAG == "y" ]] && $(gcloud artifacts docker images describe $IMAGE_URI >/dev/null 2>&1); then
+    #         echo "Logs agent image already exists - not building the image (NO_FLAG set)"
+    #     elif [[ $NO_FLAG != "y" ]]; then
+    #         gcloud builds submit --region=$GOOGLE_REGION --config=networkagents/logs/cloudbuild.yaml .
+    #     fi
+    #     gcloud run deploy logsagent \
+    #     --image $IMAGE_URI \
+    #     --region $GOOGLE_REGION \
+    #     --service-account $GOOGLE_SERVICE_ACCOUNT \
+    #     --min 1 \
+    #     --update-env-vars GOOGLE_CLOUD_PROJECT=$GOOGLE_PROJECT \
+    #     --update-env-vars GOOGLE_CLOUD_LOCATION=$GOOGLE_REGION \
+    #     --update-env-vars GOOGLE_GENAI_USE_VERTEXAI=1 \
+    #     --update-env-vars AGENT_MCP_TOOLS_ADDRESS=$TOOLS_URL/sse \
+    #     --update-env-vars GOOGLE_APPLICATION_CREDENTIALS="/agent/networkagent.json" \
+    #     --allow-unauthenticated 
+    # fi
 
     # build and deploy the network dashboard
     if [[ "$AGENT_NAMES" == "all" ]] || [[ "$AGENT_NAMES" == *"dashboard"* ]]; then

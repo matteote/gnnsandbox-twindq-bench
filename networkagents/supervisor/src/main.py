@@ -19,7 +19,7 @@ import aiohttp_cors
 import logging
 import os
 import json
-from tools.topology import build_graph, spanner_connect
+from tools.topology import build_graph
 from tools.metrics import fetch_all_last_metrics
 from tools.logs import fetch_log_entries
 from tools.traces import TraceStreamListener

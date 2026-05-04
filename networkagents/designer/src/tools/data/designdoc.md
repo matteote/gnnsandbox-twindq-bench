@@ -1,6 +1,6 @@
 # Network Design Guide
 
-This document describes the architectural design principles for deploying a VyOS L3VPN network. It provides enough knowledge for an agent to take high-level network lifecycle instructions and decompose them into a concrete network design expressed as Kubernetes Custom Resources (CRDs).
+This document describes the architectural design principles for a VyOS L3VPN network. It provides enough knowledge for an agent to take high-level network lifecycle instructions and decompose them into a concrete network design expressed as Kubernetes Custom Resources (CRDs).
 
 ---
 
@@ -16,7 +16,6 @@ This document describes the architectural design principles for deploying a VyOS
 8. [CRD Reference and Dependency Chain](#crd-reference-and-dependency-chain)
 9. [Design Rules and Constraints](#design-rules-and-constraints)
 10. [Example: Hub-and-Spoke L3VPN](#example-hub-and-spoke-l3vpn)
-11. [Querying Current Topology from Spanner](#querying-current-topology-from-spanner)
 
 ---
 
@@ -46,10 +45,10 @@ High-Level Intent
 6. Define VRF, Route Distinguisher and Route Target plan
       │
       ▼
-7. Emit CRD YAML: VyOSInfrastructure → VyOSUnderlay → VyOSL3VPN → Device
+7. Emit CRD YAML: VyOSInfrastructure (including Routers, Networks, and Devices) → VyOSUnderlay → VyOSL3VPN
 ```
 
-At each step, consult the current topology stored in Spanner to check which routers and networks already exist before adding new resources. Never duplicate a router or network name that already exists in the live topology.
+At each step, consult the current VyOS network deployed in k8s to check which routers and networks already exist before adding new resources. Never duplicate a router or network name that already exists in the live topology.
 
 ---
 
@@ -66,19 +65,21 @@ The network is built in three clearly separated layers. Each layer has its own C
 │  P routers, RR routers, LSPs via LDP         │
 ├──────────────────────────────────────────────┤
 │  Physical / Infrastructure Layer             │  ← VyOSInfrastructure CRD
-│  Routers, Links, Interfaces, IP addresses    │
+│  Routers, Links, Devices, IP addresses       │
 └──────────────────────────────────────────────┘
 ```
 
 ### Layer 1 – Physical Infrastructure
 
-Defines all routers and the point-to-point or multi-access networks connecting them. This is the only layer that knows about hardware (or virtual hardware) — container images, port assignments, IP addresses on links, MTU, VLAN IDs, and physical location.
+Defines all routers, devices, and the point-to-point or multi-access networks connecting them. This is the only layer that knows about hardware (or virtual hardware) — container images, port assignments, IP addresses on links, MTU, VLAN IDs, and physical location.
 
 **Key concepts:**
 - Every router gets a unique loopback IP (e.g., `10.0.0.x/32`) used as its stable router ID.
 - Point-to-point (P2P) links use `/24` subnets in the `172.16.x.0/24` range (only `.1` and `.2` are used).
-- The management network (`192.168.122.0/24`) connects `eth0` of every router for out-of-band access.
+- The management network (`192.168.122.0/24`) connects `eth0` of every router and `eth1` of every device for out-of-band access.
 - Each P2P link is assigned a unique VLAN ID (301+) to isolate traffic on Linux bridges.
+- **Devices** are simulated end-hosts (traffic agents) that attach to customer LANs.
+- **QoS and Security** policies are defined at this layer and bound to router interfaces.
 
 ### Layer 2 – Underlay Routing
 
@@ -357,7 +358,7 @@ Interface names in `connected_routers` must exactly match the names in `spec.rou
 
 ### Step 5: Write the VyOSInfrastructure
 
-Declare all networks and all routers. The infrastructure CRD is self-contained — it does not reference underlay protocols.
+Declare all networks, routers, and devices. The infrastructure CRD is self-contained — it does not reference underlay protocols.
 
 ### Step 6: Write the VyOSUnderlay
 
@@ -367,19 +368,19 @@ Reference the infrastructure with `infrastructureRef`. Configure OSPF and LDP on
 
 Reference the underlay with `underlayRef`. For each PE router, declare its VRF(s) with RD, RT import/export, the CE-facing interface, and the eBGP neighbour entry.
 
-### Step 8: Write Device Resources
+### Step 8: (Optional) Write Standalone Device Resources
 
-For each customer site, create a `Device` attached to the CE's LAN network with a static IP and the CE's LAN interface IP as its gateway.
+If not defined within the `VyOSInfrastructure` spec, you can create standalone `Device` resources attached to the CE's LAN network.
 
 ---
 
-## CRD Reference and Dependency Chain
+## CRD Dependency Chain
 
 Resources must be applied and reach `Ready` in this strict order:
 
 ```
 VyOSInfrastructure  (kind: VyOSInfrastructure, group: google.dev/v1)
-        │   generates VyOSRouter and LinuxNetwork children automatically
+        │   generates VyOSRouter, LinuxNetwork, and Device children automatically
         ▼
 VyOSUnderlay        (kind: VyOSUnderlay, group: google.dev/v1)
         │   spec.infrastructureRef → VyOSInfrastructure name
@@ -387,74 +388,11 @@ VyOSUnderlay        (kind: VyOSUnderlay, group: google.dev/v1)
 VyOSL3VPN           (kind: VyOSL3VPN, group: google.dev/v1)
         │   spec.underlayRef → VyOSUnderlay name
         ▼
-Device              (kind: Device, group: google.dev/v1)
-        │   spec.network_name → LinuxNetwork (generated by VyOSInfrastructure)
-        ▼
 TrafficTest         (kind: TrafficTest, group: google.dev/v1)
         │   spec.source_devices / spec.destination_device → Device names
 ```
 
 The operator enforces these dependencies automatically. A resource will wait (retrying every 10 seconds) until its parent is `Ready`.
-
-### VyOSInfrastructure Key Fields
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `spec.networks[].name` | string | Unique network segment name |
-| `spec.networks[].subnet` | CIDR | IPv4 subnet for the segment |
-| `spec.networks[].vlan` | int (1-4094) | 802.1Q VLAN ID for isolation |
-| `spec.networks[].network_type` | enum | `p2p`, `multi-access`, `management`, `loopback` |
-| `spec.networks[].mtu` | int (68-9000) | MTU, default 1500 |
-| `spec.networks[].connected_routers[].router_name` | string | Must match a router name in `spec.routers` |
-| `spec.networks[].connected_routers[].interface` | `eth[0-9]+` | Interface name on the router |
-| `spec.networks[].connected_routers[].ip_address` | IPv4 | Host IP on this segment (no mask) |
-| `spec.routers[].name` | string | Unique router name |
-| `spec.routers[].router_id` | IPv4 | Loopback/router ID address |
-| `spec.routers[].role` | enum | `P`, `PE`, `CE`, `RR` |
-| `spec.routers[].location` | object | `latitude`, `longitude`, `city`, `country`, `site` |
-| `spec.routers[].interfaces[].name` | `eth[0-9]+` or `lo` | Interface name |
-| `spec.routers[].interfaces[].network` | string | Must match a network name in `spec.networks` |
-
-### VyOSUnderlay Key Fields
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `spec.infrastructureRef` | string | Name of the VyOSInfrastructure |
-| `spec.routing.ospf.router_id_source` | string | `loopback` (use loopback IP as OSPF router ID) |
-| `spec.routing.ospf.areas[]` | array | Global area definitions (`area_id`, `type`) |
-| `spec.routing.bgp.as_number` | int | Provider iBGP AS number |
-| `spec.routing.bgp.route_reflectors[]` | string[] | Loopback IPs of RR routers |
-| `spec.mpls.enabled` | bool | Enable MPLS globally |
-| `spec.mpls.ldp.router_id_interface` | string | `loopback` |
-| `spec.routers[].name` | string | Must match a router in the infrastructure |
-| `spec.routers[].protocols.ospf.router_id` | IPv4 | Router's loopback IP |
-| `spec.routers[].protocols.ospf.areas[]` | array | `area` (dotted-quad), `type` |
-| `spec.routers[].protocols.bgp.as_number` | int | BGP AS for this router |
-| `spec.routers[].protocols.bgp.router_id` | IPv4 | Router's loopback IP |
-| `spec.routers[].protocols.bgp.route_reflector` | bool | `true` for RR routers |
-| `spec.routers[].protocols.bgp.neighbors[]` | array | `peer` (loopback IP), `remote_as`, `route_reflector_client` |
-| `spec.routers[].protocols.mpls.enabled` | bool | Enable MPLS on this router |
-| `spec.routers[].protocols.mpls.ldp.router_id` | IPv4 | Router's loopback IP |
-| `spec.routers[].protocols.mpls.ldp.interfaces[]` | string[] | Interfaces to enable LDP on (P-facing only) |
-
-### VyOSL3VPN Key Fields
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `spec.underlayRef` | string | Name of the VyOSUnderlay |
-| `spec.services[].name` | string | Service/VRF template name (e.g., `BLUE_HUB`) |
-| `spec.services[].topology` | enum | `hub`, `spoke`, `any-to-any` |
-| `spec.routers[].name` | string | PE router name |
-| `spec.routers[].vrfs[].name` | string | VRF name |
-| `spec.routers[].vrfs[].table` | int | Linux routing table ID |
-| `spec.routers[].vrfs[].rd` | string | Route Distinguisher (`ip:id`) |
-| `spec.routers[].vrfs[].rt_export[]` | string[] | Exported route targets |
-| `spec.routers[].vrfs[].rt_import[]` | string[] | Imported route targets |
-| `spec.routers[].vrfs[].interfaces[]` | string[] | CE-facing interface names to place in this VRF |
-| `spec.routers[].bgp.vrfs[].name` | string | VRF name for per-VRF BGP |
-| `spec.routers[].bgp.vrfs[].neighbors[]` | array | `peer` (CE IP), `remote_as` (CE AS) |
-
----
 
 ## Design Rules and Constraints
 
@@ -568,6 +506,7 @@ spec:
       subnet: "172.16.30.0/24"
       vlan: 301
       network_type: "p2p"
+      bandwidth: "1gbit"
       connected_routers:
         - router_name: "p1"
           interface: "eth1"
@@ -581,6 +520,7 @@ spec:
       subnet: "192.168.122.0/24"
       gateway: "192.168.122.1"
       network_type: "management"
+      bandwidth: "unlimited"
       connected_routers:
         - router_name: "p1"
           interface: "eth0"
@@ -590,11 +530,13 @@ spec:
     - name: loopbacks
       subnet: "10.0.0.0/24"
       network_type: "loopback"
+      bandwidth: "unlimited"
     # PE-to-CE links
     - name: pe1-ce1-spoke
       subnet: "10.50.50.0/24"
       vlan: 401
       network_type: "p2p"
+      bandwidth: "100mbit"
       connected_routers:
         - router_name: "pe1"
           interface: "eth2"
@@ -607,6 +549,7 @@ spec:
       subnet: "10.100.1.0/24"
       gateway: "10.100.1.1"
       network_type: "multi-access"
+      bandwidth: "1gbit"
       connected_routers:
         - router_name: "ce1-spoke"
           interface: "eth2"
@@ -630,6 +573,21 @@ spec:
         - name: "lo"
           network: "loopbacks"
     # ... (remaining routers) ...
+  devices:
+    - name: "dev1"
+      network_name: "lan-spoke1"
+      ip_address: "10.100.1.10"
+      mgmt_ip: "192.168.122.100"
+      gateway: "10.100.1.1"
+  qos:
+    policies:
+      - name: "bronze"
+        bandwidth: "10mbit"
+  security:
+    firewall:
+      policies:
+        - name: "allow-all"
+          default_action: "accept"
 ---
 # Layer 2: Underlay routing protocols
 apiVersion: google.dev/v1
@@ -768,79 +726,3 @@ spec:
             neighbors:
               - peer: "10.80.80.2"
                 remote_as: 65035
----
-# Device: simulated end-host on a customer LAN
-apiVersion: google.dev/v1
-kind: Device
-metadata:
-  name: dev1
-  namespace: default
-spec:
-  network_name: "lan-spoke1"      # Must match a LinuxNetwork name
-  ip_address: "10.100.1.10"       # Must be within the LAN subnet
-  gateway: "10.100.1.1"           # CE router's LAN interface IP
-```
-
----
-
-## Querying Current Topology from Spanner
-
-Before producing a design, always query Spanner to understand what already exists. This prevents naming conflicts and allows the design to extend the existing topology.
-
-### Check existing routers
-
-```sql
-SELECT name, role, location_city, status
-FROM PhysicalRouter
-WHERE valid_end_ts IS NULL
-ORDER BY role, name
-```
-
-### Check existing networks (logical subnets)
-
-```sql
-SELECT name, cidr, network_type, operational_state
-FROM LogicalSubnet
-WHERE valid_end_ts IS NULL
-ORDER BY cidr
-```
-
-### Check existing VPN services
-
-```sql
-SELECT vpn.name, vpn.topology, vrf.name AS vrf_name, vrf.rd, r.name AS router
-FROM L3VPNService vpn
-JOIN VRF vrf ON vpn.id = vrf.vpn_id
-JOIN PhysicalRouter r ON vrf.router_id = r.id
-WHERE vpn.valid_end_ts IS NULL
-  AND vrf.valid_end_ts IS NULL
-  AND r.valid_end_ts IS NULL
-```
-
-### Check router connectivity (graph traversal)
-
-```sql
-GRAPH networkGraph
-MATCH (r1:PhysicalRouter)-[:HasInterface]->(i1:PhysicalInterface)
-      -[:ConnectsTo]->(l:PhysicalLink)
-      -[:LinkedTo]->(i2:PhysicalInterface)<-[:HasInterface]-(r2:PhysicalRouter)
-WHERE r1.valid_end_ts IS NULL
-  AND r2.valid_end_ts IS NULL
-RETURN r1.name AS router_a, r2.name AS router_b, l.bandwidth
-```
-
-### Check VLAN and subnet allocation (to avoid conflicts)
-
-```sql
-SELECT name, cidr, network_type
-FROM LogicalSubnet
-WHERE valid_end_ts IS NULL
-  AND cidr LIKE '172.16.%'
-ORDER BY cidr
-```
-
-Use these queries to:
-- Identify existing loopback IPs already in use before picking a new one
-- Find the next available VLAN ID (highest existing + 1)
-- Confirm PE routers are in `Ready` status before adding a new VRF
-- Verify RR router loopback IPs for reference in new `VyOSUnderlay` BGP configs

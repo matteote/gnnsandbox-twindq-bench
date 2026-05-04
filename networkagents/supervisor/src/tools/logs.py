@@ -89,7 +89,7 @@ def delete_logs():
     row_count = database.execute_partitioned_dml(
       "DELETE FROM KgLogEntryNode WHERE TRUE"
     )
-    logger.info(f"Successfully deleted ~{row_count} log entries from KgLogEntryNode")
+    logger.debug(f"Successfully deleted ~{row_count} log entries from KgLogEntryNode")
     return True
   except Exception as e:
     logger.error("Spanner Delete error: {}".format(e))

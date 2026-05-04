@@ -84,7 +84,7 @@ def _load_default_network_descriptor() -> dict:
         FileNotFoundError: if the JSON data file is missing.
         json.JSONDecodeError: if the file contains invalid JSON.
     """
-    logger.info("Loading default network descriptor from %s", _DEFAULT_NETWORK_JSON)
+    logger.debug("Loading default network descriptor from %s", _DEFAULT_NETWORK_JSON)
     with open(_DEFAULT_NETWORK_JSON, "r") as f:
         return json.load(f)
 
@@ -194,7 +194,7 @@ def _save_network_descriptor(database, descriptor: dict) -> None:
         transaction.execute_update(dml, params=params, param_types=param_types)
 
     database.run_in_transaction(_run)
-    logger.info("Saved network descriptor '%s' to Spanner", network_id)
+    logger.debug("Saved network descriptor '%s' to Spanner", network_id)
 
 
 # ---------------------------------------------------------------------------
@@ -208,7 +208,7 @@ def list_network_descriptors() -> list:
     Returns:
         list of dicts with keys: id, name, description, labels, updated_at
     """
-    logger.info("Listing all network descriptors")
+    logger.debug("Listing all network descriptors")
     database = spanner_connect()
     query = """
         SELECT id, name, description, labels, updated_at
@@ -226,7 +226,7 @@ def list_network_descriptors() -> list:
                 "labels":      _as_json(row[3], {}),
                 "updated_at":  row[4].isoformat() if row[4] else None,
             })
-    logger.info("Found %d network descriptor(s)", len(results))
+    logger.debug("Found %d network descriptor(s)", len(results))
     return results
 
 
@@ -242,7 +242,7 @@ def get_network_descriptor_summary(network_id: str) -> dict | None:
                         vpn_count, traffic_test_count
         or None if not found.
     """
-    logger.info("Getting network descriptor summary for '%s'", network_id)
+    logger.debug("Getting network descriptor summary for '%s'", network_id)
     database = spanner_connect()
     query = """
         SELECT id, name, description, labels, updated_at, vpns, traffic_tests
@@ -324,7 +324,7 @@ async def apply_crds_background(descriptor: dict) -> None:
         descriptor: Full descriptor dict (as returned by ``_get_full_network_descriptor``).
     """
     network_id = descriptor.get("id", "unknown")
-    logger.info("Background CRD deploy started for '%s'", network_id)
+    logger.debug("Background CRD deploy started for '%s'", network_id)
 
     try:
         import kubernetes
@@ -357,7 +357,7 @@ async def apply_crds_background(descriptor: dict) -> None:
                 )
                 resource_api.create(body, namespace=namespace)
                 applied.append(f"{kind}/{name}")
-                logger.info("Created %s/%s", kind, name)
+                logger.debug("Created %s/%s", kind, name)
             except ApiException as exc:
                 if exc.status == 409:
                     # Already exists — merge-patch
@@ -369,7 +369,7 @@ async def apply_crds_background(descriptor: dict) -> None:
                             content_type='application/merge-patch+json'
                         )
                         applied.append(f"{kind}/{name} (updated)")
-                        logger.info("Updated %s/%s", kind, name)
+                        logger.debug("Updated %s/%s", kind, name)
                     except ApiException as patch_exc:
                         failed.append(f"{kind}/{name}: {patch_exc.reason}")
                         logger.error("Failed to patch %s/%s: %s", kind, name, patch_exc)
@@ -386,7 +386,7 @@ async def apply_crds_background(descriptor: dict) -> None:
                     kind, name, resource_exc, exc_info=True,
                 )
 
-        logger.info(
+        logger.debug(
             "Deploy of '%s' complete — applied: %d, failed: %d | %s | %s",
             network_id, len(applied), len(failed), applied, failed
         )
@@ -511,7 +511,7 @@ async def teardown_existing_crds(
     Returns:
         dict with keys ``deleted`` (list[str]) and ``failed`` (list[str]).
     """
-    logger.info("Teardown started for namespace '%s'", namespace)
+    logger.debug("Teardown started for namespace '%s'", namespace)
     deleted = []
     failed  = []
 
@@ -531,7 +531,7 @@ async def teardown_existing_crds(
                 cr_list = items.items if hasattr(items, "items") else []
 
                 if not cr_list:
-                    logger.info("Teardown: no %s resources found in '%s'", kind, namespace)
+                    logger.debug("Teardown: no %s resources found in '%s'", kind, namespace)
                     continue
 
                 # ── Step 1: Issue deletes for all CRs of this kind ──────────
@@ -547,10 +547,10 @@ async def teardown_existing_crds(
                             kind=kind,
                             name=name,
                         )
-                        logger.info("Issued delete for %s/%s", kind, name)
+                        logger.debug("Issued delete for %s/%s", kind, name)
                     except ApiException as del_exc:
                         if del_exc.status == 404:
-                            logger.info("%s/%s already gone", kind, name)
+                            logger.debug("%s/%s already gone", kind, name)
                         else:
                             failed.append(f"{kind}/{name}: {del_exc.reason}")
                             logger.error(
@@ -575,7 +575,7 @@ async def teardown_existing_crds(
                             kind=kind,
                             name=name,
                         )
-                        logger.info("Confirmed %s/%s fully gone", kind, name)
+                        logger.debug("Confirmed %s/%s fully gone", kind, name)
                     else:
                         failed.append(f"{kind}/{name}: deletion timed out")
                         logger.error("Timed out waiting for %s/%s to be gone", kind, name)
@@ -594,7 +594,7 @@ async def teardown_existing_crds(
     except Exception as exc:
         logger.error("Unhandled error during teardown: %s", exc, exc_info=True)
 
-    logger.info(
+    logger.debug(
         "Teardown complete — deleted: %d, failed: %d | %s | %s",
         len(deleted), len(failed), deleted, failed,
     )
@@ -624,7 +624,7 @@ async def teardown_and_deploy_background(descriptor: dict) -> None:
                     ``get_descriptor_for_deploy``).
     """
     network_id = descriptor.get("id", "unknown")
-    logger.info("Teardown-and-deploy started for '%s'", network_id)
+    logger.debug("Teardown-and-deploy started for '%s'", network_id)
 
     # Obtain the Socket.IO server lazily to avoid circular imports.
     sio = None
@@ -683,7 +683,7 @@ async def teardown_only_background(namespace: str = "default") -> None:
         namespace: Kubernetes namespace to target. Defaults to ``"default"``.
     """
     network_id = "teardown"
-    logger.info("Standalone teardown started for namespace '%s'", namespace)
+    logger.debug("Standalone teardown started for namespace '%s'", namespace)
 
     # Obtain the Socket.IO server lazily to avoid circular imports.
     sio = None
@@ -705,7 +705,7 @@ async def teardown_only_background(namespace: str = "default") -> None:
             deleted=len(result["deleted"]),
             failed=len(result["failed"]),
         )
-        logger.info(
+        logger.debug(
             "Standalone teardown complete — deleted: %d, failed: %d",
             len(result["deleted"]), len(result["failed"]),
         )
@@ -801,7 +801,7 @@ async def delete_vpn_with_tests_background(
 
     async with _vpn_delete_lock:
         _vpn_deleting_name = vpn_name
-        logger.info("VPN delete background started for '%s'", vpn_name)
+        logger.debug("VPN delete background started for '%s'", vpn_name)
 
         try:
             import kubernetes
@@ -823,7 +823,7 @@ async def delete_vpn_with_tests_background(
                     cr for cr in cr_list
                     if (cr.spec or {}).get("vpnRef") == vpn_name
                 ]
-                logger.info(
+                logger.debug(
                     "VPN delete: found %d linked TrafficTest(s) for '%s'",
                     len(linked), vpn_name,
                 )
@@ -839,7 +839,7 @@ async def delete_vpn_with_tests_background(
                         )
                         if gone:
                             await _emit("deleted", resource_kind="TrafficTest", resource_name=tname)
-                            logger.info("Deleted TrafficTest/%s", tname)
+                            logger.debug("Deleted TrafficTest/%s", tname)
                         else:
                             logger.warning("Timed out waiting for TrafficTest/%s to be gone", tname)
                     except ApiException as exc:
@@ -865,7 +865,7 @@ async def delete_vpn_with_tests_background(
                 )
                 if gone:
                     await _emit("deleted", resource_kind="VyOSL3VPN", resource_name=vpn_name)
-                    logger.info("Deleted VyOSL3VPN/%s", vpn_name)
+                    logger.debug("Deleted VyOSL3VPN/%s", vpn_name)
                 else:
                     await _emit("failed", message=f"Timed out waiting for VPN {vpn_name} to be deleted")
                     logger.warning("Timed out waiting for VyOSL3VPN/%s to be gone", vpn_name)
@@ -879,7 +879,7 @@ async def delete_vpn_with_tests_background(
                     return
 
             await _emit("complete")
-            logger.info("VPN delete background complete for '%s'", vpn_name)
+            logger.debug("VPN delete background complete for '%s'", vpn_name)
 
         except Exception as exc:
             logger.error("Unhandled error in delete_vpn_with_tests_background: %s", exc, exc_info=True)
@@ -900,24 +900,24 @@ def initialise_default_network() -> None:
     Any error is logged but does **not** propagate — a missing descriptor is
     not fatal to the supervisor's other functions.
     """
-    logger.info("Checking for default network descriptor (id=%s) …", DEFAULT_NETWORK_ID)
+    logger.debug("Checking for default network descriptor (id=%s) …", DEFAULT_NETWORK_ID)
     try:
         database = spanner_connect()
 
         if _check_network_exists(database, DEFAULT_NETWORK_ID):
-            logger.info(
+            logger.debug(
                 "Default network descriptor already exists in Spanner — skipping initialisation."
             )
             return
 
-        logger.info(
+        logger.debug(
             "Default network descriptor not found — loading telco-lab descriptor …"
         )
         descriptor = _load_default_network_descriptor()
 
         vpn_names  = [v.get("metadata", {}).get("name", "?") for v in descriptor.get("vpns", [])]
         test_names = [t.get("metadata", {}).get("name", "?") for t in descriptor.get("traffic_tests", [])]
-        logger.info(
+        logger.debug(
             "Loaded descriptor '%s': %d VPN(s) %s, %d traffic test(s) %s",
             descriptor.get("name"),
             len(vpn_names), vpn_names,
@@ -925,7 +925,7 @@ def initialise_default_network() -> None:
         )
 
         _save_network_descriptor(database, descriptor)
-        logger.info("✓ Default network descriptor initialised successfully.")
+        logger.debug("✓ Default network descriptor initialised successfully.")
 
     except Exception as exc:
         logger.error(
