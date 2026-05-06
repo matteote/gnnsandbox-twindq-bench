@@ -1,3 +1,3 @@
-# 5G Virtual Network Repository
+# Virtual Network Repository
 
 ConfigSync "network" namespace repository

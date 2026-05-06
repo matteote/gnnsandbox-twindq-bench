@@ -13,20 +13,10 @@
 # limitations under the License.
 
 import logging
-import datetime
-import json
-from uuid import uuid4
 from agent.host_agent import HostAgent
 from tools.topology import build_graph
 from tools.logs import fetch_log_entries, delete_logs
 from tools.metrics import *
-from utils.error_handler import (
-    SupervisorAgentError,
-    ErrorSeverity,
-    send_error_message
-)
-from ag_ui.core import RunAgentInput, UserMessage
-from tools.agui import chartTool, approvalTool
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +26,7 @@ view_to_edge_label_map = {'network': 'isConnectedTo', 'resources': 'Manages', 'b
 
 class SocketEndpoint:
     """
-    Socket.IO endpoint for handling client connections.    
+    Socket.IO endpoint for handling client connections.
     """
 
     _instance = None
@@ -50,57 +40,18 @@ class SocketEndpoint:
         self.callbacks()
 
 
-    async def _convert_to_run_agent_input(self, data):
-        """
-        Convert incoming WebSocket data to AG-UI RunAgentInput.
-        
-        Args:
-            data: Parsed JSON data from WebSocket
-            
-        Returns:
-            RunAgentInput instance
-        """
-        # Handle simple text message format
-        if isinstance(data, dict) and 'text' in data:
-            # Simple text message - convert to AG-UI format
-            thread_id = data.get('thread_id', str(uuid4()))
-            run_id = data.get('run_id', str(uuid4()))
-            
-            user_message = UserMessage(
-                id=str(uuid4()),
-                content=data['text']
-            )
-            
-            return RunAgentInput(
-                thread_id=thread_id,
-                run_id=run_id,
-                state={},
-                messages=[user_message],
-                tools=[chartTool, approvalTool],
-                context=[],
-                forwardedProps={}
-            )
-        
-        # Handle full AG-UI RunAgentInput format
-        elif isinstance(data, dict) and 'thread_id' in data:
-            return RunAgentInput(**data)
-        
-        else:
-            raise ValueError(f"Invalid message format: {data}")
-
     async def sendPushNotification(self, data):
         """
         Send data to all connected clients
-        
+
         Args:
             data: The data to send to all connected clients
-            
+
         Returns:
             bool: True if the data was sent successfully, False otherwise
         """
         try:
             logger.info("Sending %s to all connected clients", data)
-            # Emit a 'push_notification' event to all connected clients
             await self.sio.emit('push_notification', data)
             return True
         except Exception as e:
@@ -113,98 +64,86 @@ class SocketEndpoint:
         async def connect(sid, environ, auth):
             logger.info("connected client %s", sid)
 
-            # add sio to the agent
-            agent=await HostAgent.get_instance()
-            agent.sio_sessions[sid]=self.sio
+            agent = await HostAgent.get_instance()
+            agent.sio_sessions[sid] = self.sio
             logger.info(agent.sio_sessions)
 
 
         @self.sio.event
-        async def agui_message(sid, data):
+        async def chat_message(sid, data):
             """
-            Handle AG-UI protocol messages via Socket.IO
-            
-            Args:
-                sid: Socket.IO session ID
-                data: AG-UI message data
+            Handle plain text chat messages from the dashboard.
+
+            Expected data format:
+                { "text": "<user message>", "thread_id": "<session id>" }
+
+            Responses are emitted as 'chat_response' events:
+                { "text": "<chunk>", "done": false }   -- streaming chunk
+                { "text": "",        "done": true  }   -- end of stream
             """
-            logger.info("AG-UI message from %s: %s", sid, data)
-            
+            logger.info("chat_message from %s: %s", sid, data)
+
             try:
-                # Convert to RunAgentInput
-                run_input = await self._convert_to_run_agent_input(data)
-                logger.info(f"SocketEndpoint: Converted to RunAgentInput - thread_id: {run_input.thread_id}, run_id: {run_input.run_id}")
-                
-                # Get agent instance and run AG-UI protocol
+                text = data.get('text', '') if isinstance(data, dict) else str(data)
+                # Use thread_id if provided; fall back to the socket session id so
+                # each browser tab gets its own conversation history.
+                thread_id = data.get('thread_id', sid) if isinstance(data, dict) else sid
+
+                if not text.strip():
+                    logger.warning("Received empty chat_message from %s — ignoring", sid)
+                    return
+
                 agent = await HostAgent.get_instance()
-                
-                # Stream AG-UI events back to client via Socket.IO
-                async for event in agent.run_agui(run_input):
-                    event_data = event.model_dump()
-                    await self.sio.emit('agui_event', event_data, room=sid)
-                    logger.debug(f"SocketEndpoint: Emitted {type(event).__name__} to session {sid}")
-                    
+
+                # Stream text chunks back to the client
+                async for chunk in agent.run(thread_id, text):
+                    await self.sio.emit('chat_response', {'text': chunk, 'done': False}, room=sid)
+
+                # Signal end of stream
+                await self.sio.emit('chat_response', {'text': '', 'done': True}, room=sid)
+
             except Exception as e:
-                logger.error(f"Error processing AG-UI message from {sid}: {e}", exc_info=True)
-                error_response = {
-                    "type": "RUN_ERROR",
-                    "message": f"Error processing AG-UI message: {str(e)}",
-                    "code": "AGUI_PROCESSING_ERROR"
-                }
-                await self.sio.emit('agui_event', error_response, room=sid)
+                logger.error(f"Error processing chat_message from {sid}: {e}", exc_info=True)
+                await self.sio.emit('chat_response', {
+                    'text': f'Error: {str(e)}',
+                    'done': True,
+                    'error': True
+                }, room=sid)
+
 
         @self.sio.event
         async def get_topology(sid, data):
             logger.info(f"get_topology for {sid}: {data}")
             try:
-                # Update the client topology preferences
                 if sid not in clients_state: clients_state[sid] = {}
                 clients_state[sid]['topology'] = data
 
-                # map dashboard view dropdown menu entries to graph labels
                 edge_label = view_to_edge_label_map[data['view']]
 
-                # Build the graph with selected edge label.
-                # build_graph uses the module-level _database singleton internally;
-                # the database argument is kept for signature compatibility only.
                 elements, success = build_graph(None, edge_label)
                 
                 if success:
-                    # Prepare response
                     response = {'elements': elements}
-                    
-                    # Send topology update to the client
                     await self.sio.emit('topology_update', response, room=sid)
                     logger.info(f"Sent topology update to {sid} with {len(elements)} elements for '{data['view']}' view")
                 else:
                     logger.error(f"Failed to build graph for client {sid}")
-                    error = SupervisorAgentError(
-                        message="Failed to build graph",
-                        severity=ErrorSeverity.ERROR
-                    )
-                    await send_error_message(self.sio, sid, error)
+                    await self.sio.emit('chat_response', {'text': '[ERROR] Failed to build graph', 'done': True, 'error': True}, room=sid)
                     await self.sio.emit('topology_update', {'error': "Failed to build graph"}, room=sid)
             except Exception as e:
                 logger.error(f"Error fetching topology: {e}")
-                error = SupervisorAgentError(
-                    message=f"Error fetching topology: {str(e)}",
-                    severity=ErrorSeverity.ERROR,
-                    original_exception=e
-                )
-                await send_error_message(self.sio, sid, error)
+                await self.sio.emit('chat_response', {'text': f'[ERROR] Error fetching topology: {str(e)}', 'done': True, 'error': True}, room=sid)
                 await self.sio.emit('topology_update', {'error': f"Error fetching topology: {str(e)}"}, room=sid)
                 
         @self.sio.event
         async def get_logs(sid, data):
             logger.info(f"get_logs for {sid}: {data}")
             try:                
-                # Update the client's log preference
                 if sid not in clients_state: clients_state[sid] = {}
                 clients_state[sid]['logs'] = data
                 
                 enabled = clients_state[sid]['logs']['enabled']
                 if enabled:
-                    # Fetch and send initial logs
                     logs = fetch_log_entries()
                     await self.sio.emit('logs_update', logs, room=sid)
                     logger.info(f"Sent initial logs to {sid}")
@@ -218,11 +157,9 @@ class SocketEndpoint:
         async def get_traces(sid, data):
             logger.info(f"========== get_traces called for {sid}: {data} ==========")
             try:
-                # Get current state to detect transitions
                 old_enabled = clients_state.get(sid, {}).get('traces', {}).get('enabled', False)
                 logger.info(f"Old trace enabled state for {sid}: {old_enabled}")
                 
-                # Update the client's trace preference
                 if sid not in clients_state: clients_state[sid] = {}
                 clients_state[sid]['traces'] = data
                 logger.info(f"Updated client state for {sid}: {clients_state[sid]}")
@@ -230,13 +167,10 @@ class SocketEndpoint:
                 enabled = data.get('enabled', False)
                 logger.info(f"New trace enabled state: {enabled}")
                 
-                # Access trace_listener from self (attached in main.py)
                 trace_listener = getattr(self, 'trace_listener', None)
                 logger.info(f"trace_listener object: {trace_listener}")
                 
-                # Manage listener based on client count
                 if enabled and not old_enabled:
-                    # Client enabled traces
                     logger.info("Client is ENABLING traces (transition from disabled to enabled)")
                     if trace_listener:
                         logger.info("Calling trace_listener.add_client()...")
@@ -244,12 +178,9 @@ class SocketEndpoint:
                         logger.info("✓ trace_listener.add_client() completed")
                     else:
                         logger.error("❌ trace_listener is None!")
-                    
-                    # Don't fetch historical traces - only send new traces from now on
                     logger.info("✓ Trace streaming enabled - will receive new traces from current time forward")
                     
                 elif not enabled and old_enabled:
-                    # Client disabled traces
                     logger.info("Client is DISABLING traces (transition from enabled to disabled)")
                     if trace_listener:
                         logger.info("Calling trace_listener.remove_client()...")
@@ -283,7 +214,6 @@ class SocketEndpoint:
         async def reset_traces(sid, data):
             logger.info(f"========== reset_traces called for {sid}: {data} ==========")
             try:
-                # Access trace_listener from self (attached in main.py)
                 trace_listener = getattr(self, 'trace_listener', None)
                 
                 if trace_listener:
@@ -299,16 +229,12 @@ class SocketEndpoint:
             except Exception as e:
                 logger.error(f"❌ Error handling reset_traces: {e}", exc_info=True)
 
-        # reset_chat handler removed - AG-UI chat panel manages thread IDs directly
-            
         @self.sio.event
         async def disconnect(sid):
             logger.info("disconnected from %s", sid)
 
-            # Check if this client had traces enabled
             if sid in clients_state:
                 if clients_state[sid].get('traces', {}).get('enabled', False):
-                    # Access trace_listener from self (attached in main.py)
                     trace_listener = getattr(self, 'trace_listener', None)
                     if trace_listener:
                         await trace_listener.remove_client()
@@ -316,8 +242,7 @@ class SocketEndpoint:
                 
                 del clients_state[sid]
 
-            # remove the sid/sio from the agent session
-            agent=await HostAgent.get_instance()
+            agent = await HostAgent.get_instance()
             if sid in agent.sio_sessions:
                 del agent.sio_sessions[sid]
             logger.info(agent.sio_sessions)
@@ -372,7 +297,6 @@ class SocketEndpoint:
             try:
                 success = clear_network_metrics()
                 if success:
-                    # Send empty metrics updates to the client
                     await self.sio.emit('all_last_metrics_update', {}, room=sid)
                     await self.sio.emit('all_metrics_update', {}, room=sid)
                     logger.info(f"Sent empty metrics after reset to {sid}")
@@ -381,66 +305,4 @@ class SocketEndpoint:
             except Exception as e:
                 logger.error(f"Error handling reset_metrics: {e}")
                 await self.sio.emit('all_metrics_update', {'error': f"Error resetting metrics: {str(e)}"}, room=sid)
-                
-        @self.sio.event
-        async def agui_tool_result(sid, data):
-            """
-            Handle AG-UI tool results from the dashboard UI
-            
-            Args:
-                sid: The session ID of the client
-                data: The tool result data containing tool_call_id and content
-            """
-            try:
-                tool_call_id = data.get('tool_call_id')
-                content = data.get('content')
-                
-                logger.info(f"Received AG-UI tool result from {sid}: {tool_call_id} -> {content}")
-                
-                # Extract thread_id from the encoded tool_call_id if present
-                # Format: original_id::thread_id
-                session_id_to_use = sid  # Default to socket session ID
-                
-                if tool_call_id and "::" in tool_call_id:
-                    # Extract thread_id from encoded tool_call_id
-                    parts = tool_call_id.split("::", 1)
-                    if len(parts) == 2:
-                        original_tool_call_id, thread_id = parts
-                        session_id_to_use = thread_id
-                        logger.info(f"Extracted thread_id {thread_id} from encoded tool_call_id {tool_call_id}")
-                    else:
-                        logger.warning(f"Invalid encoded tool_call_id format: {tool_call_id}")
-                else:
-                    logger.info(f"Using socket session ID {sid} as fallback for tool_call_id {tool_call_id}")
-                
-                # Get agent instance and forward the tool result with the correct session ID
-                agent = await HostAgent.get_instance()
-                await agent.handleToolResult(session_id_to_use, tool_call_id, content)
-                
-            except Exception as e:
-                logger.error(f"Error handling AG-UI tool result: {e}")
 
-        @self.sio.event
-        async def notification_feedback(sid, data):
-            """
-            Handle notification feedback from the dashboard UI (thumbs up/down)
-            
-            Args:
-                sid: The session ID of the client
-                data: The feedback data containing notification details and feedback type
-            """
-            try:
-                notification_id = data.get('notification_id')
-                feedback = data.get('feedback')  # 'approve' or 'reject'
-                notification_details = data.get('notification_details', {})
-                
-                # Log the feedback event
-                logger.info(f"Received notification feedback from {sid}: {feedback} for notification {notification_id}")
-                logger.info(f"Notification details: {notification_details}")
-                
-                agent = await HostAgent.get_instance()
-                # send the approval
-                await agent.sendApproval(notification_details['name'],feedback, notification_details['task_id'], notification_details['context_id'])
-
-            except Exception as e:
-                logger.error(f"Error handling notification feedback: {e}")

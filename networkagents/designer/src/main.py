@@ -35,7 +35,7 @@ BASE_DIR = os.path.dirname(os.path.realpath(__file__))
 
 def get_agent_card(host: str, port: int):
     """Returns the Agent Card for the Designer Agent."""
-    capabilities = AgentCapabilities(streaming=True, push_notifications=True)
+    capabilities = AgentCapabilities(streaming=True, push_notifications=False)
     skill = AgentSkill(
         id='designer_agent',
         name='Designer Agent',

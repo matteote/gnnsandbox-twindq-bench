@@ -14,7 +14,6 @@
 
 import httpx
 import logging
-import datetime
 from a2a.client import A2AClient
 from a2a.types import (
     AgentCard,
@@ -40,11 +39,11 @@ class RemoteAgentConnections:
 
     def __init__(self, host_agent, agent_card: AgentCard, address: str):
         self.host_agent = host_agent
-        self.agent_client =None
+        self.agent_client = None
 
         self.card = agent_card
         self.address = address
-        self.agent_client=None
+        self.agent_client = None
 
         self.conversation_name = None
         self.conversation = None
@@ -53,61 +52,35 @@ class RemoteAgentConnections:
     async def create_client(self):
         logger.info("creating client for %s with address %s", self.card.name, self.address)
         self.agent_client = A2AClient(httpx_client=httpx.AsyncClient(timeout=30.0), agent_card=self.card)
-        # the discovered card address is the internal address of the server, make sure to update with the external address or is not reachable
-        self.agent_client.url=self.address
+        # The discovered card address may be an internal address; override with the
+        # external address so the client can actually reach the remote agent.
+        self.agent_client.url = self.address
 
     def get_agent(self) -> AgentCard:
         return self.card
 
     async def send_message(self, sio_list, text):
         """
-        Utility function to send AG-UI events back to the dashboard ui
+        Send a plain text progress update to all connected dashboard clients.
+
+        Args:
+            sio_list: dict of {sid: sio} for all active socket sessions
+            text: the text to send
         """
-        if text != '':
-            # Generate a unique message ID for this progress update
-            import uuid
-            message_id = str(uuid.uuid4())
-            
-            # Send proper AG-UI events: START -> CONTENT -> END
-            start_event = {
-                'type': 'TEXT_MESSAGE_START',
-                'timestamp': None,
-                'raw_event': None,
-                'message_id': message_id,
-                'role': 'assistant'
-            }
-            
-            content_event = {
-                'type': 'TEXT_MESSAGE_CONTENT',
-                'timestamp': None,
-                'raw_event': None,
-                'message_id': message_id,
-                'delta': text
-            }
-            
-            end_event = {
-                'type': 'TEXT_MESSAGE_END',
-                'timestamp': None,
-                'raw_event': None,
-                'message_id': message_id
-            }
-            
-            # Send AG-UI events to all registered sessions
+        if text:
             for sid, sio in sio_list.items():
-                await sio.emit('agui_event', start_event, room=sid)
-                await sio.emit('agui_event', content_event, room=sid)
-                await sio.emit('agui_event', end_event, room=sid)
+                await sio.emit('chat_response', {'text': text, 'done': False}, room=sid)
 
     async def send_task(self, request: SendMessageRequest):
         """
-        Send a request/response request to the agent - driven by background agent to agent interaction
+        Send a request/response (non-streaming) message to the remote agent.
+        Used for background agent-to-agent interactions such as approval forwarding.
         """
         logger.info("REMOTE AGENT SEND TASK")
         logger.info(request)
         logger.info(self.agent_client.url)
 
         try:
-
             result = await self.agent_client.send_message(request)
             return result
 
@@ -119,15 +92,25 @@ class RemoteAgentConnections:
     async def send_streaming_task(
         self,
         request: SendStreamingMessageRequest,
-        session_id, 
+        session_id,
         sio_list
-    ) -> Task | None:
+    ) -> tuple:
         """
-        Send a streaming request to the agent - driven by chat interaction
+        Send a streaming request to the remote agent — driven by chat interaction.
+        Progress updates are forwarded to the dashboard via plain 'chat_response' socket events.
+
+        Returns a tuple of (taskStatus, observed_task_id) so the caller can persist
+        the task_id through ADK's tool_context.state (direct session.state mutations
+        made via updateState() are lost when ADK rebuilds state from event history).
         """
         logger.info("REMOTE AGENT SEND STREAMING TASK")
         logger.info(request)
         logger.info(self.agent_client.url)
+
+        # Track the task_id observed in the stream; returned to the caller so it
+        # can be stored via tool_context.state (which creates an ADK event and
+        # therefore survives the next runner turn).
+        observed_task_id = None
 
         try:
             if self.card.capabilities.streaming:
@@ -138,9 +121,9 @@ class RemoteAgentConnections:
 
                         if isinstance(chunk.root, SendStreamingMessageSuccessResponse) and isinstance(chunk.root.result, Task):
                             task: Task = chunk.root.result
-                            # Update the session state with the task ID and agent name for the current session
+                            observed_task_id = task.id
                             await self.host_agent.updateState(
-                                session_id=session_id, 
+                                session_id=session_id,
                                 agent_name=self.card.name,
                                 task_status="submitted",
                                 task_id=task.id
@@ -155,7 +138,6 @@ class RemoteAgentConnections:
                         if isinstance(chunk.root, SendStreamingMessageSuccessResponse) and isinstance(chunk.root.result, TaskStatusUpdateEvent):
                             taskStatus: TaskStatusUpdateEvent = chunk.root.result.status
 
-                            # Check if there's an error in the task status
                             if taskStatus.state == TaskState.failed:
                                 error_message = "Task failed"
                                 if taskStatus.message and taskStatus.message.parts and taskStatus.message.parts[0].root.text:
@@ -167,22 +149,19 @@ class RemoteAgentConnections:
                                     severity=ErrorSeverity.ERROR
                                 )
                                 await send_error_message(sio_list, error)
-                                return taskStatus
+                                return taskStatus, observed_task_id
 
-                            # if input is required then return the task status message
                             if taskStatus.state == TaskState.input_required:
                                 logger.info("need info - returning task to supervisor to collect user input")
-                                return taskStatus
+                                return taskStatus, observed_task_id
                             
                             if taskStatus.state == TaskState.working:
                                 logger.info('working through steps.')
-                                # don't return to the model - just send update to socket so user see'sd progress in chat
                                 await self.send_message(sio_list, taskStatus.message.parts[0].root.text)
 
                             if taskStatus.state == TaskState.completed:
-                                # task is finished so get supervisor agent to summarise
                                 logger.info("Task is completed")
-                                return taskStatus
+                                return taskStatus, observed_task_id
 
                 except httpx.HTTPError as e:
                     error = RemoteAgentError(
@@ -225,5 +204,8 @@ class RemoteAgentConnections:
                 logger.error(f"Unexpected error in send_task: {str(e)}", exc_info=True)
                 raise error
             else:
-                # Re-raise SupervisorAgentError instances
                 raise
+
+        # Stream exhausted without hitting a terminal state event.
+        # Return the observed task_id so the caller can still persist it.
+        return None, observed_task_id

@@ -13,23 +13,77 @@
 # limitations under the License.
 
 from google.adk.agents import LlmAgent
+from google.adk.agents.callback_context import CallbackContext
+from google.genai import types
 from agent.subagents.prompts import descriptor_approve_prompt
+from tools.vyos import getVyosDescriptors
+from tools.design import deployDescriptor, deleteDescriptor
 import logging
 
 logger = logging.getLogger(__name__)
 
+
+def deploy_if_approved(callback_context: CallbackContext):
+    """
+    After the approval agent runs, check whether the descriptors were approved.
+    If approved, deploy each YAML document from state['design'] directly.
+    Deployment is deterministic Python — no LLM tool-calling required.
+    """
+    approval_result = callback_context.state.get('approval_result', '')
+    if not approval_result or 'APPROVED' not in approval_result.upper():
+        logger.info("Descriptors not approved — skipping deployment. Result: %s",
+                    str(approval_result)[:120])
+        return None
+
+    design_yaml = callback_context.state.get('design', '')
+    if not design_yaml:
+        logger.error("Approval granted but state['design'] is empty — nothing to deploy")
+        return types.Content(
+            role='model',
+            parts=[types.Part.from_text(
+                text="APPROVED but no YAML descriptors found in state to deploy."
+            )]
+        )
+
+    # Split multi-document YAML on --- separators
+    documents = [doc.strip() for doc in design_yaml.split('---') if doc.strip()]
+    logger.info("Deploying %d approved descriptor(s)", len(documents))
+
+    results = []
+    for doc in documents:
+        result = deployDescriptor(doc)
+        logger.info("deployDescriptor result: %s", result)
+        results.append(result)
+
+    summary = "\n".join(results)
+    return types.Content(
+        role='model',
+        parts=[types.Part.from_text(
+            text=f"Deployment complete:\n{summary}"
+        )]
+    )
+
+
 ###################################################
 # Approve L3VPN Descriptors Sub Agent
 # ------------------------------------
-# Given a set of updated vyos descriptors, evaluate
-# if a) the descriptors are syntactically correct
-# and b) the impact to the network will be 
-# positive. 
+# Validates that the generated CRD descriptors:
+#   a) exactly match the approved plan (one CRD
+#      per planned change, correct kind and name)
+#   b) are syntactically valid YAML conforming to
+#      the VyOS CRD schemas
+#
+# After running, the after_agent_callback fires:
+#   - reads the YAML from state['design']
+#   - if APPROVED, calls deployDescriptor() for
+#     each document directly in Python
 ###################################################
 approval_agent = LlmAgent(
     name="ApproveDescriptorSubAgent",
     model="gemini-2.5-flash",
     instruction=descriptor_approve_prompt,
-    description="Approve syntax and design compliance of proposed descriptor changes",
-    tools=[],
+    description="Validate that generated descriptors match the approved plan and are schema-compliant",
+    tools=[getVyosDescriptors],
+    output_key='approval_result',
+    after_agent_callback=deploy_if_approved,
 )

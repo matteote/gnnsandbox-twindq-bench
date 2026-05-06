@@ -47,8 +47,14 @@ SPANNER_INSTANCE     = os.getenv("SPANNER_INSTANCE",     "networktopology-instan
 SPANNER_DATABASE     = os.getenv("SPANNER_DATABASE",     "networktopology-db")
 GOOGLE_CLOUD_PROJECT = os.getenv("GOOGLE_CLOUD_PROJECT", None)
 # Per-type thresholds are loaded from model_stats.pth at runtime;
-# these are only the hard fallback defaults.
-_FALLBACK_THRESHOLDS = {"router": 0.15, "interface": 0.20, "bgp_session": 0.10}
+# these are only the hard fallback defaults (matches ANOMALY_THRESHOLDS in gnn_utils).
+_FALLBACK_THRESHOLDS = {
+    "router":      0.15,
+    "interface":   0.20,
+    "bgp_session": 0.10,
+    "vrf":         0.10,
+    "flow":        0.15,
+}
 INTERVAL_MINUTES     = int(os.getenv("INTERVAL_MINUTES", "5"))
 CACHE_DIR            = Path(tempfile.gettempdir()) / "gnn_model_cache"
 
@@ -232,13 +238,20 @@ def _write_results_to_spanner(database, node_id_map: dict, snapshot: dict, resul
 async def _run_inference() -> dict:
     """Run one HetGNN inference cycle and return a result summary dict."""
     import torch
-    from utils.gnn_utils import ROUTER_FEATURES, INTERFACE_FEATURES, BGP_SESSION_FEATURES
+    from utils.gnn_utils import (
+        ROUTER_FEATURES, INTERFACE_FEATURES, BGP_SESSION_FEATURES,
+        VRF_FEATURES, FLOW_FEATURES,
+    )
     from utils.data import SpannerDataset
 
+    # Maps each node type to its ordered feature name list for anomaly explanations.
+    # When a node is anomalous, the top-3 feature names with highest MSE are reported.
     FEATURE_NAMES = {
         "router":      ROUTER_FEATURES,
         "interface":   INTERFACE_FEATURES,
         "bgp_session": BGP_SESSION_FEATURES,
+        "vrf":         VRF_FEATURES,
+        "flow":        FLOW_FEATURES,
     }
 
     manifest = _load_manifest()
@@ -249,18 +262,24 @@ async def _run_inference() -> dict:
     device        = _cache["device"]
     thresholds    = _cache.get("thresholds", _FALLBACK_THRESHOLDS)
 
-    # Fetch the latest snapshot
+    # Fetch the two most-recent snapshots so that temporal gradient / delta
+    # features (rx_err_gradient, prefix_count_delta, vrf_route_count_delta,
+    # throughput_delta) can be computed via compute_temporal_features().
+    # Only the latest snapshot is passed to the model; the earlier one is only
+    # used as the "previous" reference for finite-difference computation.
     dataset = SpannerDataset(
         instance_id=SPANNER_INSTANCE,
         database_id=SPANNER_DATABASE,
-        num_snapshots=1,
+        num_snapshots=2,
         interval_minutes=INTERVAL_MINUTES,
         project_id=GOOGLE_CLOUD_PROJECT,
     )
     timestamps = dataset._get_timestamps()
-    latest_ts  = timestamps[-1]
-    snapshot   = dataset.fetch_snapshot(latest_ts)
-    logger.info(f"Fetched snapshot at {latest_ts.isoformat()}")
+    pair = [dataset.fetch_snapshot(ts) for ts in timestamps[-2:]]
+    SpannerDataset.compute_temporal_features(pair, interval_seconds=INTERVAL_MINUTES * 60)
+    latest_ts = timestamps[-1]
+    snapshot  = pair[-1]   # the second snapshot has its deltas populated
+    logger.info(f"Fetched snapshot pair ending at {latest_ts.isoformat()} (temporal features computed)")
 
     hetero_data = graph_builder.process_snapshot(snapshot)
     node_id_map = hetero_data.node_id_map   # {ntype: [node_id, ...]}

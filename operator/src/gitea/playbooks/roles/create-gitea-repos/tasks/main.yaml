@@ -40,10 +40,6 @@
   command: "curl -k  -H 'Content-Type: application/json'  -H 'Authorization: token {{ token_result['sha1'] }}' https://{{external_ip_address}}:3000/api/v1/user/repos -d '{\"name\": \"networkdesign\"}' --insecure"
   when: token_result.sha1 is defined
 
-- name: create incidents repo
-  command: "curl -k  -H 'Content-Type: application/json'  -H 'Authorization: token {{ token_result['sha1'] }}' https://{{external_ip_address}}:3000/api/v1/user/repos -d '{\"name\": \"incidents\"}' --insecure"
-  when: token_result.sha1 is defined
-
 ########################################################
 # NetworkAgent SSH Key
 ########################################################

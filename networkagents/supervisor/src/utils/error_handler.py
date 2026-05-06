@@ -14,7 +14,6 @@
 
 import logging
 import traceback
-import datetime
 from enum import Enum
 from typing import Optional, Dict, Any, Callable
 
@@ -90,59 +89,31 @@ class AuthenticationError(SupervisorAgentError):
 
 async def send_error_message(sio_sessions, error: SupervisorAgentError):
     """
-    Send an error message to the user through the socket.
-    
+    Send an error message to connected dashboard clients via plain 'chat_response' events.
+
     Args:
-        sio_sessions: Dictionary of socket sessions
+        sio_sessions: Dictionary of {sid: sio} socket sessions
         error: The error that occurred
     """
     # Format the error message with severity
     error_message = f"[{error.severity.value}] {error.message}"
     
-    # Add details if available
+    # Append human-readable details (skip raw traceback)
     if error.details:
-        error_details = "\n\nDetails:\n"
+        detail_lines = []
         for key, value in error.details.items():
-            if key == "traceback":
-                # Don't include traceback in user-facing messages
-                continue
-            else:
-                error_details += f"\n{key}: {value}"
-        error_message += error_details
-    
-    # Generate a unique message ID for this error
-    import uuid
-    message_id = str(uuid.uuid4())
-    
-    # Send proper AG-UI events: START -> CONTENT -> END
-    start_event = {
-        'type': 'TEXT_MESSAGE_START',
-        'timestamp': None,
-        'raw_event': None,
-        'message_id': message_id,
-        'role': 'assistant'
-    }
-    
-    content_event = {
-        'type': 'TEXT_MESSAGE_CONTENT',
-        'timestamp': None,
-        'raw_event': None,
-        'message_id': message_id,
-        'delta': error_message
-    }
-    
-    end_event = {
-        'type': 'TEXT_MESSAGE_END',
-        'timestamp': None,
-        'raw_event': None,
-        'message_id': message_id
-    }
+            if key != "traceback":
+                detail_lines.append(f"{key}: {value}")
+        if detail_lines:
+            error_message += "\n\nDetails:\n" + "\n".join(detail_lines)
 
-    # Send AG-UI events to all registered sessions
+    # Emit a plain chat_response event to every connected session
     for sid, sio in sio_sessions.items():
-        await sio.emit('agui_event', start_event, room=sid)
-        await sio.emit('agui_event', content_event, room=sid)
-        await sio.emit('agui_event', end_event, room=sid)
+        await sio.emit('chat_response', {
+            'text': error_message,
+            'done': True,
+            'error': True
+        }, room=sid)
         logger.info(f"Sent error message to {sid}: {error_message}")
 
 def with_error_handling(error_handler: Callable):
@@ -176,24 +147,16 @@ def with_error_handling(error_handler: Callable):
                 elif e.severity == ErrorSeverity.CRITICAL:
                     logger.critical(f"SupervisorAgentError: {e.message}", exc_info=True)
                 
-                # Call the error handler
                 await error_handler(e)
-                
-                # Re-raise the error to be handled by the caller
                 raise
             except Exception as e:
-                # Convert generic exceptions to SupervisorAgentError
                 error = SupervisorAgentError(
                     message=f"Unexpected error: {str(e)}",
                     severity=ErrorSeverity.ERROR,
                     original_exception=e
                 )
                 logger.error(f"Unexpected error: {str(e)}", exc_info=True)
-                
-                # Call the error handler
                 await error_handler(error)
-                
-                # Re-raise as SupervisorAgentError
                 raise error
         
         return wrapper

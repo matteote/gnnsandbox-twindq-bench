@@ -5,3 +5,4 @@ google-cloud-container==2.61.0
 google-api-python-client==2.183.0
 ruamel.yaml==0.18.15
 pydantic==2.11.9
+py-gitea==0.2.10

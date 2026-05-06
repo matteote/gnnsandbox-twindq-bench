@@ -3,7 +3,7 @@ import 'package:provider/provider.dart';
 import '../appstate.dart';
 import '../models/network_node.dart';
 import '../utils/environment_config.dart';
-import '../widgets/agui_chat_panel.dart';
+import '../widgets/chat_panel.dart';
 import '../widgets/topology/google_maps_topology.dart';
 import '../widgets/topology/logical_topology.dart';
 import '../widgets/markdown_drawer.dart';
@@ -393,7 +393,7 @@ class _NetworkDashboardState extends State<NetworkDashboard>
           if (_showChat) ...[
             SizedBox(
               width: MediaQuery.of(context).size.width * _chatPanelRatio,
-              child: AGUIChatPanel(socket: appState.socket!),
+              child: ChatPanel(socket: appState.socket!),
             ),
 
             // Horizontal resizable divider for chat panel

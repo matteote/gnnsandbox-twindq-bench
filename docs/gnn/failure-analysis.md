@@ -4,9 +4,7 @@ This document analyses all fault injection scenarios for the telco-lab L3VPN net
 in the actual topology and traffic descriptors, and explains how the GNN-based RCA approach
 compares with traditional fault management for each failure type.
 
-It also proposes an extended HetGNN graph schema that adds `vrf` and `flow` node types to the
-existing `router → interface → bgp_session` topology graph, creating a four-layer model that
-spans from kernel interface counters up to end-to-end application performance.
+For the GNN model definition — graph schema, node features, edge types, model architecture, training pipeline, and fault classification algorithm — see [rca.md](rca.md).
 
 ---
 
@@ -97,6 +95,17 @@ spans from kernel interface counters up to end-to-end application performance.
 | d3-red (10.101.3.10) | Plymouth | PE3 (Brighton) | ce3-red | 10.101.3.0/24 |
 | d4-red (10.101.4.10) | Leicester | PE4 (Cardiff) | ce4-red | 10.101.4.0/24 |
 
+### Route Target Policy (BLUE VPN Hub-and-Spoke)
+
+| Role | PE Router | VRF | Export RT | Import RT |
+|---|---|---|---|---|
+| Spoke | PE1 (Oxford) | `BLUE_SPOKE` | `65035:1011` | `65035:1030` |
+| Spoke | PE3 (Brighton) | `BLUE_SPOKE` | `65035:1011` | `65035:1030` |
+| Spoke | PE4 (Cardiff) | `BLUE_SPOKE` | `65035:1011` | `65035:1030` |
+| Hub | PE2 (Cambridge) | `BLUE_HUB` | `65035:1030` | `65035:1011`, `65035:1030` |
+
+> The hub imports both spoke routes (`65035:1011`) and its own routes (`65035:1030`) to enable spoke-to-spoke traffic via the hub. Fault 4 changes PE3's import RT to `65035:9999`, breaking this policy.
+
 ### Traffic Tests
 
 **BLUE VPN Traffic Tests (`l3vpn-blue-test.yaml`):**
@@ -121,168 +130,7 @@ spans from kernel interface counters up to end-to-end application performance.
 
 ---
 
-## Extended GNN Graph Schema
-
-The baseline HetGNN graph (`router → interface → bgp_session`) is a *topology* graph. It knows
-nothing about what VRF is forwarding a packet or what application performance looks like
-end-to-end. Adding `vrf` and `flow` node types creates a **four-layer graph** spanning from
-kernel interface counters all the way up to application performance.
-
-### Full Node Type List
-
-| Node Type | Layer | Description |
-|---|---|---|
-| `router` | Physical / Control | Any router (P, PE, RR, CE). Role in `role_id` one-hot feature. |
-| `interface` | Physical | A network interface on a router. |
-| `bgp_session` | Overlay | A BGP neighbour relationship within a VRF. |
-| **`vrf`** | **L3VPN Policy** | **A VRF instance on a PE router. One node per VRF per PE (e.g., `BLUE_SPOKE@PE3`, `RED_VPN@PE1`, `BLUE_HUB@PE2`).** |
-| **`flow`** | **Application** | **An end-to-end traffic flow from a `TrafficTest` resource. One node per direction.** |
-
----
-
-### Node Features — `router`
-
-| Feature | Source Metric | Derivation | Description |
-|---|---|---|---|
-| `state` | `node_network_up` | `1.0` if any interface up, else `0.0` | Router operational state |
-| `cpu` | `node_load1` | `ALIGN_MEAN` over snapshot window | 1-minute CPU load. > 1.0 = overload |
-| `mem` | `node_memory_MemAvailable_bytes` | `min(bytes / 4 GiB, 1.0)` | Available memory normalised; lower = more pressure |
-| `ospf_num_routes` | `frr_route_total` (afi=ipv4) | `log1p(count)` | Total IPv4 routes in FRR table |
-| `pfx_count_norm` | `frr_bgp_peer_prefixes_advertised_count_total` | Sum across all peers, `log1p` | Total BGP prefixes advertised |
-| `bgp_update_rate` | `frr_bgp_update_total` | `ALIGN_RATE`, `log1p` | BGP UPDATE messages per second. Spike = UPDATE storm / route churn. **Primary Fault 10 signal.** |
-| `vrf_count` | VRF table count per router | `log1p(count)` | Number of active VRFs. Unexpected growth = config drift or route leak |
-| `fib_size_norm` | FIB entry count / `vrf_count` | `log1p(ratio)` | FIB entries per VRF. Disproportionate growth = route duplication from a leak |
-| `role_p` | `PhysicalRouter.role` | one-hot | P router |
-| `role_pe` | `PhysicalRouter.role` | one-hot | Provider Edge |
-| `role_rr` | `PhysicalRouter.role` | one-hot | Route Reflector |
-| `role_ce` | `PhysicalRouter.role` | one-hot | Customer Edge |
-
----
-
-### Node Features — `interface`
-
-| Feature | Source Metric | Derivation | Description |
-|---|---|---|---|
-| `state` | `node_network_up` | `1.0` = up, `0.0` = down | Interface operational state |
-| `rx_drops` | `node_network_receive_drop_total` | `ALIGN_RATE`, `log1p` | Inbound drop rate |
-| `tx_drops` | `node_network_transmit_drop_total` | `ALIGN_RATE`, `log1p` | Outbound drop rate. Egress queue overflow |
-| `mtu_norm` | `node_network_mtu_bytes` | `bytes / 9000` | MTU normalised against 9 KB jumbo maximum |
-| `tx_queue_len_norm` | `node_network_transmit_queue_length` | `txqueuelen / 1000` | Transmit queue depth normalised against default (1000). **`txqueuelen 20` → 0.02 vs. healthy 1.0. Direct Fault 8 signal.** |
-| `rx_err_gradient` | `node_network_receive_errs_total` | `(rate_t − rate_{t-1}) / interval_seconds` | Rate of change of inbound errors. Detects rising error trend. **Fault 5 proactive signal.** |
-| `tx_util` | `node_network_transmit_bytes_total` | `ALIGN_RATE` / interface speed | Transmit utilisation [0, 1] |
-| `rx_util` | `node_network_receive_bytes_total` | `ALIGN_RATE` / interface speed | Receive utilisation [0, 1] |
-
----
-
-### Node Features — `bgp_session`
-
-| Feature | Source | Derivation | Description |
-|---|---|---|---|
-| `bgp_state` | `BGPSession.status` | `1.0` = Established, `0.0` = other | Session establishment state |
-| `pfx_count_norm` | `frr_bgp_peer_prefixes_advertised_count_total` | Per-session, `log1p` | Prefixes advertised on this session |
-| `prefix_count_delta` | same | `count_t − count_{t-1}` | Change in advertised prefixes. Sudden drop = route withdrawal |
-| `session_uptime_norm` | `BGPSession.valid_start_ts` | `(snapshot_ts − valid_start_ts).total_seconds() / 86400` | Session age in days, capped at 1.0. Low = recent re-establishment (flapping) |
-| `rt_import_count` | VRF RT import policy | Count of RT values in import policy | Increase = potential cross-VPN leak |
-
----
-
-### Node Features — `vrf` ⭐ NEW
-
-| Feature | Source | Derivation | Description |
-|---|---|---|---|
-| `vrf_route_count` | `frr_route_total` per VRF | `log1p(count)` | Routes in this VRF's RIB. Sudden drop = RT misconfiguration or session failure |
-| `vrf_route_count_delta` | same | `count_t − count_{t-1}` | Rate of change. Sudden negative = route withdrawal event |
-| `rt_import_hash` | VRF RT import policy | Hash of the set of configured import RTs, normalised to [0,1] | **Deviates when RT is misconfigured. Direct Fault 4 detection** — `BLUE_SPOKE@PE3` deviates when import RT changes from `65035:1030` to `65035:9999` |
-| `rt_export_hash` | VRF RT export policy | Hash of the set of configured export RTs, normalised to [0,1] | **Deviates when routes are leaked to wrong VPNs. Direct Fault 11 detection.** |
-| `vrf_mem_bytes_norm` | `/proc/net/vrf_stats` or FRR MIB | `bytes / ceiling_bytes` | Memory consumed by VRF RIB. Disproportionate growth = route duplication |
-| `vrf_active_sessions` | BGPSession count per VRF | `log1p(count)` | Active BGP sessions in this VRF. Drop to 0 = all CE sessions lost |
-| `vpn_blue` | VRF configuration | `1.0` if BLUE VPN | One-hot VPN identity — enables model to learn per-VPN baseline behaviour |
-| `vpn_red` | VRF configuration | `1.0` if RED VPN | One-hot VPN identity |
-| `is_hub` | VRF role in VPN | `1.0` if hub VRF (`BLUE_HUB`) | Distinguishes hub from spoke VRFs |
-
----
-
-### Node Features — `flow` ⭐ NEW
-
-One node per traffic test flow direction. Both directions of bidirectional tests become separate
-nodes. Sourced from `TrafficTest` resources and `traffic-agent` Prometheus metrics.
-
-| Feature | Source | Derivation | Description |
-|---|---|---|---|
-| `throughput_norm` | `traffic_agent` `throughput_bps` | `actual_bps / max_bandwidth` | Throughput as fraction of configured maximum |
-| `throughput_delta` | same | `throughput_t − throughput_{t-1}` | Rate of change. Sudden drop = fault onset |
-| `expected_rate_deviation` | `throughput_bps` vs. pattern model | `(expected_bps(t) − actual_bps) / expected_bps(t)` | **Most powerful flow feature.** The model knows each flow's traffic pattern (`multi_sine`, `schedule`, `constant`) and the current time. For the constant 8 Mbps hub push: `expected_bps = 8e6` always; any shortfall is immediately anomalous. For multi_sine flows: `expected_bps(t)` is computed from the waveform — the GNN flags deviations even when absolute throughput looks "reasonable" for the time of day. |
-| `latency_ms_norm` | `traffic_agent` `latency_ms` | `ms / training_baseline_ms` | Latency relative to learned healthy baseline. Spike = congestion or routing change. **Primary Fault 9 signal.** |
-| `jitter_norm` | `traffic_agent` `jitter_ms` | `ms / training_baseline_jitter` | Jitter relative to baseline. Spike on a constant-rate UDP flow = queue saturation. **Primary Fault 8 signal.** |
-| `packet_loss_pct` | `traffic_agent` `packet_loss_pct` | direct | End-to-end packet loss |
-| `active_sessions_norm` | `traffic_agent` `active_sessions` | `active / configured_concurrent_users` | < 1.0 = sessions failing to establish |
-| `protocol_tcp` | `TrafficTest.protocol` | `1.0` if TCP | TCP flows absorb drops via retransmission, masking interface-layer faults |
-| `is_constant` | `TrafficTest.pattern_type` | `1.0` if pattern is `constant` | Constant-rate flows have zero natural variance; any deviation is a clean anomaly |
-
----
-
-### Edge Types — Complete Schema
-
-Edges are expressed as `(source_node_type, relation_name, target_node_type)`. All edges are
-bidirectional (both directions added) unless marked directional.
-
-**Existing edges (baseline schema):**
-
-| Edge | Layer | Description |
-|---|---|---|
-| `(router, has_interface, interface)` | Physical | Router owns an interface |
-| `(interface, connected_to, interface)` | Physical | Two interfaces physically cabled together |
-| `(router, ospf_peer, router)` | Underlay | OSPF adjacency between two routers |
-| `(router, bgp_peer, router)` | Overlay | BGP session between two routers |
-| `(bgp_session, session_on, router)` | Overlay | BGP session belongs to a router via its VRF |
-
-**New VRF edges:**
-
-| Edge | Layer | Description |
-|---|---|---|
-| `(router, has_vrf, vrf)` | L3VPN Policy | PE router owns a VRF |
-| `(vrf, contains_session, bgp_session)` | L3VPN Policy | VRF is the parent of this BGP session |
-| `(vrf, same_vpn_as, vrf)` | L3VPN Policy | Two VRFs belong to the same VPN (linked by shared RT). Enables the model to detect coordinated faults across all VPN VRFs. |
-| `(vrf, leaks_to, vrf)` | L3VPN Anomaly | **Derived anomaly edge.** Present only when RT export of VRF A matches RT import of VRF B across a VPN boundary. The GNN has never seen this edge during training — its appearance is directly anomalous. |
-
-**New flow edges:**
-
-| Edge | Layer | Description |
-|---|---|---|
-| `(flow, ingresses_at, interface)` | Application | Flow enters the network at this CE-facing interface |
-| `(flow, egresses_at, interface)` | Application | Flow exits via this interface (computed from FIB at each snapshot). **When OSPF reroutes traffic, this edge changes — coordinated shifts across multiple flow nodes is the Fault 9 signature.** |
-| `(flow, belongs_to_vrf, vrf)` | Application | Flow is forwarded within this VRF |
-| `(flow, source_pe, router)` | Application | Ingress PE router for this flow |
-| `(flow, dest_pe, router)` | Application | Egress PE router for this flow |
-| `(flow, transits, interface)` | Application | Flow crosses this core interface (computed from OSPF path). Multiple flows simultaneously changing their `transits` edges = topology-wide rerouting event. |
-
----
-
-### Why the Four-Layer Graph Changes Everything
-
-```
-router ──── interface ──── bgp_session          ← baseline: topology only
-   │              │
-   │         tx_queue_len_norm                  ← new: direct Fault 8 detection
-   │
-   ▼
-  vrf ──── bgp_session                          ← NEW: L3VPN policy plane
-   │    rt_import_hash   rt_export_hash         ← direct Fault 4 + 11 signals
-   │
-   ▼
-  flow ──── interface (egresses_at / transits)  ← NEW: application plane
-         expected_rate_deviation                ← direct Fault 8 + 9 signals
-         jitter_norm                            ← direct Fault 8 signal
-         latency_ms_norm                        ← direct Fault 9 signal
-```
-
-| Fault | Without VRF/Flow nodes | With VRF/Flow nodes |
-|---|---|---|
-| F4 Wrong RT | Inferred from bgp_session pfx_count drop | **Direct**: `rt_import_hash` deviation on `BLUE_SPOKE@PE3` |
-| F8 TX Queue | Inferred from tx_drops + tx/rx asymmetry | **Direct**: `tx_queue_len_norm=0.02` + `jitter_norm` spike on flow node |
-| F9 OSPF Cost | Detected from `tx_util≈0` on P2/eth1 | **Confirmed**: `latency_ms_norm` spike + coordinated `egresses_at` edge shift across flows |
-| F11 Route Leak | Only pfx_count anomaly on bgp_sessions | **Direct**: `rt_export_hash` deviation + anomalous `leaks_to` cross-VPN edge |
-| F10 CPU Storm | No detection (cpu/mem unused) | **Direct**: `bgp_update_rate` spike on RR1 |
+> **GNN model details** — for the full graph schema (node types, features, edge types), model architecture, training pipeline, inference scoring, and fault classification algorithm, see [rca.md](rca.md).
 
 ---
 
@@ -352,6 +200,7 @@ The table below shows which GNN node features each fault exercises. A comprehens
 | Property | Value |
 |---|---|
 | **Type** | `MTU_MISMATCH` |
+| **File** | `l3vpn-hub-spoke-fault1-mtu.yaml` |
 | **Target** | PE1 / eth1 (Oxford → London, 172.16.90.0/24) |
 | **Alarms generated** | ❌ None |
 | **Severity** | Performance degradation — intermittent |
@@ -390,6 +239,7 @@ The table below shows which GNN node features each fault exercises. A comprehens
 | Property | Value |
 |---|---|
 | **Type** | `BGP_SESSION_DOWN` |
+| **File** | `l3vpn-hub-spoke-fault2-ce-down.yaml` |
 | **Target** | PE2 / eBGP session to ce1-hub (10.80.80.0/24, VLAN 402) |
 | **Alarms generated** | ✅ BGP session-down trap |
 | **Severity** | Service outage — total BLUE VPN blackout |
@@ -424,6 +274,7 @@ The table below shows which GNN node features each fault exercises. A comprehens
 | Property | Value |
 |---|---|
 | **Type** | `PROCESS_CRASH` |
+| **File** | `l3vpn-hub-spoke-fault3-rr1-crash.yaml` |
 | **Target** | RR1 (Birmingham, 10.0.0.1) — bgpd kill or loopback disable |
 | **Alarms generated** | ✅ 4+ BGP session-down traps simultaneously |
 | **Severity** | Route reflection instability — up to 90 second disruption |
@@ -457,6 +308,7 @@ After reconvergence (~90 seconds), all flows recover. The event appears as a "ne
 | Property | Value |
 |---|---|
 | **Type** | `BGP_SESSION_DOWN` / VRF misconfiguration |
+| **File** | `l3vpn-hub-spoke-fault4-rt-import.yaml` |
 | **Target** | PE3 (Brighton) — `BLUE_SPOKE` VRF import RT changed from `65035:1030` to `65035:9999` |
 | **Alarms generated** | ❌ None |
 | **Severity** | Silent isolation of Spoke2 (Liverpool) |

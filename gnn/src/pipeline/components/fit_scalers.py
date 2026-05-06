@@ -93,23 +93,26 @@ def fit_scalers(
 
     logger.info(f"Loaded {len(snapshots)} non-empty snapshots")
 
-    # Use the canonical GraphBuilder scaler logic so the output is 100%
-    # compatible with what process_snapshot() / train_*.py / serve.py expect.
-    gb = GraphBuilder()
-    gb.init_config_encoder()
-    gb.fit_scalers(snapshots)
+    # Use the module-level fit_scalers() which is the canonical scaler logic
+    # shared by train_hetgnn.py and serve.py.  GraphBuilder does not have
+    # instance methods for fitting — scalers are passed in at construction time.
+    sys.path.insert(0, "/app")
+    from utils.gnn_utils import fit_scalers as _fit_scalers, NODE_TYPES  # noqa: E402
+
+    scalers = _fit_scalers(snapshots)
 
     logger.info(
-        f"Scalers fitted. Node types in id_map: "
-        f"{[(k, len(v)) for k, v in gb.global_id_map.items()]}"
+        f"Scalers fitted for node types: "
+        f"{[nt for nt in NODE_TYPES if nt in scalers]}"
     )
 
-    # Serialize scalers + id_map with joblib (matches GraphBuilder.load_scalers)
+    # Serialize scalers with joblib (the same format train_hetgnn.py and
+    # serve.py expect: a plain dict of {node_type: StandardScaler}).
     output_gcs_prefix = f"scalers/{run_id}"
     scaler_blob_name = f"{output_gcs_prefix}/scalers.pkl"
 
     buf = io.BytesIO()
-    joblib.dump({"scalers": gb.scalers, "id_map": gb.global_id_map}, buf)
+    joblib.dump(scalers, buf)
     buf.seek(0)
     bucket.blob(scaler_blob_name).upload_from_file(buf, content_type="application/octet-stream")
 

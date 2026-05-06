@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 ###################################################
 designer_agent = LlmAgent(
     name="DescriptorDesignerSubAgent",
-    model="gemini-3.1-pro-preview",
+    model="gemini-2.5-flash",
     instruction=descriptor_design_prompt,
     description="translate network change plan to new vyos descriptors",
     tools=[getDesignDoc, getVyosDescriptors, getDeployedCRs],

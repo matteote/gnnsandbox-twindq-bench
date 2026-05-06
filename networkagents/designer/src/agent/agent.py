@@ -18,7 +18,7 @@ from google.adk.artifacts import InMemoryArtifactService
 from google.adk.sessions import InMemorySessionService
 import logging
 from agent_library.trace.trace_plugin import TracePlugin
-from agent.subagents import approval_agent, deployment_agent, designer_agent, planner_agent, validate_agent
+from agent.subagents import approval_agent, designer_agent, planner_agent
 
 logger = logging.getLogger(__name__)
 
@@ -81,9 +81,10 @@ class DesignerAgent:
             name="DesignerExecutionAgent",
             description=(
                 "Execute an approved network change plan: generate CRD descriptors, "
-                "validate them, deploy to the cluster, and verify all resources are Ready."
+                "validate them, and deploy to the cluster."
             ),
-            sub_agents=[designer_agent]#, approval_agent, deployment_agent, validate_agent],
+            # deployment is handled by the after_agent_callback on approval_agent
+            sub_agents=[designer_agent, approval_agent],
         )
 
         self.execution_runner = Runner(

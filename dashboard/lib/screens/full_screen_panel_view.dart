@@ -3,7 +3,7 @@ import 'package:provider/provider.dart';
 import 'package:socket_io_client/socket_io_client.dart' as io;
 import '../models/panel_type.dart';
 import '../models/log_entry.dart';
-import '../widgets/agui_chat_panel.dart';
+import '../widgets/chat_panel.dart';
 import '../widgets/log_widget.dart';
 import '../widgets/performance/performance_graph_widget.dart';
 import '../widgets/trace/trace_widget.dart';
@@ -97,7 +97,7 @@ class FullScreenPanelView extends StatelessWidget {
   Widget _buildPanelContent() {
     switch (panelType) {
       case PanelType.chat:
-        return AGUIChatPanel(socket: socket!, isFullScreen: true);
+        return ChatPanel(socket: socket!, isFullScreen: true);
       case PanelType.logs:
         return Consumer<Appstate>(
           builder: (context, appState, child) {

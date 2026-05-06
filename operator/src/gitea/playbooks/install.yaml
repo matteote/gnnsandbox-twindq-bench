@@ -25,10 +25,6 @@
       import_role:
         name: create-gitea-repos
 
-    - name: incidents-repo
-      import_role:
-        name: incidents
-
     - name: networkdesign-repo
       import_role:
         name: networkdesign

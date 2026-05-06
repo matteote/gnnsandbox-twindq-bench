@@ -71,10 +71,12 @@ VALIDATION_SPLIT = 0.2  # 20% for validation
 EARLY_STOPPING_PATIENCE = 10  # Stop if no improvement for 10 epochs
 MIN_DELTA = 0.001  # Minimum change to qualify as an improvement
 
-# Multi-task objective weights (3 node types)
-ALPHA = 0.5  # Weight for Router Loss
-GAMMA = 0.3  # Weight for Interface Loss
-BETA  = 0.2  # Weight for BGP Session Loss
+# Multi-task objective weights (5 node types)
+ALPHA   = 0.35  # Weight for Router Loss
+GAMMA   = 0.25  # Weight for Interface Loss
+BETA    = 0.15  # Weight for BGP Session Loss
+DELTA   = 0.15  # Weight for VRF Loss            ← new four-layer model
+EPSILON = 0.10  # Weight for Flow Loss            ← new four-layer model
 DIVERSITY_WEIGHT = 0.1  # Weight for contrastive diversity penalty (10%)
 
 def contrastive_diversity_loss(embeddings_dict):
@@ -224,7 +226,11 @@ def train_hetgnn_on_snapshots(
 
     max_epochs = epochs_override if epochs_override is not None else EPOCHS
     logger.info(f"Starting training for up to {max_epochs} epochs with early stopping (patience={EARLY_STOPPING_PATIENCE})")
-    logger.info(f"Multi-task weights: α={ALPHA} (router), γ={GAMMA} (interface), β={BETA} (bgp_session), diversity={DIVERSITY_WEIGHT}")
+    logger.info(
+        f"Multi-task weights: α={ALPHA} (router), γ={GAMMA} (interface), "
+        f"β={BETA} (bgp_session), δ={DELTA} (vrf), ε={EPSILON} (flow), "
+        f"diversity={DIVERSITY_WEIGHT}"
+    )
 
     # ── Training loop ────────────────────────────────────────────────────────
     best_val_loss = float('inf')
@@ -238,6 +244,9 @@ def train_hetgnn_on_snapshots(
         train_router_tensors = []
         train_interface_tensors = []
         train_diversity_tensors = []
+
+        train_vrf_tensors = []
+        train_flow_tensors = []
 
         for snap_idx, snapshot in enumerate(train_snapshots):
             optimizer.zero_grad()
@@ -255,6 +264,8 @@ def train_hetgnn_on_snapshots(
             loss_router = 0
             loss_interface = 0
             loss_bgp = 0
+            loss_vrf = 0
+            loss_flow = 0
             for node_type, recon_x in recon_dict.items():
                 if node_type in snapshot.x_dict:
                     node_loss = criterion(recon_x, snapshot.x_dict[node_type])
@@ -264,12 +275,18 @@ def train_hetgnn_on_snapshots(
                         loss_interface += node_loss
                     elif node_type == "bgp_session":
                         loss_bgp += node_loss
+                    elif node_type == "vrf":
+                        loss_vrf += node_loss
+                    elif node_type == "flow":
+                        loss_flow += node_loss
 
             diversity_loss = contrastive_diversity_loss(embeddings)
             total_loss = (
-                (ALPHA * loss_router) +
-                (GAMMA * loss_interface) +
-                (BETA  * loss_bgp) +
+                (ALPHA   * loss_router) +
+                (GAMMA   * loss_interface) +
+                (BETA    * loss_bgp) +
+                (DELTA   * loss_vrf) +
+                (EPSILON * loss_flow) +
                 (DIVERSITY_WEIGHT * diversity_loss)
             )
             total_loss.backward()
@@ -280,11 +297,17 @@ def train_hetgnn_on_snapshots(
                 train_router_tensors.append(loss_router.detach())
             if isinstance(loss_interface, torch.Tensor) and loss_interface.numel() > 0:
                 train_interface_tensors.append(loss_interface.detach())
+            if isinstance(loss_vrf, torch.Tensor) and loss_vrf.numel() > 0:
+                train_vrf_tensors.append(loss_vrf.detach())
+            if isinstance(loss_flow, torch.Tensor) and loss_flow.numel() > 0:
+                train_flow_tensors.append(loss_flow.detach())
             train_diversity_tensors.append(diversity_loss.detach())
 
         train_loss = torch.stack(train_loss_tensors).sum().item()
         train_loss_router = torch.stack(train_router_tensors).sum().item() if train_router_tensors else 0.0
         train_loss_interface = torch.stack(train_interface_tensors).sum().item() if train_interface_tensors else 0.0
+        train_loss_vrf = torch.stack(train_vrf_tensors).sum().item() if train_vrf_tensors else 0.0
+        train_loss_flow = torch.stack(train_flow_tensors).sum().item() if train_flow_tensors else 0.0
         train_loss_diversity = torch.stack(train_diversity_tensors).mean().item() if train_diversity_tensors else 0.0
 
         # ── Validation phase ──────────────────────────────────────────────────
@@ -294,12 +317,17 @@ def train_hetgnn_on_snapshots(
         val_interface_tensors = []
         val_diversity_tensors = []
 
+        val_vrf_tensors = []
+        val_flow_tensors = []
+
         with torch.no_grad():
             for snapshot in val_snapshots:
                 recon_dict, embeddings = model(snapshot.x_dict, snapshot.edge_index_dict)
                 loss_router = 0
                 loss_interface = 0
                 loss_bgp = 0
+                loss_vrf = 0
+                loss_flow = 0
                 for node_type, recon_x in recon_dict.items():
                     if node_type in snapshot.x_dict:
                         node_loss = criterion(recon_x, snapshot.x_dict[node_type])
@@ -309,11 +337,17 @@ def train_hetgnn_on_snapshots(
                             loss_interface += node_loss
                         elif node_type == "bgp_session":
                             loss_bgp += node_loss
+                        elif node_type == "vrf":
+                            loss_vrf += node_loss
+                        elif node_type == "flow":
+                            loss_flow += node_loss
                 diversity_loss = contrastive_diversity_loss(embeddings)
                 total_loss = (
-                    (ALPHA * loss_router) +
-                    (GAMMA * loss_interface) +
-                    (BETA  * loss_bgp) +
+                    (ALPHA   * loss_router) +
+                    (GAMMA   * loss_interface) +
+                    (BETA    * loss_bgp) +
+                    (DELTA   * loss_vrf) +
+                    (EPSILON * loss_flow) +
                     (DIVERSITY_WEIGHT * diversity_loss)
                 )
                 val_loss_tensors.append(total_loss.detach())
@@ -321,11 +355,17 @@ def train_hetgnn_on_snapshots(
                     val_router_tensors.append(loss_router.detach())
                 if isinstance(loss_interface, torch.Tensor) and loss_interface.numel() > 0:
                     val_interface_tensors.append(loss_interface.detach())
+                if isinstance(loss_vrf, torch.Tensor) and loss_vrf.numel() > 0:
+                    val_vrf_tensors.append(loss_vrf.detach())
+                if isinstance(loss_flow, torch.Tensor) and loss_flow.numel() > 0:
+                    val_flow_tensors.append(loss_flow.detach())
                 val_diversity_tensors.append(diversity_loss.detach())
 
         val_loss = torch.stack(val_loss_tensors).sum().item()
         val_loss_router = torch.stack(val_router_tensors).sum().item() if val_router_tensors else 0.0
         val_loss_interface = torch.stack(val_interface_tensors).sum().item() if val_interface_tensors else 0.0
+        val_loss_vrf = torch.stack(val_vrf_tensors).sum().item() if val_vrf_tensors else 0.0
+        val_loss_flow = torch.stack(val_flow_tensors).sum().item() if val_flow_tensors else 0.0
         val_loss_diversity = torch.stack(val_diversity_tensors).mean().item() if val_diversity_tensors else 0.0
 
         scheduler.step(val_loss)
@@ -333,8 +373,14 @@ def train_hetgnn_on_snapshots(
 
         if (epoch + 1) % 5 == 0:
             logger.info(f"Epoch {epoch+1}/{max_epochs}, Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}, LR: {current_lr:.6f}")
-            logger.info(f"  Train - Router: {train_loss_router:.4f}, Interface: {train_loss_interface:.4f}, Diversity: {train_loss_diversity:.4f}")
-            logger.info(f"  Val   - Router: {val_loss_router:.4f}, Interface: {val_loss_interface:.4f}, Diversity: {val_loss_diversity:.4f}")
+            logger.info(
+                f"  Train - Router: {train_loss_router:.4f}, Interface: {train_loss_interface:.4f}, "
+                f"VRF: {train_loss_vrf:.4f}, Flow: {train_loss_flow:.4f}, Diversity: {train_loss_diversity:.4f}"
+            )
+            logger.info(
+                f"  Val   - Router: {val_loss_router:.4f}, Interface: {val_loss_interface:.4f}, "
+                f"VRF: {val_loss_vrf:.4f}, Flow: {val_loss_flow:.4f}, Diversity: {val_loss_diversity:.4f}"
+            )
         else:
             logger.debug(f"Epoch {epoch+1}/{max_epochs}, Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}")
 
@@ -424,6 +470,13 @@ def run_training_pipeline():
         if SNAPSHOTS_GCS_PATH:
             logger.info(f"Loading pre-fetched snapshots from GCS: {SNAPSHOTS_GCS_PATH}")
             snapshot_objects = load_snapshots_from_gcs(SNAPSHOTS_GCS_PATH)
+            # Temporal features (rx_err_gradient, prefix_count_delta, etc.) are
+            # baked into the GCS pickles by the ingest component — no need to
+            # recompute here. Log a confirmation so training runs are auditable.
+            logger.info(
+                f"Loaded {len(snapshot_objects)} snapshots with temporal features "
+                "pre-computed by the ingest component."
+            )
         else:
             logger.info(f"Fetching snapshots live from Spanner: {SPANNER_INSTANCE}/{SPANNER_DATABASE}")
             dataset = SpannerDataset(SPANNER_INSTANCE, SPANNER_DATABASE, num_snapshots=TRAINING_SNAPSHOTS, interval_minutes=INTERVAL_MINUTES)
