@@ -23,14 +23,14 @@ bgp_session:
     Note: bgp_state and session_uptime_norm are derived from the
     frr_bgp_peer_uptime_seconds metric (20 s cadence) rather than the
     SCD-written BGPSession.status / valid_start_ts (60 s update cycle).
-vrf  ⭐ NEW:
+vrf:
     id, type, router_id, vpn_id, vrf_name, status,
     vrf_route_count (log1p), rt_import_hash, rt_export_hash,
     vrf_active_sessions (log1p),
     vrf_route_count_delta  ← added by compute_temporal_features()
     Note: vpn_blue/vpn_red/is_hub one-hots removed — RT hashes capture
     VPN policy identity without per-VPN string enumeration.
-flow  ⭐ NEW:
+flow:
     id, type, flow_name, src_device_id, dst_device_id,
     throughput_bps (log1p), latency_ms_norm, jitter_norm,
     packet_loss_pct, active_sessions (log1p),
@@ -221,8 +221,8 @@ class SpannerDataset:
         self,
         instance_id: str,
         database_id: str,
-        num_snapshots: int = 50,
-        interval_minutes: int = 5,
+        num_snapshots: int = 576,
+        interval_minutes: float = 0.5,
         project_id: Optional[str] = None,
         from_time: Optional[datetime.datetime] = None,
         to_time: Optional[datetime.datetime] = None,

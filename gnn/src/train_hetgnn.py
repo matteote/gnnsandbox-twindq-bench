@@ -24,7 +24,13 @@ from utils.gnn_utils import (
 SPANNER_INSTANCE = os.getenv("SPANNER_INSTANCE", "networktopology-instance")
 SPANNER_DATABASE = os.getenv("SPANNER_DATABASE", "networktopology-db")
 GCS_BUCKET_NAME  = os.getenv("GCS_BUCKET_NAME", "")
-INTERVAL_MINUTES = int(os.getenv("INTERVAL_MINUTES", "5"))
+# 0.5 minutes (30 seconds) matches the 240× time-compressed traffic tests:
+#   - 30 s interval  = 2 simulated hours per snapshot
+#   - 12 snapshots   = 1 full compressed day (period=360 s)
+#   - 3 Prometheus points per averaging window → stable metrics
+#   - throughput_delta ≈ 6 Mbps/step — proportionate and trainable
+# Set INTERVAL_MINUTES=5 to revert to real-world (wall-clock) traffic cadence.
+INTERVAL_MINUTES = float(os.getenv("INTERVAL_MINUTES", "0.5"))
 
 # ── Model architecture constants ─────────────────────────────────────────────
 HIDDEN_CHANNELS = int(os.getenv("HIDDEN_CHANNELS", "64"))
@@ -66,7 +72,10 @@ def load_snapshots_from_gcs(gcs_path: str) -> list:
 # Configuration
 EPOCHS = 50
 LEARNING_RATE = 0.001
-TRAINING_SNAPSHOTS = 100
+# 576 snapshots at 30 s intervals = 4.8 real hours = ~48 compressed days.
+# 80/20 split → 460 training + 116 validation snapshots.
+# Set TRAINING_SNAPSHOTS=100 for a faster smoke-test with real-world cadence.
+TRAINING_SNAPSHOTS = 576
 VALIDATION_SPLIT = 0.2  # 20% for validation
 EARLY_STOPPING_PATIENCE = 10  # Stop if no improvement for 10 epochs
 MIN_DELTA = 0.001  # Minimum change to qualify as an improvement

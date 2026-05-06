@@ -41,8 +41,12 @@ def gnn_training_pipeline(
     spanner_instance: str = "networktopology-instance",
     spanner_database: str = "networktopology-db",
     gcs_bucket: str = "network-model-artifacts",
-    num_snapshots: int = 20,
-    interval_minutes: int = 1,
+    # 576 snapshots at 30 s intervals = 4.8 real hours = ~48 compressed days.
+    # Covers 6+ full weekly cycles (2520 s each) for weekday/weekend diversity.
+    num_snapshots: int = 576,
+    # 0.5 min = 30 s per snapshot — calibrated for 240× time-compressed traffic.
+    # Each 30 s step = 2 simulated hours; 12 steps = one full compressed day.
+    interval_minutes: float = 0.5,
     machine_type: str = "n1-standard-4",
     accelerator_type: str = "",
     accelerator_count: int = 0,

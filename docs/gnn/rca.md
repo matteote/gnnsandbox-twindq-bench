@@ -23,6 +23,8 @@ The GNN identifies anomalies by comparing the current state to the learned "norm
 
 The GNN is trained on telemetry collected during a 48-hour time-compressed traffic run that simulates approximately **1.3 years of realistic daily and weekly traffic patterns** across both VPNs. Two separate TrafficTest manifests drive the simulation, one per VPN, each producing a distinct traffic character.
 
+![traffic strategy](/docs/drawings/traffic-strategy.svg)
+
 #### Time Compression
 
 All traffic patterns use a **240× time compression ratio**:
@@ -297,8 +299,8 @@ Separate decoders per node type enable reconstruction error to be isolated by la
 |---|---|---|
 | `HIDDEN_CHANNELS` | 64 | Shared hidden dimension across all node types |
 | `NUM_LAYERS` | 2 | Message-passing layers |
-| `SNAPSHOT_INTERVAL` | 5 min | Time between snapshots (inference cadence) |
-| `TRAINING_SNAPSHOTS` | 100 | Snapshots used for training (~8 hours of data at 5-min intervals) |
+| `SNAPSHOT_INTERVAL` | 30 s (0.5 min) | Time between snapshots — calibrated for 240× compressed traffic. 30 s = 2 simulated hours; 12 snapshots = one full compressed day. Metrics window contains ≈3 Prometheus scrape points (10 s cadence). Use `INTERVAL_MINUTES=5` env var for real-world (wall-clock) traffic. |
+| `TRAINING_SNAPSHOTS` | 576 | Snapshots used for training — 4.8 real hours = ≈48 compressed days = 6+ complete weekly cycles. 80/20 split → 460 training + 116 validation. Minimum viable set (100 snapshots) is reached in ≈50 real minutes. |
 | `LEARNING_RATE` | 0.001 | Adam optimizer initial LR |
 | `EPOCHS` | 50 | Maximum training epochs |
 | `EARLY_STOPPING_PATIENCE` | 10 | Epochs without improvement before stopping |

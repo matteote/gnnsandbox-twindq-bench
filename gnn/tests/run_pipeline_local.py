@@ -101,7 +101,7 @@ def step_ingest(args, snapshots_dir: Path) -> list:
     logger.info("=" * 60)
 
     snapshots_dir.mkdir(parents=True, exist_ok=True)
-    interval = args.interval_minutes or 5  # default: 5-minute snapshot cadence
+    interval = args.interval_minutes or 0.5  # default: 30 s for compressed traffic
 
     logger.info(
         f"Fetching {args.num_snapshots} snapshots from "
@@ -259,11 +259,12 @@ def parse_args():
                    help="Spanner instance ID (or set SPANNER_INSTANCE)")
     p.add_argument("--spanner-database", default=os.getenv("SPANNER_DATABASE", "networktopology-db"),
                    help="Spanner database ID (or set SPANNER_DATABASE)")
-    p.add_argument("--interval-minutes", type=int, default=5,
-                   help="Snapshot interval in minutes (default: 5)")
+    p.add_argument("--interval-minutes", type=float, default=0.5,
+                   help="Snapshot interval in minutes (default: 0.5 = 30 s for "
+                        "240x time-compressed traffic; use 5 for real-world cadence)")
 
     # Data
-    p.add_argument("--num-snapshots",   type=int, default=1)
+    p.add_argument("--num-snapshots",   type=int, default=576)
     p.add_argument("--skip-ingest",     action="store_true",
                    help="Skip ingest; load snapshots from --snapshots-dir")
     p.add_argument("--snapshots-dir",   type=Path,
