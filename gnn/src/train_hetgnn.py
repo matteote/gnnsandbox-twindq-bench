@@ -219,9 +219,8 @@ def train_hetgnn_on_snapshots(
     logger.info(f"Dataset split: {len(train_snapshots)} training, {len(val_snapshots)} validation snapshots")
 
     # ── Build model ──────────────────────────────────────────────────────────
-    out_channels = hidden_channels  # autoencoder symmetric dims
     logger.info(f"Creating HetGNN model with hidden_channels={hidden_channels}, num_layers={num_layers}")
-    model = HetGNN(metadata, hidden_channels, out_channels, num_layers)
+    model = HetGNN(metadata, hidden_channels, num_layers)
     model.set_input_dims(input_dims)
 
     optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE)

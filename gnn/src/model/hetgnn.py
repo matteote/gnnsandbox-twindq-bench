@@ -9,7 +9,7 @@ class HetGNN(nn.Module):
     for entirely disparate node schemas (e.g., config lines, protocol states, metrics).
     Useful for root cause segregation.
     """
-    def __init__(self, metadata, hidden_channels=64, out_channels=64, num_layers=2):
+    def __init__(self, metadata, hidden_channels=64, num_layers=2):
         super(HetGNN, self).__init__()
         self.hidden_channels = hidden_channels
         self.num_layers = num_layers

@@ -55,7 +55,7 @@ _FALLBACK_THRESHOLDS = {
     "vrf":         0.10,
     "flow":        0.15,
 }
-INTERVAL_MINUTES     = int(os.getenv("INTERVAL_MINUTES", "5"))
+INTERVAL_MINUTES     = float(os.getenv("INTERVAL_MINUTES", "5"))
 CACHE_DIR            = Path(tempfile.gettempdir()) / "gnn_model_cache"
 
 # ── In-process model cache (warm across concurrent requests) ──────────────────
