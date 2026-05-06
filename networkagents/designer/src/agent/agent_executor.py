@@ -510,8 +510,15 @@ class DesignerAgentExecutor(AgentExecutor):
             )],
         )
 
-        emitted_final = False
-        last_text = "Network changes completed successfully."
+        # Stage acknowledgment messages keyed by sub-agent author name.
+        # Raw text from sub-agents (YAML descriptors, approval text, deployment
+        # summaries) is intentionally suppressed; only these friendly status
+        # messages are surfaced to the caller.
+        stage_messages = {
+            "DescriptorDesignerSubAgent": "Generating network configuration descriptors…",
+            "ApproveDescriptorSubAgent":  "Validating descriptors and deploying changes to the cluster…",
+        }
+        emitted_stages: set = set()
 
         async for event in agent.execution_runner.run_async(
             user_id="agent",
@@ -523,41 +530,44 @@ class DesignerAgentExecutor(AgentExecutor):
                 for part in event.content.parts:
                     if part.text:
                         logger.info("** %s: %s", event.author, part.text[:120])
-                        last_text = part.text
-                        is_final = event.is_final_response()
-                        await event_queue.enqueue_event(
-                            TaskStatusUpdateEvent(
-                                status=TaskStatus(
-                                    state=TaskState.completed if is_final else TaskState.working,
-                                    message=new_agent_text_message(
-                                        part.text, task.context_id, task.id
+                        # Emit a single stage acknowledgment the first time we
+                        # receive text from each sub-agent.  The raw content
+                        # (YAML CRs, approval verdict, deployment summary) is
+                        # never forwarded to the caller.
+                        stage_msg = stage_messages.get(event.author)
+                        if stage_msg and event.author not in emitted_stages:
+                            emitted_stages.add(event.author)
+                            await event_queue.enqueue_event(
+                                TaskStatusUpdateEvent(
+                                    status=TaskStatus(
+                                        state=TaskState.working,
+                                        message=new_agent_text_message(
+                                            stage_msg, task.context_id, task.id
+                                        ),
                                     ),
-                                ),
-                                final=is_final,
-                                context_id=task.context_id,
-                                task_id=task.id,
+                                    final=False,
+                                    context_id=task.context_id,
+                                    task_id=task.id,
+                                )
                             )
-                        )
-                        if is_final:
-                            emitted_final = True
 
-        # Guarantee a completed event so the supervisor's streaming call always
-        # terminates, even if the SequentialAgent produced no text-bearing events.
-        if not emitted_final:
-            logger.info("Execution loop ended without a final event — emitting fallback completed")
-            await event_queue.enqueue_event(
-                TaskStatusUpdateEvent(
-                    status=TaskStatus(
-                        state=TaskState.completed,
-                        message=new_agent_text_message(
-                            last_text, task.context_id, task.id,
-                        ),
+        # Always emit a guaranteed final completed event.  The supervisor's
+        # streaming call requires at least one final=True event to terminate.
+        logger.info("Execution loop complete — emitting final completed event")
+        await event_queue.enqueue_event(
+            TaskStatusUpdateEvent(
+                status=TaskStatus(
+                    state=TaskState.completed,
+                    message=new_agent_text_message(
+                        "Network changes have been successfully applied to the cluster.",
+                        task.context_id, task.id,
                     ),
-                    final=True,
-                    context_id=task.context_id,
-                    task_id=task.id,
-                )
+                ),
+                final=True,
+                context_id=task.context_id,
+                task_id=task.id,
             )
+        )
 
     # ── Formatting helpers ─────────────────────────────────────────────────────
 
