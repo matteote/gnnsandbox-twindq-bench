@@ -122,6 +122,61 @@ async def update_vyosinfrastructure(body, spec, name, namespace, uid, logger, **
 _INFRA_CHILD_KINDS = ["VyOSRouter", "LinuxNetwork", "Device"]
 
 
+def _list_blocking_dependents(name: str, namespace: str) -> list[str]:
+    """
+    Return a list of "Kind/resource-name" strings for VyOSUnderlay and
+    VyOSL3VPN resources that are still referencing this VyOSInfrastructure
+    (directly or transitively).
+
+    Blocks deletion until these dependents are removed first:
+      - VyOSUnderlay CRs whose spec.infrastructureRef == name
+      - VyOSL3VPN CRs whose spec.underlayRef matches any of those underlays
+
+    Args:
+        name:      Name of the VyOSInfrastructure being deleted.
+        namespace: Kubernetes namespace to search.
+
+    Returns:
+        List of "Kind/name" strings for blocking dependents (empty == safe to delete).
+    """
+    blocking: list[str] = []
+    client = kubernetes.dynamic.DynamicClient(kubernetes.client.ApiClient())
+
+    # Step 1 — find VyOSUnderlay CRs that reference this infrastructure.
+    blocking_underlay_names: list[str] = []
+    try:
+        underlay_api = client.resources.get(api_version="google.dev/v1", kind="VyOSUnderlay")
+        items = underlay_api.get(namespace=namespace)
+        cr_list = items.items if hasattr(items, "items") else []
+        for cr in cr_list:
+            cr_dict = cr.to_dict() if hasattr(cr, "to_dict") else cr
+            infra_ref = cr_dict.get("spec", {}).get("infrastructureRef", "")
+            if infra_ref == name:
+                underlay_name = cr_dict["metadata"]["name"]
+                blocking.append(f"VyOSUnderlay/{underlay_name}")
+                blocking_underlay_names.append(underlay_name)
+    except kubernetes.client.rest.ApiException as exc:
+        if exc.status != 404:
+            raise
+
+    # Step 2 — find VyOSL3VPN CRs whose underlayRef points to one of those underlays.
+    if blocking_underlay_names:
+        try:
+            l3vpn_api = client.resources.get(api_version="google.dev/v1", kind="VyOSL3VPN")
+            items = l3vpn_api.get(namespace=namespace)
+            cr_list = items.items if hasattr(items, "items") else []
+            for cr in cr_list:
+                cr_dict = cr.to_dict() if hasattr(cr, "to_dict") else cr
+                underlay_ref = cr_dict.get("spec", {}).get("underlayRef", "")
+                if underlay_ref in blocking_underlay_names:
+                    blocking.append(f"VyOSL3VPN/{cr_dict['metadata']['name']}")
+        except kubernetes.client.rest.ApiException as exc:
+            if exc.status != 404:
+                raise
+
+    return blocking
+
+
 def _list_owned_children(uid: str, namespace: str) -> list[str]:
     """
     Return the names of child CRs that still have *uid* in their ownerReferences.
@@ -177,6 +232,26 @@ async def delete_vyosinfrastructure(body, spec, name, namespace, logger, **kwarg
     """
     logger.info(f"Deleting VyOSInfrastructure: {name}")
     await update_status(name, namespace, "VyOSInfrastructure", "Deleting", "Deleting VyOSInfrastructure")
+
+    # Step 0 — refuse to begin if VyOSUnderlay or VyOSL3VPN resources still
+    # depend on this infrastructure.  Deleting the infrastructure while its
+    # dependents are present would leave those resources in a broken state.
+    # Raise a TemporaryError so Kopf retries once the dependents are removed.
+    try:
+        blocking = _list_blocking_dependents(name, namespace)
+    except Exception as exc:
+        logger.error(f"Error checking dependents of VyOSInfrastructure {name}: {exc}")
+        raise kopf.TemporaryError(f"Error checking dependents: {exc}", delay=10) from exc
+
+    if blocking:
+        logger.warning(
+            f"VyOSInfrastructure {name}: cannot proceed with deletion — "
+            f"dependent resources still exist: {blocking}"
+        )
+        raise kopf.TemporaryError(
+            f"Refusing deletion: dependent resources still exist: {blocking}",
+            delay=10,
+        )
 
     # Step 1 — clear OpsAgent scrape targets immediately.
     await update_opsagent_config(namespace, [], [])

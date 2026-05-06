@@ -38,6 +38,7 @@ from tools.networkdescriptors import (
     get_descriptor_for_deploy,
     apply_crds_background,
     teardown_and_deploy_background,
+    deploy_to_git_background,
     teardown_only_background,
     delete_vpn_with_tests_background,
     get_vpn_delete_status,
@@ -762,7 +763,7 @@ class RestEndpoint:
         """
         logger.info("REST endpoint: get VPNs")
         try:
-            namespace = request.query.get("namespace", "default")
+            namespace = request.query.get("namespace", "network")
             vpns = fetch_vpns(namespace=namespace)
             return web.json_response(vpns)
         except Exception as e:
@@ -783,7 +784,7 @@ class RestEndpoint:
         """
         logger.info("REST endpoint: get TrafficTests")
         try:
-            namespace = request.query.get("namespace", "default")
+            namespace = request.query.get("namespace", "network")
             tests = fetch_traffic_tests(namespace=namespace)
             return web.json_response(tests)
         except Exception as e:
@@ -816,7 +817,7 @@ class RestEndpoint:
                     status=409,
                 )
 
-            namespace = request.query.get("namespace", "default")
+            namespace = request.query.get("namespace", "network")
             asyncio.create_task(delete_vpn_with_tests_background(vpn_name, namespace))
             logger.info("Scheduled background VPN delete for '%s'", vpn_name)
             return web.json_response({"status": "deleting", "vpn_name": vpn_name})
@@ -855,7 +856,7 @@ class RestEndpoint:
             if not test_name:
                 return web.json_response({"error": "No test name provided"}, status=400)
 
-            namespace = request.query.get("namespace", "default")
+            namespace = request.query.get("namespace", "network")
             success = delete_traffic_test_crd(test_name, namespace)
             if success:
                 return web.json_response({"status": "deleted", "name": test_name})
@@ -907,7 +908,7 @@ class RestEndpoint:
         """
         logger.info("REST endpoint: get VyosInfrastructure")
         try:
-            namespace = request.query.get("namespace", "default")
+            namespace = request.query.get("namespace", "network")
             infra = fetch_vyos_infrastructure(namespace=namespace)
             return web.json_response(infra)
         except Exception as e:
@@ -932,7 +933,7 @@ class RestEndpoint:
         """
         logger.info("REST endpoint: get combined infrastructure state")
         try:
-            namespace = request.query.get("namespace", "default")
+            namespace = request.query.get("namespace", "network")
             state = fetch_infrastructure_state(namespace=namespace)
             return web.json_response(state)
         except Exception as e:
@@ -1081,11 +1082,12 @@ class RestEndpoint:
                     status=404
                 )
 
-            # Fire-and-forget: tear down existing CRDs then apply new ones.
-            asyncio.create_task(teardown_and_deploy_background(descriptor))
+            # Fire-and-forget: GitOps path — delete from git, wait for
+            # VyOSInfrastructure CR to be gone, then commit new YAML files.
+            asyncio.create_task(deploy_to_git_background(descriptor))
 
             logger.info(
-                "Scheduled background teardown+deploy for '%s' (%d VPN(s), %d test(s))",
+                "Scheduled GitOps deploy for '%s' (%d VPN(s), %d test(s))",
                 network_id,
                 len(descriptor.get("vpns", [])),
                 len(descriptor.get("traffic_tests", [])),

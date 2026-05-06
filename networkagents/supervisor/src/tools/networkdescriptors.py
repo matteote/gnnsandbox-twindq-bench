@@ -350,7 +350,7 @@ async def apply_crds_background(descriptor: dict) -> None:
         for body in resources:
             kind      = body.get("kind", "Unknown")
             name      = body.get("metadata", {}).get("name", "unknown")
-            namespace = body.get("metadata", {}).get("namespace", "default")
+            namespace = body.get("metadata", {}).get("namespace", "network")
             try:
                 resource_api = dyn_client.resources.get(
                     api_version="google.dev/v1", kind=kind
@@ -482,7 +482,7 @@ async def _wait_for_cr_gone(
 
 
 async def teardown_existing_crds(
-    namespace: str = "default",
+    namespace: str = "network",
     *,
     sio=None,
     network_id: str = "",
@@ -504,7 +504,7 @@ async def teardown_existing_crds(
     function move on to the next kind.
 
     Args:
-        namespace:  Kubernetes namespace to target. Defaults to ``"default"``.
+        namespace:  Kubernetes namespace to target. Defaults to ``"network"``.
         sio:        Optional Socket.IO server instance for progress events.
         network_id: Forwarded to every progress event.
 
@@ -637,7 +637,7 @@ async def teardown_and_deploy_background(descriptor: dict) -> None:
 
     # Derive namespace from the infrastructure body if available.
     infra = descriptor.get("infrastructure") or {}
-    namespace = infra.get("metadata", {}).get("namespace", "default")
+    namespace = infra.get("metadata", {}).get("namespace", "network")
 
     await _emit_progress(sio, network_id, stage="teardown_started")
 
@@ -665,9 +665,15 @@ async def teardown_and_deploy_background(descriptor: dict) -> None:
         )
 
 
-async def teardown_only_background(namespace: str = "default") -> None:
+async def teardown_only_background() -> None:
     """
-    Tear down all existing network CRDs without deploying a replacement.
+    Tear down a deployed network without deploying a replacement.
+
+    Uses the GitOps path:
+      1. Deletes all YAML files for the network from the Gitea ``network``
+         repo — Config Sync sees the removals and starts deleting K8s CRs.
+      2. Polls the Kubernetes API until the ``VyOSInfrastructure`` CR
+         disappears, confirming that Config Sync has completed the teardown.
 
     Intended to be run as a fire-and-forget background task via
     ``asyncio.create_task(teardown_only_background())``.
@@ -676,14 +682,12 @@ async def teardown_only_background(namespace: str = "default") -> None:
     UI can display live deletion status in the progress banner.
 
     Stages emitted:
-        teardown_started → deleting / waiting / deleted (per resource) →
+        teardown_started → git_deleted (per file) →
+        waiting (while polling for VyOSInfrastructure) →
         teardown_only_complete  (or teardown_failed on error)
 
-    Args:
-        namespace: Kubernetes namespace to target. Defaults to ``"default"``.
     """
-    network_id = "teardown"
-    logger.debug("Standalone teardown started for namespace '%s'", namespace)
+    logger.debug("Standalone GitOps teardown started")
 
     # Obtain the Socket.IO server lazily to avoid circular imports.
     sio = None
@@ -695,26 +699,143 @@ async def teardown_only_background(namespace: str = "default") -> None:
         logger.warning("Could not obtain sio instance: %s", sio_exc)
 
     try:
-        await _emit_progress(sio, network_id, stage="teardown_started")
+        await _emit_progress(sio, "", stage="teardown_started")
 
-        result = await teardown_existing_crds(namespace, sio=sio, network_id=network_id)
+        # ── Step 1: Delete ALL YAML files currently in the Gitea repo ────
+        from utils.git_utils import delete_all_git_files, NETWORK_REPO
+        message = f"Teardown all network resources"
+        logger.debug("Deleting all files from '%s' repo ", NETWORK_REPO)
+        deleted_files, failed_files = delete_all_git_files(message, repo_name=NETWORK_REPO)
+
+        for fname in deleted_files:
+            await _emit_progress(sio, "", stage="git_deleted", file=fname)
+        for fname in failed_files:
+            await _emit_progress(sio, "", stage="git_delete_failed", file=fname)
+
+        logger.debug(
+            "Git teardown for '%s' — deleted: %s, failed: %s",
+            "default", deleted_files, failed_files,
+        )
+
+        # ── Step 2: Wait for all VyOSInfrastructure CRs to disappear ─────
+        namespace = "network"
+        try:
+            import kubernetes
+            from utils.k8s import get_client as get_k8s_client
+            dyn_client = kubernetes.dynamic.DynamicClient(get_k8s_client())
+            resource_api = dyn_client.resources.get(
+                api_version="google.dev/v1", kind="VyOSInfrastructure"
+            )
+            items = resource_api.get(namespace=namespace)
+            cr_list = items.items if hasattr(items, "items") else []
+            for cr in cr_list:
+                infra_name = cr.metadata.name
+                await _wait_for_cr_gone(
+                    resource_api, infra_name, namespace,
+                    sio=sio, network_id="", kind="VyOSInfrastructure",
+                )
+                logger.debug(
+                    "VyOSInfrastructure/%s confirmed gone",
+                    infra_name,
+                )
+        except Exception as wait_exc:
+            logger.warning(
+                "Could not confirm VyOSInfrastructure CRs are gone: %s", wait_exc,
+            )
 
         await _emit_progress(
-            sio, network_id,
+            sio, "",
             stage="teardown_only_complete",
-            deleted=len(result["deleted"]),
-            failed=len(result["failed"]),
+            deleted=len(deleted_files),
+            failed=len(failed_files),
         )
         logger.debug(
-            "Standalone teardown complete — deleted: %d, failed: %d",
-            len(result["deleted"]), len(result["failed"]),
+            "Standalone GitOps teardown complete — git deleted: %d, git failed: %d",
+            len(deleted_files), len(failed_files),
         )
     except Exception as exc:
         logger.error("Unhandled error in standalone teardown: %s", exc, exc_info=True)
         await _emit_progress(
-            sio, network_id,
+            sio, "",
             stage="teardown_failed",
             error=str(exc),
+        )
+
+
+async def deploy_to_git_background(descriptor: dict) -> None:
+    """
+    Deploy a network descriptor via the GitOps path.
+
+    This is the primary entry-point for network deployment.  Rather than
+    applying CRDs directly to Kubernetes, the function:
+
+      1. Deletes all existing YAML files for the network from the Gitea
+         ``network`` repository — Config Sync starts removing the old K8s CRs.
+      2. Polls the Kubernetes API until the ``VyOSInfrastructure`` CR
+         disappears, confirming a clean slate.
+      3. Commits the new descriptor's CRD bodies as YAML files to the Gitea
+         ``network`` repository — Config Sync applies them to the cluster.
+
+    Socket.IO ``deploy_progress`` events are emitted throughout so the
+    dashboard UI can display a live status banner.
+
+    Stages emitted:
+        teardown_started →
+        git_deleted / git_delete_failed (per file) →
+        waiting (while polling VyOSInfrastructure) →
+        teardown_complete →
+        deploying →
+        git_committed / git_commit_failed (per file) →
+        deploy_complete  (or deploy_failed on error)
+
+    Args:
+        descriptor: Full descriptor dict (as returned by
+                    ``get_descriptor_for_deploy``).
+    """
+    network_id = descriptor.get("id", "unknown")
+    logger.debug("GitOps deploy started for '%s'", network_id)
+
+    # Obtain the Socket.IO server lazily to avoid circular imports.
+    sio = None
+    try:
+        from endpoints.socketendpoint import SocketEndpoint
+        if SocketEndpoint._instance is not None:
+            sio = SocketEndpoint._instance.sio
+    except Exception as sio_exc:
+        logger.warning("Could not obtain sio instance: %s", sio_exc)
+
+    from utils.git_utils import deploy_descriptor_to_git
+
+    # ── Phase 1: Teardown ─────────────────────────────────────────────────
+    await teardown_only_background()
+
+    # ── Phase 2: Deploy ───────────────────────────────────────────────────
+    try:
+        await _emit_progress(sio, network_id, stage="deploying")
+
+        git_deploy = await deploy_descriptor_to_git(
+            descriptor, sio=sio, network_id=network_id
+        )
+        logger.debug(
+            "Git deploy for '%s' — committed: %s, failed: %s",
+            network_id, git_deploy["committed"], git_deploy["failed"],
+        )
+
+        await _emit_progress(
+            sio, network_id,
+            stage="deploy_complete",
+            committed=len(git_deploy["committed"]),
+            failed=len(git_deploy["failed"]),
+        )
+
+    except Exception as deploy_exc:
+        logger.error(
+            "Git deploy step failed for '%s': %s", network_id, deploy_exc, exc_info=True
+        )
+        await _emit_progress(
+            sio, network_id,
+            stage="deploy_failed",
+            error=str(deploy_exc),
         )
 
 
@@ -757,7 +878,7 @@ def get_vpn_delete_status() -> dict:
 
 async def delete_vpn_with_tests_background(
     vpn_name:  str,
-    namespace: str = "default",
+    namespace: str = "network",
 ) -> None:
     """
     Delete all TrafficTests linked to *vpn_name* first, then delete the VPN
@@ -775,7 +896,7 @@ async def delete_vpn_with_tests_background(
 
     Args:
         vpn_name:  Name of the VyOSL3VPN CR to delete.
-        namespace: Kubernetes namespace (default: ``"default"``).
+        namespace: Kubernetes namespace (default: ``"network"``).
     """
     global _vpn_deleting_name
 

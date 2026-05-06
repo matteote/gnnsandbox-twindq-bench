@@ -1,18 +1,12 @@
 import asyncio
 import kopf
 import logging
+import time
 import kubernetes
 from typing import Dict, Any
-from utils.vyosnetwork import patch_vyos_router, update_status
+from utils.vyosnetwork import patch_vyos_router, update_status, router_provisioning_lock
 
 logger = logging.getLogger(__name__)
-
-# Serialize all VyOSL3VPN reconciliations so that concurrent VPN CRDs
-# (e.g. blue-vpn and red-vpn applied back-to-back from the dashboard)
-# don't race on the same PE router patches and cause rr2 to fail
-# mid-configuration. asyncio.Lock yields control back to the event loop
-# while waiting, so the operator remains responsive.
-_vpn_reconcile_lock = asyncio.Lock()
 
 async def _wait_for_routers_leave_running(
     router_names: list, namespace: str, logger,
@@ -80,18 +74,23 @@ async def _wait_for_routers_leave_running(
 
 async def _wait_for_routers_running(
     router_names: list, namespace: str, logger,
-    timeout: int = 180, poll_interval: int = 5
+    timeout: int = 600, poll_interval: int = 5
 ) -> None:
     """Poll VyOSRouter CRs until every named router reaches Running status.
 
-    Raises kopf.PermanentError if any router enters Failed state or the
-    overall timeout expires.  Uses asyncio.sleep so the event loop stays
-    responsive while we wait.
+    Timeout is 600 s (10 min) to allow routers whose update handler raised a
+    TemporaryError to complete multiple self-retry cycles (each up to 60 s)
+    before giving up.
+
+    On timeout a TemporaryError (not PermanentError) is raised so the VPN
+    handler itself is also rescheduled rather than permanently abandoned —
+    a subsequent retry will re-patch the routers and resume waiting.
     """
     client = kubernetes.dynamic.DynamicClient(kubernetes.client.ApiClient())
     api = client.resources.get(api_version='google.dev/v1', kind='VyOSRouter')
 
     elapsed = 0
+    not_running = []
     while elapsed < timeout:
         not_running = []
         for rname in router_names:
@@ -99,6 +98,11 @@ async def _wait_for_routers_running(
                 r = api.get(name=rname, namespace=namespace)
                 phase = r.get('status', {}).get('phase', 'Unknown')
                 if phase == 'Failed':
+                    # Router update handler raised PermanentError — raise
+                    # TemporaryError so the VPN handler retries.  On the next
+                    # retry the VPN handler will re-patch the router, which (via
+                    # the reconcile-trigger annotation path) re-fires the update
+                    # handler to attempt recovery.
                     raise kopf.TemporaryError(
                         f"Router {rname} entered Failed state while applying VPN configuration; "
                         f"will retry after router is recovered",
@@ -119,8 +123,10 @@ async def _wait_for_routers_running(
         await asyncio.sleep(poll_interval)
         elapsed += poll_interval
 
-    raise kopf.PermanentError(
-        f"Timed out after {timeout}s waiting for routers to reach Running state: {not_running}"
+    raise kopf.TemporaryError(
+        f"Timed out after {timeout}s waiting for routers to reach Running state: {not_running}; "
+        f"will retry",
+        delay=120,
     )
 
 
@@ -173,12 +179,12 @@ async def create_vyosl3vpn(body, spec, name, namespace, uid, logger, **kwargs):
     except kopf.PermanentError:
         raise
 
-    # Serialize the actual patch work so that concurrent VPN CRDs (e.g.
-    # blue-vpn and red-vpn applied back-to-back by the dashboard) do not
-    # race on the same PE routers and cause rr2 to fail mid-configuration.
-    logger.info(f"VyOSL3VPN {name}: waiting for reconcile lock")
-    async with _vpn_reconcile_lock:
-        logger.info(f"VyOSL3VPN {name}: acquired reconcile lock, proceeding")
+    # Acquire the shared provisioning lock to serialize this operation against
+    # all other VyOSUnderlay and VyOSL3VPN lifecycle operations.  Concurrent
+    # Ansible playbooks on the same PE routers cause configuration races.
+    logger.info(f"VyOSL3VPN {name}: waiting for provisioning lock")
+    async with router_provisioning_lock:
+        logger.info(f"VyOSL3VPN {name}: acquired provisioning lock, proceeding")
         try:
             await update_status(name, namespace, "VyOSL3VPN", "Processing", "Applying L3VPN configuration")
 
@@ -220,7 +226,9 @@ async def create_vyosl3vpn(body, spec, name, namespace, uid, logger, **kwargs):
                     _sanitized = kubernetes.client.ApiClient().sanitize_for_serialization(
                         current_router.to_dict()
                     )
-                    current_spec = _json.loads(_json.dumps(_sanitized)).get('spec') or {}
+                    current_dict = _json.loads(_json.dumps(_sanitized))
+                    current_spec = current_dict.get('spec') or {}
+                    current_phase = (current_dict.get('status') or {}).get('phase')
 
                     # VRF merge: keep every VRF not owned by this VPN, then add/replace
                     # this VPN's VRFs (identified by name).
@@ -305,6 +313,50 @@ async def create_vyosl3vpn(body, spec, name, namespace, uid, logger, **kwargs):
                                 )
                                 logger.info(f"Assigned interfaces {vrf_interfaces} to VRF {vrf_name} on router {router_name}")
 
+                    # ── Reconcile-trigger annotation ──────────────────────────
+                    # If the router was already in Failed state when this retry
+                    # started, the spec patches above may have been no-ops
+                    # (identical values already stored in K8s → no resourceVersion
+                    # change → no update event → update_vyosrouter never fires →
+                    # router stays stuck in Failed forever).
+                    #
+                    # Setting a timestamp annotation is always a genuine write
+                    # (annotations are unrestricted by the CRD schema and any
+                    # annotation change bumps resourceVersion), which guarantees
+                    # update_vyosrouter fires and Ansible is re-run even when the
+                    # spec diff is empty.  The handler ignores this annotation for
+                    # all purposes other than recognising "something changed".
+                    if current_phase == 'Failed':
+                        RECONCILE_ANNOTATION = 'vyos.google.dev/vpn-reconcile-trigger'
+                        logger.info(
+                            f"Router {router_name} was in Failed state — setting "
+                            f"reconcile-trigger annotation to force update_vyosrouter"
+                        )
+                        try:
+                            trigger_client = kubernetes.dynamic.DynamicClient(
+                                kubernetes.client.ApiClient()
+                            )
+                            trigger_api = trigger_client.resources.get(
+                                api_version='google.dev/v1', kind='VyOSRouter'
+                            )
+                            trigger_api.patch(
+                                name=router_name,
+                                namespace=namespace,
+                                body={
+                                    'metadata': {
+                                        'annotations': {
+                                            RECONCILE_ANNOTATION: str(int(time.time()))
+                                        }
+                                    }
+                                },
+                                content_type='application/merge-patch+json',
+                            )
+                        except Exception as ann_err:
+                            logger.warning(
+                                f"Could not set reconcile-trigger annotation on "
+                                f"{router_name}: {ann_err}"
+                            )
+
                 except Exception as e:
                     logger.error(f"Failed to patch router {router_name} for L3VPN: {e}")
 
@@ -347,7 +399,7 @@ async def create_vyosl3vpn(body, spec, name, namespace, uid, logger, **kwargs):
                 await _wait_for_routers_running(all_patched_routers, namespace, logger)
 
             await update_status(name, namespace, "VyOSL3VPN", "Ready", "L3VPN configuration applied")
-            logger.info(f"VyOSL3VPN {name}: releasing reconcile lock")
+            logger.info(f"VyOSL3VPN {name}: releasing provisioning lock")
 
         except kopf.TemporaryError:
             raise
@@ -396,9 +448,9 @@ async def delete_vyosl3vpn(body, spec, name, namespace, logger, **kwargs):
         logger.info(f"VyOSL3VPN {name}: no routers listed in spec, nothing to clean up")
         return
 
-    logger.info(f"VyOSL3VPN {name}: acquiring reconcile lock for cleanup")
-    async with _vpn_reconcile_lock:
-        logger.info(f"VyOSL3VPN {name}: reconcile lock acquired")
+    logger.info(f"VyOSL3VPN {name}: waiting for provisioning lock (delete)")
+    async with router_provisioning_lock:
+        logger.info(f"VyOSL3VPN {name}: provisioning lock acquired (delete)")
 
         try:
             k8s_client = kubernetes.dynamic.DynamicClient(kubernetes.client.ApiClient())
@@ -535,7 +587,7 @@ async def delete_vyosl3vpn(body, spec, name, namespace, logger, **kwargs):
 
             logger.info(
                 f"VyOSL3VPN {name}: VRF/BGP config removed from all routers — "
-                f"releasing reconcile lock"
+                f"releasing provisioning lock"
             )
 
         except kopf.PermanentError:

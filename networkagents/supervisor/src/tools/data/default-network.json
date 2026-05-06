@@ -7,7 +7,7 @@
     "kind": "VyOSInfrastructure",
     "metadata": {
       "name": "l3vpn-infra",
-      "namespace": "default",
+      "namespace": "network",
       "labels": {
         "type": "telco-lab",
         "environment": "lab"
@@ -1395,7 +1395,7 @@
     "kind": "VyOSUnderlay",
     "metadata": {
       "name": "l3vpn-underlay",
-      "namespace": "default"
+      "namespace": "network"
     },
     "spec": {
       "infrastructureRef": "l3vpn-infra",
@@ -1796,7 +1796,7 @@
       "kind": "VyOSL3VPN",
       "metadata": {
         "name": "l3vpn-blue-service",
-        "namespace": "default"
+        "namespace": "network"
       },
       "spec": {
         "underlayRef": "l3vpn-underlay",
@@ -2016,7 +2016,7 @@
       "kind": "VyOSL3VPN",
       "metadata": {
         "name": "l3vpn-red-service",
-        "namespace": "default"
+        "namespace": "network"
       },
       "spec": {
         "underlayRef": "l3vpn-underlay",
@@ -2232,7 +2232,7 @@
       "kind": "TrafficTest",
       "metadata": {
         "name": "d1-hub-bidir-tcp",
-        "namespace": "default",
+        "namespace": "network",
         "labels": {
           "scenario": "l3vpn-spoke-hub",
           "vpn": "blue-spoke",
@@ -2312,7 +2312,7 @@
       "kind": "TrafficTest",
       "metadata": {
         "name": "d2-hub-bidir-udp",
-        "namespace": "default",
+        "namespace": "network",
         "labels": {
           "scenario": "l3vpn-spoke-hub",
           "vpn": "blue-spoke",
@@ -2368,7 +2368,7 @@
       "kind": "TrafficTest",
       "metadata": {
         "name": "d3-hub-bidir-tcp",
-        "namespace": "default",
+        "namespace": "network",
         "labels": {
           "scenario": "l3vpn-spoke-hub",
           "vpn": "blue-spoke",
@@ -2448,7 +2448,7 @@
       "kind": "TrafficTest",
       "metadata": {
         "name": "all-spokes-hub-udp",
-        "namespace": "default",
+        "namespace": "network",
         "labels": {
           "scenario": "l3vpn-spoke-hub",
           "vpn": "blue-spoke",
@@ -2503,7 +2503,7 @@
       "kind": "TrafficTest",
       "metadata": {
         "name": "d1-red-d2-red-bidir",
-        "namespace": "default",
+        "namespace": "network",
         "labels": {
           "scenario": "l3vpn-red-mesh",
           "vpn": "red-mesh",
@@ -2573,7 +2573,7 @@
       "kind": "TrafficTest",
       "metadata": {
         "name": "d1-red-d3-red-bidir",
-        "namespace": "default",
+        "namespace": "network",
         "labels": {
           "scenario": "l3vpn-red-mesh",
           "vpn": "red-mesh",
@@ -2643,7 +2643,7 @@
       "kind": "TrafficTest",
       "metadata": {
         "name": "d1-red-d4-red-bidir",
-        "namespace": "default",
+        "namespace": "network",
         "labels": {
           "scenario": "l3vpn-red-mesh",
           "vpn": "red-mesh",
@@ -2713,7 +2713,7 @@
       "kind": "TrafficTest",
       "metadata": {
         "name": "d2-red-d3-red-bidir",
-        "namespace": "default",
+        "namespace": "network",
         "labels": {
           "scenario": "l3vpn-red-mesh",
           "vpn": "red-mesh",
@@ -2783,7 +2783,7 @@
       "kind": "TrafficTest",
       "metadata": {
         "name": "d2-red-d4-red-bidir",
-        "namespace": "default",
+        "namespace": "network",
         "labels": {
           "scenario": "l3vpn-red-mesh",
           "vpn": "red-mesh",
@@ -2834,7 +2834,7 @@
       "kind": "TrafficTest",
       "metadata": {
         "name": "d3-red-d4-red-bidir",
-        "namespace": "default",
+        "namespace": "network",
         "labels": {
           "scenario": "l3vpn-red-mesh",
           "vpn": "red-mesh",

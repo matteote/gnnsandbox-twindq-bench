@@ -12,11 +12,22 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import asyncio
 import logging
 import ipaddress
 import re
 import kubernetes
 from typing import Dict, List, Any, Optional
+
+# Shared lock to ensure only one VyOSUnderlay or VyOSL3VPN lifecycle
+# operation runs at a time.  Both CR types patch VyOSRouter specs and
+# wait for Ansible to complete; allowing them to run concurrently causes
+# races on the same physical routers and configuration inconsistencies.
+#
+# VyOSRouter create/update handlers do NOT acquire this lock — they are
+# child operations triggered by the spec patches above, and locking them
+# would deadlock the parent waiting for the child to finish.
+router_provisioning_lock = asyncio.Lock()
 
 logger = logging.getLogger(__name__)
 
@@ -885,3 +896,5 @@ async def create_device(device_cr: Dict[str, Any], namespace: str):
             logger.info(f"Device {device_cr['metadata']['name']} already exists — skipping")
         else:
             raise
+
+

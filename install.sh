@@ -1272,6 +1272,8 @@ Networkagent()
         --update-env-vars GOOGLE_CLOUD_LOCATION=$GOOGLE_REGION \
         --update-env-vars GOOGLE_GENAI_USE_VERTEXAI=1 \
         --update-env-vars GOOGLE_APPLICATION_CREDENTIALS="/agent/networkagent.json" \
+        --update-env-vars WEBAPPS_PWD=${WEBAPPS_PWD} \
+        --update-env-vars WEBAPPS_LOGIN=${WEBAPPS_LOGIN} \
         --update-env-vars AGENT_MCP_TOOLS_ADDRESS=$TOOLS_URL/sse \
         --allow-unauthenticated 
 

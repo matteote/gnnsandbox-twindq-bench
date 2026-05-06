@@ -180,9 +180,29 @@ async def create_vyosrouter(body, spec, name, namespace, uid, logger, **kwargs):
                                body=body, spec=spec, uid=uid, logger_obj=logger)
             raise
 
-@kopf.on.update('google.dev', 'v1', 'vyosrouter', field='spec')
-async def update_vyosrouter(body, spec, name, namespace, uid, logger, **kwargs):
-    """Handle VyOSRouter updates using Ansible"""
+@kopf.on.update('google.dev', 'v1', 'vyosrouter')
+async def update_vyosrouter(body, spec, name, namespace, uid, logger, diff, **kwargs):
+    """Handle VyOSRouter updates using Ansible.
+
+    Reacts to either a spec change or an explicit reconcile-trigger annotation
+    written by the VyOSL3VPN handler when it detects that a router is in Failed
+    state and the spec patch would otherwise be a no-op (identical values already
+    stored → no K8s update event → update handler never fires → router stays stuck).
+    """
+    RECONCILE_ANNOTATION = 'vyos.google.dev/vpn-reconcile-trigger'
+
+    relevant = any(
+        (len(fp) > 0 and fp[0] == 'spec') or
+        fp == ('metadata', 'annotations', RECONCILE_ANNOTATION)
+        for _, fp, _, _ in diff
+    )
+    if not relevant:
+        logger.debug(
+            f"VyOSRouter {name}: update event contains no spec or reconcile-trigger "
+            f"changes — skipping Ansible run"
+        )
+        return
+
     logger.info(f"Updating VyOSRouter: {name} in namespace: {namespace}")
 
     ip_address = await get_ip("automation", "networkvm")
@@ -219,15 +239,15 @@ async def update_vyosrouter(body, spec, name, namespace, uid, logger, **kwargs):
             logger.info(f"Successfully updated VyOSRouter {name}")
         else:
             error_msg = result.get('error', 'Unknown update error')
-            if _is_transient_error(error_msg):
-                logger.warning(f"Transient update error for {name}, will retry: {error_msg}")
-                await update_status(name, namespace, "Updating", f"Update pending retry: {error_msg}",
-                                   body=body, spec=spec, uid=uid, logger_obj=logger)
-                raise kopf.TemporaryError(f"Transient update error: {error_msg}", delay=30)
-            else:
-                await update_status(name, namespace, "Failed", f"Failed to update router: {error_msg}",
-                                   body=body, spec=spec, uid=uid, logger_obj=logger)
-                raise kopf.PermanentError(f"VyOS router update failed: {error_msg}")
+            # All Ansible update failures are treated as transient — VyOS config errors
+            # are almost always worth retrying (timing issues, commit locks, etc.).
+            # Raising TemporaryError lets kopf reschedule this handler automatically
+            # without requiring a new spec-change event to re-trigger it.
+            delay = 30 if _is_transient_error(error_msg) else 60
+            logger.warning(f"Update error for {name}, will retry in {delay}s: {error_msg}")
+            await update_status(name, namespace, "Updating", f"Update pending retry: {error_msg}",
+                               body=body, spec=spec, uid=uid, logger_obj=logger)
+            raise kopf.TemporaryError(f"Update error (will retry): {error_msg}", delay=delay)
 
     except (kopf.TemporaryError, kopf.PermanentError):
         # Re-raise kopf control exceptions without double-handling
@@ -235,15 +255,11 @@ async def update_vyosrouter(body, spec, name, namespace, uid, logger, **kwargs):
     except Exception as e:
         error_msg = str(e)
         logger.error(f"Failed to update VyOSRouter {name}: {error_msg}")
-        if _is_transient_error(error_msg):
-            logger.warning(f"Treating as transient error, will retry: {error_msg}")
-            await update_status(name, namespace, "Updating", f"Retrying after error: {error_msg}",
-                               body=body, spec=spec, uid=uid, logger_obj=logger)
-            raise kopf.TemporaryError(error_msg, delay=30)
-        else:
-            await update_status(name, namespace, "Failed", error_msg,
-                               body=body, spec=spec, uid=uid, logger_obj=logger)
-            raise
+        delay = 30 if _is_transient_error(error_msg) else 60
+        logger.warning(f"Treating as retryable error, will retry in {delay}s: {error_msg}")
+        await update_status(name, namespace, "Updating", f"Retrying after error: {error_msg}",
+                           body=body, spec=spec, uid=uid, logger_obj=logger)
+        raise kopf.TemporaryError(error_msg, delay=delay)
 
 @kopf.on.delete('google.dev', 'v1', 'vyosrouter')
 async def delete_vyosrouter(body, spec, name, namespace, logger, **kwargs):

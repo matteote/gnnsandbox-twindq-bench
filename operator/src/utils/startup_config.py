@@ -66,7 +66,6 @@ class StartupConfig:
         #   unblocks, and the idempotency guards ensure clean recovery on operator restart.
         #   Avoid setting this >> 15 for VPN mode to keep the semaphore wait queue small.
         #
-        # For FREE5GC mode:
         #   More handlers with varied workloads; 20 gives enough headroom.
         self.max_workers_default = int(os.getenv("KOPF_MAX_WORKERS_DEFAULT", "25"))
         self.max_workers_free5gc = int(os.getenv("KOPF_MAX_WORKERS_FREE5GC", "25"))

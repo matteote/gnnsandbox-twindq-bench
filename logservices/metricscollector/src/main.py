@@ -23,6 +23,21 @@ DATABASE_ID = os.environ.get("GOOGLE_SPANNER_DATABASE")
 #   operator/src/vyosvm/playbooks/templates/ops-agent-config.yaml.j2
 POLL_INTERVAL = int(os.environ.get("POLL_INTERVAL", 20))
 
+# Spanner write batching
+# Each row insert generates mutations for the base table AND every secondary
+# index entry.  NetworkMetrics has 9 columns and 4 secondary indexes, giving:
+#
+#   Base table              9 cols  →  9 mutations
+#   NetworkMetricsIdx1      timestamp + id + 7 STORING  →  9 mutations
+#   NetworkMetricsByNodeTime      node_name, metric_name, interface, timestamp + id + 3 STORING  →  8 mutations
+#   NetworkMetricsByKindNodeTime  kind, node_name, metric_name, timestamp + id + 3 STORING  →  8 mutations
+#   NetworkMetricsByKindTime      kind, timestamp + id + 5 STORING  →  8 mutations
+#
+#   Total: 42 mutations per row  →  hard limit of 80,000 allows at most ~1,904 rows
+#
+# We default to 1,500 rows (~63,000 mutations) to stay safely under that ceiling.
+SPANNER_BATCH_SIZE = int(os.environ.get("SPANNER_BATCH_SIZE", 1500))
+
 # Retention settings
 RETENTION_HOURS = int(os.environ.get("RETENTION_HOURS", 3))
 # Metrics clean up frequency
@@ -432,25 +447,39 @@ def run_worker():
             logger.error(f"Error during API poll: {e}")
 
         # Batch write to Spanner
+        # Split into chunks to stay under Spanner's 80,000-mutation limit.
+        # Each row costs 42 mutations (9 base + 4 indexes); safe ceiling is
+        # ~1,904 rows. SPANNER_BATCH_SIZE defaults to 1,500.
         if data_to_insert:
-            try:
-                with lock:
-                    logger.debug("Main thread: Acquired lock")
-                    with db_container['db'].batch() as batch:
-                        logger.info(
-                            f"Inserting {len(data_to_insert)} metric points at {current_poll_time}"
+            total = len(data_to_insert)
+            chunks = [
+                data_to_insert[i:i + SPANNER_BATCH_SIZE]
+                for i in range(0, total, SPANNER_BATCH_SIZE)
+            ]
+            logger.info(
+                f"Inserting {total} metric points in {len(chunks)} Spanner "
+                f"batch(es) of up to {SPANNER_BATCH_SIZE} rows at {current_poll_time}"
+            )
+            for chunk_idx, chunk in enumerate(chunks):
+                try:
+                    with lock:
+                        logger.debug(
+                            f"Main thread: writing chunk {chunk_idx + 1}/{len(chunks)} "
+                            f"({len(chunk)} rows)"
                         )
-                        batch.insert(
-                            table="NetworkMetrics",
-                            columns=(
-                                "timestamp", "node_name", "metric_name",
-                                "metric_type", "kind", "value", "labels", "interface"
-                            ),
-                            values=data_to_insert,
-                        )
-                    logger.debug("Main thread: Released lock")
-            except Exception as e:
-                logger.error(f"Error writing to Spanner: {e}")
+                        with db_container['db'].batch() as batch:
+                            batch.insert(
+                                table="NetworkMetrics",
+                                columns=(
+                                    "timestamp", "node_name", "metric_name",
+                                    "metric_type", "kind", "value", "labels", "interface"
+                                ),
+                                values=chunk,
+                            )
+                except Exception as e:
+                    logger.error(
+                        f"Error writing to Spanner (chunk {chunk_idx + 1}/{len(chunks)}): {e}"
+                    )
 
         last_poll_time = current_poll_time
         logger.debug(f"Sleeping for {POLL_INTERVAL} seconds")

@@ -1,9 +1,10 @@
 import asyncio
 import kopf
 import logging
+import time
 import kubernetes
 from typing import Dict, Any
-from utils.vyosnetwork import patch_vyos_router, update_status
+from utils.vyosnetwork import patch_vyos_router, update_status, router_provisioning_lock
 
 logger = logging.getLogger(__name__)
 
@@ -40,13 +41,15 @@ async def _wait_for_routers_leave_running(
                 r = api.get(name=rname, namespace=namespace)
                 phase = r.get('status', {}).get('phase', 'Unknown')
                 if phase == 'Failed':
-                    raise kopf.PermanentError(
-                        f"Router {rname} entered Failed state while applying underlay configuration"
+                    raise kopf.TemporaryError(
+                        f"Router {rname} entered Failed state while applying underlay configuration; "
+                        f"will retry after router is recovered",
+                        delay=60,
                     )
                 if phase == 'Running':
                     next_still_running.append(rname)
                 # Any non-Running, non-Failed phase means the handler picked it up — good.
-            except kopf.PermanentError:
+            except (kopf.TemporaryError, kopf.PermanentError):
                 raise
             except Exception as e:
                 # If we can't read the router, conservatively assume still Running.
@@ -72,18 +75,22 @@ async def _wait_for_routers_leave_running(
 
 async def _wait_for_routers_running(
     router_names: list, namespace: str, logger,
-    timeout: int = 180, poll_interval: int = 5
+    timeout: int = 600, poll_interval: int = 5
 ) -> None:
     """Poll VyOSRouter CRs until every named router reaches Running status.
 
-    Raises kopf.PermanentError if any router enters Failed state or the
-    overall timeout expires.  Uses asyncio.sleep so the event loop stays
-    responsive while we wait.
+    Timeout is 600 s (10 min) to allow routers whose update handler raised a
+    TemporaryError to complete multiple self-retry cycles (each up to 60 s)
+    before giving up.
+
+    On timeout a TemporaryError (not PermanentError) is raised so the underlay
+    handler itself is also rescheduled rather than permanently abandoned.
     """
     client = kubernetes.dynamic.DynamicClient(kubernetes.client.ApiClient())
     api = client.resources.get(api_version='google.dev/v1', kind='VyOSRouter')
 
     elapsed = 0
+    not_running = []
     while elapsed < timeout:
         not_running = []
         for rname in router_names:
@@ -91,12 +98,18 @@ async def _wait_for_routers_running(
                 r = api.get(name=rname, namespace=namespace)
                 phase = r.get('status', {}).get('phase', 'Unknown')
                 if phase == 'Failed':
-                    raise kopf.PermanentError(
-                        f"Router {rname} entered Failed state while applying underlay configuration"
+                    # Router update handler raised PermanentError — raise
+                    # TemporaryError so the underlay handler retries.  On the
+                    # next retry the reconcile-trigger annotation path ensures
+                    # update_vyosrouter re-fires even for no-op spec patches.
+                    raise kopf.TemporaryError(
+                        f"Router {rname} entered Failed state while applying underlay configuration; "
+                        f"will retry after router is recovered",
+                        delay=60,
                     )
                 if phase != 'Running':
                     not_running.append(f"{rname}({phase})")
-            except kopf.PermanentError:
+            except (kopf.TemporaryError, kopf.PermanentError):
                 raise
             except Exception as e:
                 not_running.append(f"{rname}(error:{e})")
@@ -109,8 +122,10 @@ async def _wait_for_routers_running(
         await asyncio.sleep(poll_interval)
         elapsed += poll_interval
 
-    raise kopf.PermanentError(
-        f"Timed out after {timeout}s waiting for routers to reach Running state: {not_running}"
+    raise kopf.TemporaryError(
+        f"Timed out after {timeout}s waiting for routers to reach Running state: {not_running}; "
+        f"will retry",
+        delay=120,
     )
 
 
@@ -156,52 +171,94 @@ async def create_vyosunderlay(body, spec, name, namespace, uid, logger, **kwargs
             await update_status(name, namespace, "VyOSUnderlay", "Waiting", 
                               f"Waiting for VyOSInfrastructure {infrastructure_ref} to be ready")
             raise kopf.TemporaryError(f"Waiting for VyOSInfrastructure {infrastructure_ref} to be ready", delay=10)
-        
-        await update_status(name, namespace, "VyOSUnderlay", "Processing", "Applying underlay configuration")
-        
-        routers = spec.get('routers', [])
-        
-        # Apply global protocol settings to all routers in the infrastructure
-        # (This is a simplification, in reality we might want to be more selective)
-        patched_routers = []
-        for router in routers:
-            router_name = router['name']
-            
-            # Construct the patch for the VyOSRouter
-            # We merge the underlay protocols into the router's spec.protocols
-            router_patch = {
-                'spec': {
-                    'protocols': router.get('protocols', {})
+
+        # Acquire the shared provisioning lock to serialize this operation against
+        # all other VyOSUnderlay and VyOSL3VPN lifecycle operations.  Concurrent
+        # Ansible playbooks on the same routers cause configuration races.
+        logger.info(f"VyOSUnderlay {name}: waiting for provisioning lock")
+        async with router_provisioning_lock:
+            logger.info(f"VyOSUnderlay {name}: acquired provisioning lock, proceeding")
+
+            await update_status(name, namespace, "VyOSUnderlay", "Processing", "Applying underlay configuration")
+
+            routers = spec.get('routers', [])
+
+            patched_routers = []
+            for router in routers:
+                router_name = router['name']
+
+                # Read the router's current phase before patching so we can
+                # detect no-op patches below (identical spec → no K8s event →
+                # update_vyosrouter never fires → router stays stuck in Failed).
+                try:
+                    _check_client = kubernetes.dynamic.DynamicClient(kubernetes.client.ApiClient())
+                    _check_api = _check_client.resources.get(api_version='google.dev/v1', kind='VyOSRouter')
+                    _current = _check_api.get(name=router_name, namespace=namespace)
+                    _pre_phase = (_current.get('status') or {}).get('phase')
+                except Exception:
+                    _pre_phase = None
+
+                router_patch = {
+                    'spec': {
+                        'protocols': router.get('protocols', {})
+                    }
                 }
-            }
-            if 'traffic_policy' in router:
-                router_patch['spec']['traffic_policy'] = router['traffic_policy']
-            
-            try:
-                await patch_vyos_router(router_name, namespace, router_patch)
-                patched_routers.append(router_name)
-            except Exception as e:
-                logger.error(f"Failed to patch router {router_name} for underlay: {e}")
-                # We continue with other routers even if one fails
+                if 'traffic_policy' in router:
+                    router_patch['spec']['traffic_policy'] = router['traffic_policy']
 
-        # Wait for every patched router to finish its Ansible reconfiguration
-        # and reach Running status before marking the underlay Ready.
-        if patched_routers:
-            await update_status(name, namespace, "VyOSUnderlay", "Processing",
-                                f"Waiting for routers to finish reconfiguration: {patched_routers}")
-            # Phase 1: wait for routers to leave Running so we know the
-            # update handler has picked up the spec change.
-            await _wait_for_routers_leave_running(patched_routers, namespace, logger)
-            # Phase 2: wait for routers to return to Running (Ansible done).
-            await _wait_for_routers_running(patched_routers, namespace, logger)
+                try:
+                    await patch_vyos_router(router_name, namespace, router_patch)
+                    patched_routers.append(router_name)
+                except Exception as e:
+                    logger.error(f"Failed to patch router {router_name} for underlay: {e}")
+                    continue
 
-        await update_status(name, namespace, "VyOSUnderlay", "Ready", "Underlay configuration applied")
+                # ── Reconcile-trigger annotation ──────────────────────────────
+                # If the router was already in Failed state when this retry
+                # started, the spec patch above may have been a no-op (identical
+                # values already stored → no resourceVersion change → no update
+                # event → update_vyosrouter never re-fires → router stays stuck).
+                # Setting a timestamp annotation always bumps resourceVersion,
+                # guaranteeing update_vyosrouter fires even with an empty spec diff.
+                if _pre_phase == 'Failed':
+                    RECONCILE_ANNOTATION = 'vyos.google.dev/vpn-reconcile-trigger'
+                    logger.info(
+                        f"Router {router_name} was in Failed state — setting "
+                        f"reconcile-trigger annotation to force update_vyosrouter"
+                    )
+                    try:
+                        _trig_client = kubernetes.dynamic.DynamicClient(kubernetes.client.ApiClient())
+                        _trig_api = _trig_client.resources.get(api_version='google.dev/v1', kind='VyOSRouter')
+                        _trig_api.patch(
+                            name=router_name,
+                            namespace=namespace,
+                            body={
+                                'metadata': {
+                                    'annotations': {
+                                        RECONCILE_ANNOTATION: str(int(time.time()))
+                                    }
+                                }
+                            },
+                            content_type='application/merge-patch+json',
+                        )
+                    except Exception as ann_err:
+                        logger.warning(
+                            f"Could not set reconcile-trigger annotation on "
+                            f"{router_name}: {ann_err}"
+                        )
+
+            if patched_routers:
+                await update_status(name, namespace, "VyOSUnderlay", "Processing",
+                                    f"Waiting for routers to finish reconfiguration: {patched_routers}")
+                await _wait_for_routers_leave_running(patched_routers, namespace, logger)
+                await _wait_for_routers_running(patched_routers, namespace, logger)
+
+            await update_status(name, namespace, "VyOSUnderlay", "Ready", "Underlay configuration applied")
+            logger.info(f"VyOSUnderlay {name}: releasing provisioning lock")
 
     except kopf.TemporaryError:
-        # Re-raise TemporaryError to allow Kopf to retry
         raise
     except kopf.PermanentError:
-        # Re-raise PermanentError from check_infrastructure_ready
         raise
     except Exception as e:
         error_msg = f"Failed to create VyOSUnderlay: {str(e)}"
@@ -236,54 +293,51 @@ async def delete_vyosunderlay(body, spec, name, namespace, logger, **kwargs):
         logger.info(f"VyOSUnderlay {name}: no routers listed in spec, nothing to clean up")
         return
 
-    patched_routers = []
-    for router in routers:
-        router_name = router.get('name')
-        if not router_name:
-            continue
+    # Acquire the shared provisioning lock to serialize this delete against
+    # any concurrent VyOSL3VPN or VyOSUnderlay lifecycle operations.
+    logger.info(f"VyOSUnderlay {name}: waiting for provisioning lock (delete)")
+    async with router_provisioning_lock:
+        logger.info(f"VyOSUnderlay {name}: provisioning lock acquired (delete)")
 
-        # Clear the underlay-applied fields so the router reconciles to its
-        # baseline config. Setting protocols to {} removes underlay protocol
-        # config; traffic_policy is cleared the same way.
-        router_patch = {
-            'spec': {
-                'protocols': {},
+        patched_routers = []
+        for router in routers:
+            router_name = router.get('name')
+            if not router_name:
+                continue
+
+            router_patch = {
+                'spec': {
+                    'protocols': {},
+                }
             }
-        }
-        if 'traffic_policy' in router:
-            router_patch['spec']['traffic_policy'] = {}
+            if 'traffic_policy' in router:
+                router_patch['spec']['traffic_policy'] = {}
 
-        try:
-            await patch_vyos_router(router_name, namespace, router_patch)
-            patched_routers.append(router_name)
-            logger.info(f"Cleared underlay config from VyOSRouter {router_name}")
-        except Exception as e:
-            logger.error(f"Failed to clear underlay config from VyOSRouter {router_name}: {e}")
+            try:
+                await patch_vyos_router(router_name, namespace, router_patch)
+                patched_routers.append(router_name)
+                logger.info(f"Cleared underlay config from VyOSRouter {router_name}")
+            except Exception as e:
+                logger.error(f"Failed to clear underlay config from VyOSRouter {router_name}: {e}")
 
-    # Wait for every patched router to finish its Ansible reconfiguration
-    # before releasing the finalizer.
-    if patched_routers:
-        try:
-            logger.info(
-                f"VyOSUnderlay {name} delete: waiting for routers to finish "
-                f"reconfiguration: {patched_routers}"
-            )
-            # Phase 1: wait for routers to leave Running so we know the
-            # update handler has picked up the spec change.
-            await _wait_for_routers_leave_running(patched_routers, namespace, logger)
-            # Phase 2: wait for routers to return to Running (Ansible done).
-            await _wait_for_routers_running(patched_routers, namespace, logger)
-        except kopf.PermanentError:
-            # Log but don't block deletion — the CR should still be removed.
-            logger.error(
-                f"Permanent error while waiting for routers during VyOSUnderlay {name} "
-                f"cleanup; router config may need manual inspection"
-            )
-        except Exception as e:
-            logger.error(
-                f"Unexpected error while waiting for routers during VyOSUnderlay {name} "
-                f"cleanup: {e}",
-                exc_info=True,
-            )
+        if patched_routers:
+            try:
+                logger.info(
+                    f"VyOSUnderlay {name} delete: waiting for routers to finish "
+                    f"reconfiguration: {patched_routers}"
+                )
+                await _wait_for_routers_leave_running(patched_routers, namespace, logger)
+                await _wait_for_routers_running(patched_routers, namespace, logger)
+            except kopf.PermanentError:
+                logger.error(
+                    f"Permanent error while waiting for routers during VyOSUnderlay {name} "
+                    f"cleanup; router config may need manual inspection"
+                )
+            except Exception as e:
+                logger.error(
+                    f"Unexpected error while waiting for routers during VyOSUnderlay {name} "
+                    f"cleanup: {e}",
+                    exc_info=True,
+                )
 
-    logger.info(f"VyOSUnderlay {name}: underlay config cleared from all routers")
+        logger.info(f"VyOSUnderlay {name}: underlay config cleared from all routers — releasing provisioning lock")

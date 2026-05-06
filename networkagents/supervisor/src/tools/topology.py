@@ -1022,7 +1022,7 @@ def fetch_anomalies(limit: int = 50, timestamp_str: str = None):
 # VyOSL3VPN & TrafficTest (Kubernetes CRDs)
 #####################################################################################
 
-def fetch_vpns(namespace: str = "default") -> list:
+def fetch_vpns(namespace: str = "network") -> list:
     """
     Fetch all VyOSL3VPN custom resources from Kubernetes and return a
     normalised summary list suitable for the dashboard.
@@ -1094,7 +1094,7 @@ def fetch_vpns(namespace: str = "default") -> list:
         return []
 
 
-def fetch_traffic_tests(namespace: str = "default") -> list:
+def fetch_traffic_tests(namespace: str = "network") -> list:
     """
     Fetch all TrafficTest custom resources from Kubernetes and return a
     normalised summary list suitable for the dashboard.
@@ -1143,13 +1143,13 @@ def fetch_traffic_tests(namespace: str = "default") -> list:
         return []
 
 
-def delete_traffic_test_crd(name: str, namespace: str = "default") -> bool:
+def delete_traffic_test_crd(name: str, namespace: str = "network") -> bool:
     """
     Delete a single TrafficTest CRD from Kubernetes by name.
 
     Args:
         name:      The TrafficTest resource name to delete.
-        namespace: Kubernetes namespace (default: "default").
+        namespace: Kubernetes namespace (default: "network").
 
     Returns:
         True  – delete issued successfully (or resource already gone).
@@ -1174,13 +1174,13 @@ def delete_traffic_test_crd(name: str, namespace: str = "default") -> bool:
         return False
 
 
-def delete_vpn_crd(name: str, namespace: str = "default") -> bool:
+def delete_vpn_crd(name: str, namespace: str = "network") -> bool:
     """
     Delete a single VyOSL3VPN CRD from Kubernetes by name.
 
     Args:
         name:      The VyOSL3VPN resource name to delete.
-        namespace: Kubernetes namespace (default: "default").
+        namespace: Kubernetes namespace (default: "network").
 
     Returns:
         True  – delete issued successfully (or resource already gone).
@@ -1205,7 +1205,7 @@ def delete_vpn_crd(name: str, namespace: str = "default") -> bool:
         return False
 
 
-def fetch_vyos_underlay(namespace: str = "default") -> list:
+def fetch_vyos_underlay(namespace: str = "network") -> list:
     """
     Fetch all VyOSUnderlay custom resources from Kubernetes and return a
     normalised summary list suitable for the dashboard status card.
@@ -1242,7 +1242,7 @@ def fetch_vyos_underlay(namespace: str = "default") -> list:
         return []
 
 
-def fetch_vyos_infrastructure(namespace: str = "default") -> list:
+def fetch_vyos_infrastructure(namespace: str = "network") -> list:
     """
     Fetch all VyosInfrastructure custom resources from Kubernetes and return a
     normalised summary list suitable for the dashboard status card.
@@ -1301,7 +1301,7 @@ def fetch_vyos_infrastructure(namespace: str = "default") -> list:
         return []
 
 
-def fetch_infrastructure_state(namespace: str = "default") -> dict:
+def fetch_infrastructure_state(namespace: str = "network") -> dict:
     """Return VPNs, TrafficTests, and VyosInfrastructure in a single call.
 
     Replaces three sequential REST calls from the dashboard VPN refresh timer

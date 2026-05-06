@@ -43,6 +43,17 @@ _cache_value: dict = {}
 _cache_ts: float = 0.0
 _CACHE_TTL_SECONDS = 15.0
 
+# ---------------------------------------------------------------------------
+# Per-test-name result cache for fetch_traffic_test_metrics.
+# The dashboard polls every 20 s and may fire one request per linked traffic
+# test sequentially.  A 15-second TTL ensures only the first request within
+# each poll cycle hits Spanner; subsequent requests for the same test_name
+# are served from memory.  The cache is a dict keyed by test_name whose
+# values are (result_list, monotonic_timestamp) tuples.
+# ---------------------------------------------------------------------------
+_traffic_cache_lock = threading.Lock()
+_traffic_cache: dict = {}   # test_name → (list[dict], float)
+
 
 # Connect to Spanner database
 def spanner_connect():
@@ -217,33 +228,21 @@ def fetch_traffic_test_metrics(test_name: str) -> list:
     prefix = f"{test_name}_"
     logger.debug("fetch_traffic_test_metrics: test_name=%r  prefix=%r", test_name, prefix)
 
-    # Diagnostic: count TRAFFIC rows in the window (separate snapshot — Spanner
-    # single-use snapshots allow only one execute_sql call per context).
-    try:
-        with database.snapshot() as diag_snap:
-            diag_sql = """
-                SELECT COUNT(*) AS total,
-                       COUNTIF(STARTS_WITH(JSON_VALUE(labels, '$.flow_id'), @prefix)) AS matching
-                FROM NetworkMetrics
-                WHERE kind = 'TRAFFIC'
-                  AND timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL @window_seconds SECOND)
-            """
-            diag = list(diag_snap.execute_sql(
-                diag_sql,
-                params={"prefix": prefix, "window_seconds": _LATEST_WINDOW_SECONDS},
-                param_types={
-                    "prefix": spanner.param_types.STRING,
-                    "window_seconds": spanner.param_types.INT64,
-                },
-            ))
-        total_traffic = diag[0][0] if diag else 0
-        matching_traffic = diag[0][1] if diag else 0
-        logger.debug(
-            "fetch_traffic_test_metrics: TRAFFIC rows in window=%d  matching prefix=%d",
-            total_traffic, matching_traffic,
-        )
-    except Exception as e:
-        logger.warning("fetch_traffic_test_metrics diagnostic failed: %s", e)
+    # ── Cache check ────────────────────────────────────────────────────────────
+    # The dashboard polls every 20 s and may call this function once per linked
+    # traffic test in a tight sequential loop.  Serve from the in-memory cache
+    # when the entry is younger than the TTL to avoid redundant Spanner scans.
+    now = time.monotonic()
+    with _traffic_cache_lock:
+        cached = _traffic_cache.get(test_name)
+        if cached is not None:
+            cached_value, cached_ts = cached
+            if now - cached_ts < _CACHE_TTL_SECONDS:
+                logger.debug(
+                    "fetch_traffic_test_metrics: cache hit for %r (age=%.1fs)",
+                    test_name, now - cached_ts,
+                )
+                return cached_value
 
     with database.snapshot() as snapshot:
         try:
@@ -255,13 +254,21 @@ def fetch_traffic_test_metrics(test_name: str) -> list:
             # MAX(timestamp) GROUP BY subquery + self-join selects the latest
             # row per (node_name, metric_name, labels) group without needing
             # QUALIFY or ROW_NUMBER(), which Spanner does not support.
+            #
+            # FORCE_INDEX directs Spanner to use the NetworkMetricsByKindTime index
+            # (kind, timestamp DESC) STORING (node_name, metric_name, value, labels,
+            # interface) for both the subquery and the outer scan.  This avoids a
+            # full base-table scan: the index key range (kind='TRAFFIC', timestamp >=
+            # cutoff) is much tighter than a timestamp-only or kind+node_name scan,
+            # and all projected columns are stored inline so no base-table join-back
+            # is needed.
             sql = """
                 SELECT nm.node_name, nm.metric_name, nm.value, nm.labels, nm.timestamp
-                FROM NetworkMetrics AS nm
+                FROM NetworkMetrics@{FORCE_INDEX=NetworkMetricsByKindTime} AS nm
                 JOIN (
                     SELECT node_name, metric_name, TO_JSON_STRING(labels) AS labels_str,
                            MAX(timestamp) AS max_ts
-                    FROM NetworkMetrics
+                    FROM NetworkMetrics@{FORCE_INDEX=NetworkMetricsByKindTime}
                     WHERE kind = 'TRAFFIC'
                       AND STARTS_WITH(JSON_VALUE(labels, '$.flow_id'), @prefix)
                       AND timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL @window_seconds SECOND)
@@ -343,7 +350,13 @@ def fetch_traffic_test_metrics(test_name: str) -> list:
                 if field:
                     flows[key][field] = value
 
-            return list(flows.values())
+            result = list(flows.values())
+
+            # ── Cache update ───────────────────────────────────────────────────
+            with _traffic_cache_lock:
+                _traffic_cache[test_name] = (result, time.monotonic())
+
+            return result
 
         except Exception as e:
             logger.error("fetch_traffic_test_metrics SQL error: {}".format(e))
@@ -486,11 +499,13 @@ def clear_network_metrics():
             "DELETE FROM NetworkMetrics WHERE TRUE"
         )
         logger.debug(f"Successfully cleared ~{row_count} records from NetworkMetrics table")
-        # Invalidate the in-memory cache so the next read doesn't serve stale data.
+        # Invalidate all in-memory caches so the next read doesn't serve stale data.
         with _cache_lock:
             global _cache_value, _cache_ts
             _cache_value = {}
             _cache_ts = 0.0
+        with _traffic_cache_lock:
+            _traffic_cache.clear()
         return True
     except Exception as e:
         logger.error(f"Failed to clear NetworkMetrics table: {e}")

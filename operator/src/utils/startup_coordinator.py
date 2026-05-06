@@ -228,14 +228,4 @@ def register_application_services_phase():
         priority=3
     )
     
-    if os.getenv("FREE5GC") is not None:
-        def load_free5gc():
-            logger.info("Loading FREE5GC lifecycle")
-            import free5gc.ueransim.lifecycle
-            import free5gc.upf.lifecycle
-            import free5gc.controlplane.lifecycle
-            import free5gc.dnn.lifecycle
-            import free5gc.uetest.lifecycle
-        phase.add_module(load_free5gc)
-    
     startup_coordinator.register_phase(phase)
