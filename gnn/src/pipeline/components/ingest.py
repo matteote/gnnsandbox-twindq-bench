@@ -108,6 +108,14 @@ def ingest_snapshots(
             "Check that the network operator is running and has written topology data."
         )
 
+    # Compute temporal gradient / delta features across the ordered snapshot sequence.
+    # This must be done before serialising — the temporal features (rx_err_gradient,
+    # prefix_count_delta, vrf_route_count_delta, throughput_delta) require at least
+    # two consecutive snapshots and cannot be recomputed from individual pickle files.
+    logger.info("Computing temporal features across snapshot sequence...")
+    dataset.compute_temporal_features(snapshots, interval_seconds=interval_minutes * 60)
+    logger.info("Temporal features computed")
+
     # Write each snapshot as a pickle file and JSON file to GCS
     for i, snapshot in enumerate(snapshots):
         blob_name = f"{gcs_prefix}/snapshot_{i:04d}.pkl"

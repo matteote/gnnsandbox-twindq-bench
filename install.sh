@@ -688,9 +688,7 @@ Start()
     done
     echo "VyosVM networkvm is Ready!"
 
-    # kubectl apply -f environment/bigquery.yaml
-
-    # DeployGit
+    DeployGit
 }
 
 ############################################################
@@ -838,6 +836,7 @@ Kill()
     gcloud run jobs delete gnn-infer --region=$GOOGLE_REGION --quiet 2>/dev/null || true
 
     gcloud run services delete networktools --region=$GOOGLE_REGION --quiet
+    gcloud run services delete designeragent --region=$GOOGLE_REGION --quiet
     gcloud run services delete testagent --region=$GOOGLE_REGION --quiet
     gcloud run services delete logsagent --region=$GOOGLE_REGION --quiet
     gcloud run services delete network-agent-supervisor --region=$GOOGLE_REGION --quiet
@@ -939,7 +938,7 @@ DeployOperator()
 DeployGit()
 {
     # Delete current instance
-    echo "Deleting current spanner DB..."
+    echo "Deleting current git instance..."
     kubectl delete -f environment/git.yaml
 
     echo "#####################################"
@@ -1312,11 +1311,16 @@ Networkagent()
         --region $GOOGLE_REGION \
         --service-account $GOOGLE_SERVICE_ACCOUNT \
         --min 1 \
+        --update-env-vars GOOGLE_PROJECT=$GOOGLE_PROJECT \
+        --update-env-vars GOOGLE_REGION=$GOOGLE_REGION \
+        --update-env-vars GOOGLE_ZONE=$GOOGLE_ZONE \
         --update-env-vars GOOGLE_CLOUD_PROJECT=$GOOGLE_PROJECT \
         --update-env-vars GOOGLE_CLOUD_LOCATION=$GOOGLE_REGION \
         --update-env-vars GOOGLE_GENAI_USE_VERTEXAI=1 \
         --update-env-vars AGENT_MCP_TOOLS_ADDRESS=$TOOLS_URL/sse \
         --update-env-vars GOOGLE_APPLICATION_CREDENTIALS="/agent/networkagent.json" \
+        --update-env-vars WEBAPPS_PWD=${WEBAPPS_PWD} \
+        --update-env-vars WEBAPPS_LOGIN=${WEBAPPS_LOGIN} \
         --allow-unauthenticated 
     fi
 
@@ -1456,17 +1460,17 @@ DisplayDemoInfo()
 {
     echo "Gathering demo information..."
     DASHBOARD_URL=$(gcloud run services describe network-dashboard --region=$GOOGLE_REGION --format="value(status.url)")
-    TESTER_URL=$(gcloud run services describe testagent --region=$GOOGLE_REGION --format="value(status.url)")
-    LOGS_URL=$(gcloud run services describe logsagent --region=$GOOGLE_REGION --format="value(status.url)")
-    TOOLS_URL=$(gcloud run services describe networktools --region=$GOOGLE_REGION --format="value(status.url)")
+    GITEA_HOST=$(kubectl get gitea gitea -o 'jsonpath={..status.create_gitea.external_ip_address}')
 
     echo "============================================================"
     echo "=                Demo information Summary                  ="
     echo "============================================================"
     echo ""
     echo "Network Agent Dashboard: ${DASHBOARD_URL}"
-    echo "Username/password: ${WEBAPPS_LOGIN}/${WEBAPPS_PWD}"
+    echo "GITEA Host: https://${GITEA_HOST}:3000"
+    echo "  git clone https://$GITEA_HOST:3000/${WEBAPPS_LOGIN}/network -c http.sslVerify=false"
     echo ""
+    echo "Username/password: ${WEBAPPS_LOGIN}/${WEBAPPS_PWD}"
 }
 
 ############################################################

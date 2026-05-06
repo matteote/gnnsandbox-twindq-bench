@@ -14,6 +14,7 @@
 
 import json
 import logging
+from pydantic import BaseModel, Field
 from typing import Optional, Tuple
 from typing_extensions import override
 from a2a.server.agent_execution import AgentExecutor, RequestContext
@@ -23,6 +24,7 @@ from a2a.types import (
     TaskStatus,
     TaskStatusUpdateEvent,
 )
+from google import genai
 from google.genai import types
 from agent.agent import DesignerAgent
 from agent.subagents.plan import NetworkChangePlan
@@ -39,6 +41,28 @@ logger = logging.getLogger(__name__)
 # ── State-machine values ───────────────────────────────────────────────────────
 _STATE_ASKING = 'asking_clarification'   # planner asked the user a question
 _STATE_APPROVAL = 'awaiting_approval'    # plan built, waiting for human decision
+
+# ── LLM approval interpreter ──────────────────────────────────────────────────
+
+class ApprovalDecision(BaseModel):
+    """Structured output for the LLM-based approval interpreter."""
+    approved: bool = Field(
+        description="True if the user wants to proceed with the plan, False if they have concerns or want changes."
+    )
+    feedback: str = Field(
+        default="",
+        description="Specific feedback or reason for rejection. Empty string if the user approved with no comments."
+    )
+
+# Lazy singleton — initialised on first use so the module can be imported
+# without requiring GOOGLE_CLOUD_PROJECT to be set at import time.
+_genai_client: Optional[genai.Client] = None
+
+def _get_genai_client() -> genai.Client:
+    global _genai_client
+    if _genai_client is None:
+        _genai_client = genai.Client()
+    return _genai_client
 
 
 class DesignerAgentExecutor(AgentExecutor):
@@ -63,13 +87,13 @@ class DesignerAgentExecutor(AgentExecutor):
     State machine (stored in agent._states[task.id]):
 
       None / not set  →  run planner_runner with the user's message
-                         ├─ plan generated        → STATE_APPROVAL, emit input_required [PLAN]
-                         └─ needs clarification   → STATE_ASKING, emit input_required [QUESTION]
+                         ├─ plan generated        → STATE_APPROVAL, emit input_required (markdown plan)
+                         └─ needs clarification   → STATE_ASKING, emit input_required (clarification question)
 
       STATE_ASKING    →  re-run planner_runner with the user's answer
                          (full session history gives the planner context)
 
-      STATE_APPROVAL  →  parse user response (JSON from widget or plain text):
+      STATE_APPROVAL  →  LLM interprets the user's plain-text chat reply:
                          ├─ approved              → clear state, run execution_runner
                          └─ rejected + feedback   → clear plan, re-run planner with feedback
     """
@@ -199,8 +223,8 @@ class DesignerAgentExecutor(AgentExecutor):
 
         After the run, inspects session.state['change_plan'] to determine
         whether the planner:
-          (a) produced a plan  → STATE_APPROVAL, emit input_required [PLAN]
-          (b) needs more info  → STATE_ASKING,   emit input_required [QUESTION]
+          (a) produced a plan  → STATE_APPROVAL, emit input_required with markdown plan
+          (b) needs more info  → STATE_ASKING,   emit input_required with clarification question
         """
         logger.info("Running planner_runner  session_key=%s", session_key)
 
@@ -266,12 +290,16 @@ class DesignerAgentExecutor(AgentExecutor):
         if plan.needs_clarification:
             logger.info("Planner needs clarification: %s", plan.needs_clarification)
             agent._states[session_key] = _STATE_ASKING
+            clarification_text = (
+                f"I need a bit more information before I can generate a plan:\n\n"
+                f"{plan.needs_clarification}"
+            )
             await event_queue.enqueue_event(
                 TaskStatusUpdateEvent(
                     status=TaskStatus(
                         state=TaskState.input_required,
                         message=new_agent_text_message(
-                            f"[QUESTION] {plan.needs_clarification}",
+                            clarification_text,
                             task.context_id, task.id,
                         ),
                     ),
@@ -356,7 +384,7 @@ class DesignerAgentExecutor(AgentExecutor):
             )
 
         elif current_state == _STATE_APPROVAL:
-            approved, feedback = self._parse_approval_response(user_input)
+            approved, feedback = await self._parse_approval_response(user_input)
             logger.info(
                 "Approval response: approved=%s feedback=%r",
                 approved, feedback[:80] if feedback else ''
@@ -435,12 +463,12 @@ class DesignerAgentExecutor(AgentExecutor):
         NOTE: A SequentialAgent produces mostly tool-call events with no text
         content.  We therefore track whether a final=True event was emitted and
         always emit a guaranteed completed event at the end so the supervisor's
-        send_streaming_task terminates and the approval widget is dismissed.
+        send_streaming_task terminates cleanly.
         """
         logger.info("Running execution pipeline  session_key=%s", session_key)
 
         # Immediately emit a working event so the UI transitions away from
-        # input_required (approval widget dismisses) and shows progress.
+        # input_required and shows progress.
         await event_queue.enqueue_event(
             TaskStatusUpdateEvent(
                 status=TaskStatus(
@@ -535,10 +563,15 @@ class DesignerAgentExecutor(AgentExecutor):
 
     def _format_plan_for_approval(self, plan: NetworkChangePlan) -> str:
         """
-        Format the proposed_changes list as a bullet list for the approval widget.
+        Format the proposed_changes list as a markdown document for chat display.
         Reasoning is intentionally omitted — only the actions are shown to the user.
         """
-        lines = []
+        lines = [
+            "## Proposed Network Change Plan",
+            "",
+            "Please review the following changes:",
+            "",
+        ]
         for change in (plan.proposed_changes or []):
             lines.append(
                 f"* **{change.action}** `{change.resource_type}` — "
@@ -546,38 +579,62 @@ class DesignerAgentExecutor(AgentExecutor):
             )
             if change.depends_on:
                 lines.append(f"  *Depends on*: {', '.join(change.depends_on)}")
-        return "[PLAN]\n" + "\n".join(lines)
+        lines += [
+            "",
+            "Reply **yes** to approve and execute, or describe any changes you'd like made.",
+        ]
+        return "\n".join(lines)
 
-    def _parse_approval_response(self, user_input: str) -> Tuple[bool, str]:
+    async def _parse_approval_response(self, user_input: str) -> Tuple[bool, str]:
         """
-        Parse the human's approval response.
+        Parse the human's plain-text chat reply to determine whether they are
+        approving or rejecting the plan.
 
-        Handles:
-        - JSON from requestTaskApproval widget: {"approved": true/false, "feedback": "..."}
-        - Simple yes/no text
-        - Any other text → treated as rejected + feedback (triggers re-planning)
+        Uses Gemini with structured output (ApprovalDecision) for reliable intent
+        classification.  Falls back to simple keyword matching if the LLM call fails.
 
         Returns (approved: bool, feedback: str)
         """
-        # Try JSON (from the approval widget via the supervisor)
+        # ── Free-text → LLM interpretation ───────────────────────────────────
+        # All approval responses arrive as plain chat text (no UI widget).
         try:
-            data = json.loads(user_input)
-            if isinstance(data, dict) and 'approved' in data:
-                approved = bool(data['approved'])
-                feedback = str(data.get('feedback', '') or '')
-                logger.info("Parsed JSON approval: approved=%s", approved)
-                return approved, feedback
-        except (json.JSONDecodeError, ValueError):
-            pass
+            client = _get_genai_client()
+            prompt = (
+                "A user was shown a proposed network change plan and replied with the "
+                "following message. Determine whether they are approving or rejecting "
+                "the plan.\n\n"
+                "Rules:\n"
+                "- Set approved=true if the user wants to proceed with the plan as-is.\n"
+                "- Set approved=false if the user has concerns, wants changes, or is "
+                "explicitly rejecting the plan.\n"
+                "- Set feedback to any specific feedback or reason for rejection. "
+                "Leave it as an empty string if the user approved with no comments.\n\n"
+                f"User reply: {user_input}"
+            )
+            response = await client.aio.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    response_schema=ApprovalDecision,
+                ),
+            )
+            decision = ApprovalDecision.model_validate_json(response.text)
+            logger.info(
+                "LLM parsed approval: approved=%s feedback=%r",
+                decision.approved, (decision.feedback or '')[:80]
+            )
+            return decision.approved, decision.feedback or ''
+        except Exception as e:
+            logger.warning("LLM approval parsing failed (%s) — falling back to keyword match", e)
 
-        # Plain text
+        # ── 3. Keyword fallback (if LLM unavailable) ─────────────────────────
         cleaned = user_input.strip().lower()
         if cleaned in ('yes', 'y', 'approve', 'approved', 'ok', 'proceed', 'confirm'):
             return True, ''
         if cleaned in ('no', 'n', 'deny', 'denied', 'cancel', 'cancelled', 'reject', 'rejected'):
             return False, ''
 
-        # Unrecognised text → treat as rejection with textual feedback (re-plan with it)
         logger.info("Treating unrecognised response as rejection with feedback: %r", user_input[:80])
         return False, user_input
 

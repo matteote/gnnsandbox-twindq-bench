@@ -2,16 +2,6 @@
 
 This document contains ready-to-execute queries for demonstrating network topology visualization, metrics analysis, and GNN embedding-based root cause analysis in Spanner Studio.
 
-## Prerequisites
-
-1. base demo deployed: `install.sh c && install.sh -s`
-2. Network deployed: `kubectl apply -f environment/telco-lab/l3vpn-hub-spoke.yaml`
-   - wait until all vyosrouters are ready `watch kubectl get vyosrouter -n default`
-3. Traffic running: `kubectl apply -f environment/telco-lab/l3vpn-test.yaml`
-4. GNN model training and inferencing deployed: `install.sh --deploy gnn`
-5. Metrics being collected by metricscollector: `install.sh --deploy metricscollector`
----
-
 ## A) Show Live Topology Visualization
 
 ### Query A1: Hub-Spoke Topology Overview
@@ -280,8 +270,8 @@ SELECT
     ne.node_id,
     ne.node_type,
     ne.hetgnn_score,
-    JSON_VALUE(ne.anomaly_explanation, '$.primary_feature') AS primary_issue,
-    JSON_VALUE(ne.anomaly_explanation, '$.error_value') AS error_value,
+    JSON_VALUE(ne.anomaly_explanation, '$.top_features[0].feature')                   AS top_feature,
+    CAST(JSON_VALUE(ne.anomaly_explanation, '$.top_features[0].mse') AS FLOAT64)      AS top_mse,
     ne.timestamp
 FROM NodeEmbedding ne
 WHERE ne.timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 30 MINUTE)
@@ -290,7 +280,7 @@ ORDER BY ne.hetgnn_score DESC, ne.timestamp DESC
 LIMIT 20;
 ```
 
-**Expected Result**: During faults, shows PE1 or PE2 with high scores and "Config (Semantic)" as primary issue.
+**Expected Result**: During RT misconfiguration, shows PE1 `vrf` node with high score and `rt_import_hash` as top feature.
 
 ---
 
@@ -358,11 +348,11 @@ ORDER BY node_type, node_id;
 - **BGP Behavior**: PE1 will reject all VPNv4 routes with RT `65035:1030`
 
 **GNN Detection Signature**:
-- **Router Embedding**: PE1 config embedding shows high reconstruction error
-- **Feature Attribution**: Config (semantic) feature is primary anomaly driver
-- **Temporal Signal**: Embedding diverges at fault injection time
-- **Interface Metrics**: pe1-eth2 shows dropped traffic/zero throughput
-- **Graph Propagation**: Anomaly localizes to PE1 node and connected interfaces
+- **VRF Embedding**: `vrf:pe1:BLUE_SPOKE` shows high reconstruction error; `rt_import_hash` is the top anomalous feature (the MD5 fingerprint of the RT import set has changed)
+- **Router Embedding**: `router:pe1` reconstruction error rises via message-passing from the anomalous VRF
+- **Temporal Signal**: Embedding diverges at fault injection time; `vrf_route_count` drops simultaneously as hub routes are no longer imported
+- **Flow Embedding**: `flow` node for dev1→devhub shows `throughput_norm = 0` and `expected_rate_deviation` spike
+- **Graph Propagation**: Anomaly is localised to the `vrf` layer; `bgp_session` and `interface` layers remain healthy
 
 ## Misconfigure the system
 
@@ -417,7 +407,7 @@ SELECT
         WHEN c.current_score > b.baseline_score * 1.5 THEN 'WARNING'
         ELSE 'NORMAL'
     END AS status,
-    JSON_VALUE(c.anomaly_explanation, '$.primary_feature') AS root_cause_feature,
+    JSON_VALUE(c.anomaly_explanation, '$.top_features[0].feature')  AS root_cause_feature,
     b.baseline_time,
     c.current_time
 FROM current c
@@ -425,7 +415,7 @@ LEFT JOIN baseline b ON c.node_id = b.node_id
 ORDER BY score_delta DESC;
 ```
 
-**Expected Result**: PE1 shows large score_delta with "Config (Semantic)" as root cause after Fault 1 injection.
+**Expected Result**: PE1 `vrf` node shows large score_delta with `rt_import_hash` as root cause after Fault 1 injection.
 
 ---
 
@@ -437,8 +427,8 @@ Shows how a specific node's embedding changed over time.
 SELECT 
     timestamp,
     hetgnn_score,
-    JSON_VALUE(anomaly_explanation, '$.primary_feature') AS primary_feature,
-    JSON_VALUE(anomaly_explanation, '$.error_value') AS error_value,
+    JSON_VALUE(anomaly_explanation, '$.top_features[0].feature')                 AS top_feature,
+    CAST(JSON_VALUE(anomaly_explanation, '$.top_features[0].mse') AS FLOAT64)    AS top_mse,
     -- Show first 5 dimensions of embedding for trending
     hetgnn_embedding[OFFSET(0)] AS emb_dim_0,
     hetgnn_embedding[OFFSET(1)] AS emb_dim_1,
@@ -446,7 +436,8 @@ SELECT
     hetgnn_embedding[OFFSET(3)] AS emb_dim_3,
     hetgnn_embedding[OFFSET(4)] AS emb_dim_4
 FROM NodeEmbedding
-WHERE node_id = 'pe1'  -- Focus on specific router
+WHERE node_id = 'router:pe1'  -- Focus on the PE1 router node (Spanner ID convention)
+  AND node_type = 'router'
   AND timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 2 HOUR)
 ORDER BY timestamp ASC;
 ```
@@ -485,6 +476,7 @@ JOIN PhysicalRouter pe ON vrf.router_id = pe.id
 -- Latest embedding for that PE router within the last 10 minutes
 JOIN NodeEmbedding pe_emb
     ON pe_emb.node_id = pe.id
+    AND pe_emb.node_type = 'router'
     AND pe_emb.timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 10 MINUTE)
 WHERE d.name = 'dev1'           -- Device with connectivity issue
   AND d.valid_end_ts IS NULL
@@ -497,7 +489,7 @@ WHERE d.name = 'dev1'           -- Device with connectivity issue
 ORDER BY pe_emb.hetgnn_score DESC
 ```
 
-**Expected Result**: Traces from dev1 → ce1-spoke → pe1, showing PE1 has high anomaly in config.
+**Expected Result**: Traces from dev1 → ce1-spoke → pe1, showing PE1 has high `hetgnn_score`; `anomaly_explanation` reveals which features (e.g. `vrf_route_count`, `bgp_update_rate`) drove the error.
 
 ---
 
@@ -509,27 +501,31 @@ Detects which routers had configuration changes by comparing config embeddings.
 WITH config_changes AS (
     SELECT 
         node_id,
+        node_type,
         timestamp,
         hetgnn_score,
-        JSON_VALUE(anomaly_explanation, '$.feature_errors."Config (Semantic)"') AS config_error,
+        JSON_VALUE(anomaly_explanation, '$.top_features[0].feature')                AS top_feature,
+        CAST(JSON_VALUE(anomaly_explanation, '$.top_features[0].mse') AS FLOAT64)   AS top_mse,
         LAG(hetgnn_score) OVER (PARTITION BY node_id ORDER BY timestamp) AS prev_score
     FROM NodeEmbedding
-    WHERE node_type IN ('PE Router', 'P Router', 'CE Router')
+    WHERE node_type = 'router'   -- all router nodes (P, PE, CE, RR — role is in PhysicalRouter.role)
       AND timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 2 HOUR)
 )
 SELECT 
     node_id,
+    node_type,
     timestamp AS change_detected_at,
     hetgnn_score AS current_score,
     prev_score,
     ROUND(hetgnn_score - COALESCE(prev_score, 0), 4) AS score_jump,
-    CAST(config_error AS FLOAT64) AS config_error_magnitude
+    top_feature,
+    top_mse
 FROM config_changes
 WHERE hetgnn_score - COALESCE(prev_score, 0) > 0.2  -- Significant change
 ORDER BY score_jump DESC;
 ```
 
-**Expected Result**: Shows timestamp when PE1's config changed (fault injection moment).
+**Expected Result**: Shows the exact timestamp when `router:pe1`'s score jumped, with `top_feature` pointing to the anomalous feature (e.g. `ospf_num_routes`, `vrf_count`).
 
 ---
 

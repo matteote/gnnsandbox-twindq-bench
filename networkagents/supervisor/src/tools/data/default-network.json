@@ -2231,121 +2231,16 @@
       "apiVersion": "google.dev/v1",
       "kind": "TrafficTest",
       "metadata": {
-        "name": "d1-to-hub-tcp",
+        "name": "d1-hub-bidir-tcp",
         "namespace": "default",
         "labels": {
           "scenario": "l3vpn-spoke-hub",
-          "source": "d1",
-          "pattern": "multi_sine"
-        }
-      },
-      "spec": {
-        "vpnRef": "l3vpn-blue-service",
-        "source_devices": [
-          "d1-blue"
-        ],
-        "destination_device": "dh-blue",
-        "protocol": "TCP",
-        "duration": 604800,
-        "bandwidth": "50Mbps",
-        "pattern_type": "multi_sine",
-        "pattern_config": {
-          "time_reference": "wall_clock",
-          "base_rate": "25Mbps",
-          "components": [
-            {
-              "period": 86400,
-              "amplitude": "20Mbps",
-              "phase_offset": -28800
-            },
-            {
-              "period": 604800,
-              "amplitude": "8Mbps",
-              "phase_offset": 0
-            }
-          ],
-          "noise_stddev_pct": 3.0,
-          "min_rate": "3Mbps",
-          "max_rate": "100Mbps"
-        },
-        "concurrent_users": 10
-      }
-    },
-    {
-      "apiVersion": "google.dev/v1",
-      "kind": "TrafficTest",
-      "metadata": {
-        "name": "d2-to-hub-udp",
-        "namespace": "default",
-        "labels": {
-          "scenario": "l3vpn-spoke-hub",
-          "source": "d2",
-          "pattern": "schedule"
-        }
-      },
-      "spec": {
-        "vpnRef": "l3vpn-blue-service",
-        "source_devices": [
-          "d2-blue"
-        ],
-        "destination_device": "dh-blue",
-        "protocol": "UDP",
-        "duration": 604800,
-        "bandwidth": "50Mbps",
-        "pattern_type": "schedule",
-        "pattern_config": {
-          "time_reference": "wall_clock",
-          "interpolation": "linear",
-          "repeat": "daily",
-          "waypoints": [
-            {
-              "time": "00:00",
-              "rate": "2Mbps"
-            },
-            {
-              "time": "07:30",
-              "rate": "15Mbps"
-            },
-            {
-              "time": "09:00",
-              "rate": "40Mbps"
-            },
-            {
-              "time": "12:00",
-              "rate": "30Mbps"
-            },
-            {
-              "time": "13:30",
-              "rate": "45Mbps"
-            },
-            {
-              "time": "17:00",
-              "rate": "25Mbps"
-            },
-            {
-              "time": "19:00",
-              "rate": "10Mbps"
-            },
-            {
-              "time": "22:00",
-              "rate": "4Mbps"
-            }
-          ]
-        },
-        "concurrent_users": 10
-      }
-    },
-    {
-      "apiVersion": "google.dev/v1",
-      "kind": "TrafficTest",
-      "metadata": {
-        "name": "d1-hub-tcp-bidir",
-        "namespace": "default",
-        "labels": {
-          "scenario": "l3vpn-spoke-hub",
-          "source": "d1",
+          "vpn": "blue-spoke",
+          "source": "d1-blue",
+          "destination": "dh-blue",
           "pattern": "multi_sine",
-          "direction": "bidirectional"
+          "direction": "bidirectional",
+          "compression": "240x"
         }
       },
       "spec": {
@@ -2355,64 +2250,77 @@
         ],
         "destination_device": "dh-blue",
         "protocol": "TCP",
-        "duration": 604800,
-        "bandwidth": "50Mbps",
+        "duration": 172800,
+        "bandwidth": "40Mbps",
         "pattern_type": "multi_sine",
         "pattern_config": {
-          "time_reference": "wall_clock",
-          "base_rate": "25Mbps",
+          "time_reference": "elapsed",
+          "base_rate": "12Mbps",
           "components": [
             {
-              "period": 86400,
-              "amplitude": "20Mbps",
-              "phase_offset": -28800
+              "period": 180,
+              "amplitude": "8Mbps",
+              "phase_offset": -75
             },
             {
-              "period": 604800,
-              "amplitude": "8Mbps",
-              "phase_offset": 0
+              "period": 360,
+              "amplitude": "3Mbps",
+              "phase_offset": -210
+            },
+            {
+              "period": 2520,
+              "amplitude": "2Mbps",
+              "phase_offset": -1470
             }
           ],
-          "noise_stddev_pct": 3.0,
-          "min_rate": "3Mbps",
-          "max_rate": "100Mbps"
+          "noise_stddev_pct": 5.0,
+          "min_rate": "2Mbps",
+          "max_rate": "70Mbps"
         },
         "bidirectional": true,
-        "reverse_bandwidth": "80Mbps",
+        "reverse_bandwidth": "90Mbps",
         "reverse_pattern_type": "multi_sine",
         "reverse_pattern_config": {
-          "time_reference": "wall_clock",
-          "base_rate": "40Mbps",
+          "time_reference": "elapsed",
+          "base_rate": "30Mbps",
           "components": [
             {
-              "period": 86400,
-              "amplitude": "30Mbps",
-              "phase_offset": -28800
+              "period": 180,
+              "amplitude": "20Mbps",
+              "phase_offset": -75
             },
             {
-              "period": 604800,
-              "amplitude": "10Mbps",
-              "phase_offset": 0
+              "period": 360,
+              "amplitude": "8Mbps",
+              "phase_offset": -210
+            },
+            {
+              "period": 2520,
+              "amplitude": "5Mbps",
+              "phase_offset": -1470
             }
           ],
-          "noise_stddev_pct": 3.0,
+          "noise_stddev_pct": 4.0,
           "min_rate": "5Mbps",
-          "max_rate": "100Mbps"
+          "max_rate": "95Mbps"
         },
-        "concurrent_users": 10
+        "concurrent_users": 20
       }
     },
     {
       "apiVersion": "google.dev/v1",
       "kind": "TrafficTest",
       "metadata": {
-        "name": "d2-hub-udp-bidir",
+        "name": "d2-hub-bidir-udp",
         "namespace": "default",
         "labels": {
           "scenario": "l3vpn-spoke-hub",
-          "source": "d2",
-          "pattern": "schedule",
-          "direction": "bidirectional"
+          "vpn": "blue-spoke",
+          "source": "d2-blue",
+          "destination": "dh-blue",
+          "pattern": "multi_sine",
+          "direction": "bidirectional",
+          "compression": "240x"
         }
       },
       "spec": {
@@ -2422,65 +2330,188 @@
         ],
         "destination_device": "dh-blue",
         "protocol": "UDP",
-        "duration": 604800,
-        "bandwidth": "50Mbps",
-        "pattern_type": "schedule",
+        "duration": 172800,
+        "bandwidth": "30Mbps",
+        "pattern_type": "multi_sine",
         "pattern_config": {
-          "time_reference": "wall_clock",
-          "interpolation": "linear",
-          "repeat": "daily",
-          "waypoints": [
+          "time_reference": "elapsed",
+          "base_rate": "8Mbps",
+          "components": [
             {
-              "time": "00:00",
-              "rate": "2Mbps"
+              "period": 180,
+              "amplitude": "6Mbps",
+              "phase_offset": -75
             },
             {
-              "time": "07:30",
-              "rate": "15Mbps"
+              "period": 360,
+              "amplitude": "2Mbps",
+              "phase_offset": -210
             },
             {
-              "time": "09:00",
-              "rate": "40Mbps"
-            },
-            {
-              "time": "12:00",
-              "rate": "30Mbps"
-            },
-            {
-              "time": "13:30",
-              "rate": "45Mbps"
-            },
-            {
-              "time": "17:00",
-              "rate": "25Mbps"
-            },
-            {
-              "time": "19:00",
-              "rate": "10Mbps"
-            },
-            {
-              "time": "22:00",
-              "rate": "4Mbps"
+              "period": 2520,
+              "amplitude": "2Mbps",
+              "phase_offset": -1470
             }
-          ]
+          ],
+          "noise_stddev_pct": 4.0,
+          "min_rate": "1Mbps",
+          "max_rate": "40Mbps"
         },
         "bidirectional": true,
-        "reverse_bandwidth": "8Mbps",
+        "reverse_bandwidth": "10Mbps",
         "reverse_pattern_type": "constant",
-        "concurrent_users": 10
+        "concurrent_users": 12
       }
     },
     {
       "apiVersion": "google.dev/v1",
       "kind": "TrafficTest",
       "metadata": {
-        "name": "d1-red-to-d2-red-tcp",
+        "name": "d3-hub-bidir-tcp",
+        "namespace": "default",
+        "labels": {
+          "scenario": "l3vpn-spoke-hub",
+          "vpn": "blue-spoke",
+          "source": "d3-blue",
+          "destination": "dh-blue",
+          "pattern": "multi_sine",
+          "direction": "bidirectional",
+          "compression": "240x"
+        }
+      },
+      "spec": {
+        "vpnRef": "l3vpn-blue-service",
+        "source_devices": [
+          "d3-blue"
+        ],
+        "destination_device": "dh-blue",
+        "protocol": "TCP",
+        "duration": 172800,
+        "bandwidth": "35Mbps",
+        "pattern_type": "multi_sine",
+        "pattern_config": {
+          "time_reference": "elapsed",
+          "base_rate": "10Mbps",
+          "components": [
+            {
+              "period": 180,
+              "amplitude": "7Mbps",
+              "phase_offset": -75
+            },
+            {
+              "period": 360,
+              "amplitude": "3Mbps",
+              "phase_offset": -225
+            },
+            {
+              "period": 2520,
+              "amplitude": "2Mbps",
+              "phase_offset": -1470
+            }
+          ],
+          "noise_stddev_pct": 5.0,
+          "min_rate": "2Mbps",
+          "max_rate": "60Mbps"
+        },
+        "bidirectional": true,
+        "reverse_bandwidth": "85Mbps",
+        "reverse_pattern_type": "multi_sine",
+        "reverse_pattern_config": {
+          "time_reference": "elapsed",
+          "base_rate": "28Mbps",
+          "components": [
+            {
+              "period": 180,
+              "amplitude": "18Mbps",
+              "phase_offset": -75
+            },
+            {
+              "period": 360,
+              "amplitude": "7Mbps",
+              "phase_offset": -225
+            },
+            {
+              "period": 2520,
+              "amplitude": "4Mbps",
+              "phase_offset": -1470
+            }
+          ],
+          "noise_stddev_pct": 4.0,
+          "min_rate": "4Mbps",
+          "max_rate": "90Mbps"
+        },
+        "concurrent_users": 18
+      }
+    },
+    {
+      "apiVersion": "google.dev/v1",
+      "kind": "TrafficTest",
+      "metadata": {
+        "name": "all-spokes-hub-udp",
+        "namespace": "default",
+        "labels": {
+          "scenario": "l3vpn-spoke-hub",
+          "vpn": "blue-spoke",
+          "source": "all-spokes",
+          "destination": "dh-blue",
+          "pattern": "multi_sine",
+          "direction": "unidirectional",
+          "compression": "240x"
+        }
+      },
+      "spec": {
+        "vpnRef": "l3vpn-blue-service",
+        "source_devices": [
+          "d1-blue",
+          "d2-blue",
+          "d3-blue"
+        ],
+        "destination_device": "dh-blue",
+        "protocol": "UDP",
+        "duration": 172800,
+        "bandwidth": "12Mbps",
+        "pattern_type": "multi_sine",
+        "pattern_config": {
+          "time_reference": "elapsed",
+          "base_rate": "4Mbps",
+          "components": [
+            {
+              "period": 180,
+              "amplitude": "3Mbps",
+              "phase_offset": -75
+            },
+            {
+              "period": 360,
+              "amplitude": "1Mbps",
+              "phase_offset": -210
+            },
+            {
+              "period": 2520,
+              "amplitude": "1Mbps",
+              "phase_offset": -1470
+            }
+          ],
+          "noise_stddev_pct": 4.0,
+          "min_rate": "500Kbps",
+          "max_rate": "15Mbps"
+        },
+        "concurrent_users": 8
+      }
+    },
+    {
+      "apiVersion": "google.dev/v1",
+      "kind": "TrafficTest",
+      "metadata": {
+        "name": "d1-red-d2-red-bidir",
         "namespace": "default",
         "labels": {
           "scenario": "l3vpn-red-mesh",
           "vpn": "red-mesh",
           "source": "d1-red",
-          "pattern": "multi_sine"
+          "destination": "d2-red",
+          "pattern": "multi_sine",
+          "direction": "bidirectional",
+          "compression": "240x"
         }
       },
       "spec": {
@@ -2490,94 +2521,51 @@
         ],
         "destination_device": "d2-red",
         "protocol": "TCP",
-        "duration": 604800,
+        "duration": 172800,
         "bandwidth": "50Mbps",
         "pattern_type": "multi_sine",
         "pattern_config": {
-          "time_reference": "wall_clock",
+          "time_reference": "elapsed",
+          "base_rate": "18Mbps",
+          "components": [
+            {
+              "period": 360,
+              "amplitude": "12Mbps",
+              "phase_offset": -120
+            },
+            {
+              "period": 2520,
+              "amplitude": "4Mbps",
+              "phase_offset": -450
+            }
+          ],
+          "noise_stddev_pct": 4.0,
+          "min_rate": "2Mbps",
+          "max_rate": "80Mbps"
+        },
+        "bidirectional": true,
+        "reverse_bandwidth": "70Mbps",
+        "reverse_pattern_type": "multi_sine",
+        "reverse_pattern_config": {
+          "time_reference": "elapsed",
           "base_rate": "25Mbps",
           "components": [
             {
-              "period": 86400,
-              "amplitude": "20Mbps",
-              "phase_offset": -28800
+              "period": 360,
+              "amplitude": "18Mbps",
+              "phase_offset": -120
             },
             {
-              "period": 604800,
-              "amplitude": "8Mbps",
-              "phase_offset": 0
+              "period": 2520,
+              "amplitude": "5Mbps",
+              "phase_offset": -450
             }
           ],
-          "noise_stddev_pct": 3.0,
-          "min_rate": "3Mbps",
-          "max_rate": "100Mbps"
+          "noise_stddev_pct": 4.0,
+          "min_rate": "4Mbps",
+          "max_rate": "90Mbps"
         },
-        "concurrent_users": 10
-      }
-    },
-    {
-      "apiVersion": "google.dev/v1",
-      "kind": "TrafficTest",
-      "metadata": {
-        "name": "d3-red-to-d4-red-udp",
-        "namespace": "default",
-        "labels": {
-          "scenario": "l3vpn-red-mesh",
-          "vpn": "red-mesh",
-          "source": "d3-red",
-          "pattern": "schedule"
-        }
-      },
-      "spec": {
-        "vpnRef": "l3vpn-red-service",
-        "source_devices": [
-          "d3-red"
-        ],
-        "destination_device": "d4-red",
-        "protocol": "UDP",
-        "duration": 604800,
-        "bandwidth": "50Mbps",
-        "pattern_type": "schedule",
-        "pattern_config": {
-          "time_reference": "wall_clock",
-          "interpolation": "linear",
-          "repeat": "daily",
-          "waypoints": [
-            {
-              "time": "00:00",
-              "rate": "2Mbps"
-            },
-            {
-              "time": "07:30",
-              "rate": "15Mbps"
-            },
-            {
-              "time": "09:00",
-              "rate": "40Mbps"
-            },
-            {
-              "time": "12:00",
-              "rate": "30Mbps"
-            },
-            {
-              "time": "13:30",
-              "rate": "45Mbps"
-            },
-            {
-              "time": "17:00",
-              "rate": "25Mbps"
-            },
-            {
-              "time": "19:00",
-              "rate": "10Mbps"
-            },
-            {
-              "time": "22:00",
-              "rate": "4Mbps"
-            }
-          ]
-        },
-        "concurrent_users": 10
+        "concurrent_users": 15
       }
     },
     {
@@ -2590,8 +2578,10 @@
           "scenario": "l3vpn-red-mesh",
           "vpn": "red-mesh",
           "source": "d1-red",
+          "destination": "d3-red",
           "pattern": "multi_sine",
-          "direction": "bidirectional"
+          "direction": "bidirectional",
+          "compression": "240x"
         }
       },
       "spec": {
@@ -2601,51 +2591,191 @@
         ],
         "destination_device": "d3-red",
         "protocol": "TCP",
-        "duration": 604800,
-        "bandwidth": "50Mbps",
+        "duration": 172800,
+        "bandwidth": "40Mbps",
         "pattern_type": "multi_sine",
         "pattern_config": {
-          "time_reference": "wall_clock",
-          "base_rate": "25Mbps",
+          "time_reference": "elapsed",
+          "base_rate": "15Mbps",
           "components": [
             {
-              "period": 86400,
-              "amplitude": "20Mbps",
-              "phase_offset": -28800
+              "period": 360,
+              "amplitude": "12Mbps",
+              "phase_offset": -120
             },
             {
-              "period": 604800,
-              "amplitude": "8Mbps",
-              "phase_offset": 0
+              "period": 2520,
+              "amplitude": "4Mbps",
+              "phase_offset": -450
+            }
+          ],
+          "noise_stddev_pct": 4.0,
+          "min_rate": "2Mbps",
+          "max_rate": "75Mbps"
+        },
+        "bidirectional": true,
+        "reverse_bandwidth": "60Mbps",
+        "reverse_pattern_type": "multi_sine",
+        "reverse_pattern_config": {
+          "time_reference": "elapsed",
+          "base_rate": "22Mbps",
+          "components": [
+            {
+              "period": 360,
+              "amplitude": "16Mbps",
+              "phase_offset": -120
+            },
+            {
+              "period": 2520,
+              "amplitude": "5Mbps",
+              "phase_offset": -450
             }
           ],
           "noise_stddev_pct": 3.0,
           "min_rate": "3Mbps",
-          "max_rate": "100Mbps"
+          "max_rate": "85Mbps"
         },
-        "bidirectional": true,
-        "reverse_bandwidth": "80Mbps",
-        "reverse_pattern_type": "multi_sine",
-        "reverse_pattern_config": {
-          "time_reference": "wall_clock",
-          "base_rate": "40Mbps",
+        "concurrent_users": 15
+      }
+    },
+    {
+      "apiVersion": "google.dev/v1",
+      "kind": "TrafficTest",
+      "metadata": {
+        "name": "d1-red-d4-red-bidir",
+        "namespace": "default",
+        "labels": {
+          "scenario": "l3vpn-red-mesh",
+          "vpn": "red-mesh",
+          "source": "d1-red",
+          "destination": "d4-red",
+          "pattern": "multi_sine",
+          "direction": "bidirectional",
+          "compression": "240x"
+        }
+      },
+      "spec": {
+        "vpnRef": "l3vpn-red-service",
+        "source_devices": [
+          "d1-red"
+        ],
+        "destination_device": "d4-red",
+        "protocol": "UDP",
+        "duration": 172800,
+        "bandwidth": "15Mbps",
+        "pattern_type": "multi_sine",
+        "pattern_config": {
+          "time_reference": "elapsed",
+          "base_rate": "5Mbps",
           "components": [
             {
-              "period": 86400,
-              "amplitude": "30Mbps",
-              "phase_offset": -28800
+              "period": 360,
+              "amplitude": "4Mbps",
+              "phase_offset": -120
             },
             {
-              "period": 604800,
-              "amplitude": "10Mbps",
-              "phase_offset": 0
+              "period": 2520,
+              "amplitude": "1Mbps",
+              "phase_offset": -450
+            }
+          ],
+          "noise_stddev_pct": 2.0,
+          "min_rate": "1Mbps",
+          "max_rate": "20Mbps"
+        },
+        "bidirectional": true,
+        "reverse_bandwidth": "15Mbps",
+        "reverse_pattern_type": "multi_sine",
+        "reverse_pattern_config": {
+          "time_reference": "elapsed",
+          "base_rate": "5Mbps",
+          "components": [
+            {
+              "period": 360,
+              "amplitude": "4Mbps",
+              "phase_offset": -120
+            },
+            {
+              "period": 2520,
+              "amplitude": "1Mbps",
+              "phase_offset": -450
+            }
+          ],
+          "noise_stddev_pct": 2.0,
+          "min_rate": "1Mbps",
+          "max_rate": "20Mbps"
+        },
+        "concurrent_users": 10
+      }
+    },
+    {
+      "apiVersion": "google.dev/v1",
+      "kind": "TrafficTest",
+      "metadata": {
+        "name": "d2-red-d3-red-bidir",
+        "namespace": "default",
+        "labels": {
+          "scenario": "l3vpn-red-mesh",
+          "vpn": "red-mesh",
+          "source": "d2-red",
+          "destination": "d3-red",
+          "pattern": "multi_sine",
+          "direction": "bidirectional",
+          "compression": "240x"
+        }
+      },
+      "spec": {
+        "vpnRef": "l3vpn-red-service",
+        "source_devices": [
+          "d2-red"
+        ],
+        "destination_device": "d3-red",
+        "protocol": "TCP",
+        "duration": 172800,
+        "bandwidth": "45Mbps",
+        "pattern_type": "multi_sine",
+        "pattern_config": {
+          "time_reference": "elapsed",
+          "base_rate": "15Mbps",
+          "components": [
+            {
+              "period": 360,
+              "amplitude": "11Mbps",
+              "phase_offset": -120
+            },
+            {
+              "period": 2520,
+              "amplitude": "4Mbps",
+              "phase_offset": -450
+            }
+          ],
+          "noise_stddev_pct": 4.0,
+          "min_rate": "2Mbps",
+          "max_rate": "70Mbps"
+        },
+        "bidirectional": true,
+        "reverse_bandwidth": "55Mbps",
+        "reverse_pattern_type": "multi_sine",
+        "reverse_pattern_config": {
+          "time_reference": "elapsed",
+          "base_rate": "20Mbps",
+          "components": [
+            {
+              "period": 360,
+              "amplitude": "14Mbps",
+              "phase_offset": -120
+            },
+            {
+              "period": 2520,
+              "amplitude": "4Mbps",
+              "phase_offset": -450
             }
           ],
           "noise_stddev_pct": 3.0,
-          "min_rate": "5Mbps",
-          "max_rate": "100Mbps"
+          "min_rate": "3Mbps",
+          "max_rate": "80Mbps"
         },
-        "concurrent_users": 10
+        "concurrent_users": 15
       }
     },
     {
@@ -2658,8 +2788,10 @@
           "scenario": "l3vpn-red-mesh",
           "vpn": "red-mesh",
           "source": "d2-red",
-          "pattern": "schedule",
-          "direction": "bidirectional"
+          "destination": "d4-red",
+          "pattern": "multi_sine",
+          "direction": "bidirectional",
+          "compression": "240x"
         }
       },
       "spec": {
@@ -2669,50 +2801,81 @@
         ],
         "destination_device": "d4-red",
         "protocol": "UDP",
-        "duration": 604800,
-        "bandwidth": "50Mbps",
-        "pattern_type": "schedule",
+        "duration": 172800,
+        "bandwidth": "25Mbps",
+        "pattern_type": "multi_sine",
         "pattern_config": {
-          "time_reference": "wall_clock",
-          "interpolation": "linear",
-          "repeat": "daily",
-          "waypoints": [
+          "time_reference": "elapsed",
+          "base_rate": "8Mbps",
+          "components": [
             {
-              "time": "00:00",
-              "rate": "2Mbps"
+              "period": 360,
+              "amplitude": "5Mbps",
+              "phase_offset": -120
             },
             {
-              "time": "07:30",
-              "rate": "15Mbps"
-            },
-            {
-              "time": "09:00",
-              "rate": "40Mbps"
-            },
-            {
-              "time": "12:00",
-              "rate": "30Mbps"
-            },
-            {
-              "time": "13:30",
-              "rate": "45Mbps"
-            },
-            {
-              "time": "17:00",
-              "rate": "25Mbps"
-            },
-            {
-              "time": "19:00",
-              "rate": "10Mbps"
-            },
-            {
-              "time": "22:00",
-              "rate": "4Mbps"
+              "period": 2520,
+              "amplitude": "2Mbps",
+              "phase_offset": -450
             }
-          ]
+          ],
+          "noise_stddev_pct": 3.0,
+          "min_rate": "1Mbps",
+          "max_rate": "30Mbps"
         },
         "bidirectional": true,
-        "reverse_bandwidth": "8Mbps",
+        "reverse_bandwidth": "4Mbps",
+        "reverse_pattern_type": "constant",
+        "concurrent_users": 10
+      }
+    },
+    {
+      "apiVersion": "google.dev/v1",
+      "kind": "TrafficTest",
+      "metadata": {
+        "name": "d3-red-d4-red-bidir",
+        "namespace": "default",
+        "labels": {
+          "scenario": "l3vpn-red-mesh",
+          "vpn": "red-mesh",
+          "source": "d3-red",
+          "destination": "d4-red",
+          "pattern": "multi_sine",
+          "direction": "bidirectional",
+          "compression": "240x"
+        }
+      },
+      "spec": {
+        "vpnRef": "l3vpn-red-service",
+        "source_devices": [
+          "d3-red"
+        ],
+        "destination_device": "d4-red",
+        "protocol": "UDP",
+        "duration": 172800,
+        "bandwidth": "20Mbps",
+        "pattern_type": "multi_sine",
+        "pattern_config": {
+          "time_reference": "elapsed",
+          "base_rate": "7Mbps",
+          "components": [
+            {
+              "period": 360,
+              "amplitude": "5Mbps",
+              "phase_offset": -113
+            },
+            {
+              "period": 2520,
+              "amplitude": "2Mbps",
+              "phase_offset": -450
+            }
+          ],
+          "noise_stddev_pct": 3.0,
+          "min_rate": "1Mbps",
+          "max_rate": "25Mbps"
+        },
+        "bidirectional": true,
+        "reverse_bandwidth": "3Mbps",
         "reverse_pattern_type": "constant",
         "concurrent_users": 10
       }

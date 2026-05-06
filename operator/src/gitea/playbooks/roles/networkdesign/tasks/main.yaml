@@ -51,9 +51,7 @@
     group: git
     mode: '0644'
   loop:
-   - 5gnetwork.md
-   - performance.md
-   - 5GNetworkDesign.pdf
+   - designdoc.md
 
 - name: add to master branch in networkdesign repo
   command: sudo -u git git add .

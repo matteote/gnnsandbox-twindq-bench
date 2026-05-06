@@ -63,8 +63,6 @@ class LogsAgent:
         )
 
         self.app_name = "LogsAgent"
-        # Initialize ADKAgent wrapper for AG-UI protocol support
-        # Let ADKAgent manage its own session and artifact services
         self.adk_agent = ADKAgent(
             adk_agent=self.root_agent,
             app_name=self.app_name,

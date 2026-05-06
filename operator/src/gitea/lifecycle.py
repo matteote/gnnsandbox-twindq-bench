@@ -52,8 +52,8 @@ async def create_gitea(spec, meta, name, namespace, logger, **kwargs):
     # Create the private key
     # await create_root_sync_private_key()
 
-    # Create root sync object
-    await create_root_sync(external_ip_address)
+    # Create root sync object (disable sync for testing)
+    # await create_root_sync(external_ip_address)
 
     return {"status": "Running", "external_ip_address": external_ip_address}
 

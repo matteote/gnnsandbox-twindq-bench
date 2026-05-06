@@ -189,13 +189,16 @@ Traffic flows provisioned by the traffic-agent via `TrafficTest` Kubernetes CRDs
 **Example: query active flow metrics from Spanner**
 
 ```sql
+-- Traffic-agent metrics are stored with kind='TRAFFIC'.
+-- node_name holds the device name (e.g. "dev1"); the full flow_id is in labels.
 SELECT
-  node_name AS flow_id,
+  node_name                              AS device_name,
+  JSON_VALUE(labels, '$.flow_id')        AS flow_id,
   metric_name,
   value,
   timestamp
 FROM NetworkMetrics
-WHERE kind = 'flow'
+WHERE kind = 'TRAFFIC'
   AND timestamp > TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 10 MINUTE)
 ORDER BY timestamp DESC
 LIMIT 50
@@ -204,6 +207,9 @@ LIMIT 50
 **Example: join flow topology with its metrics**
 
 ```sql
+-- The flow_id label is "{traffictest_name}_{device_name}".
+-- TrafficFlow.id is "flow:{traffictest_name}", so strip the prefix and match
+-- using STARTS_WITH to handle both sender and receiver rows for the same flow.
 SELECT
   f.name        AS flow_name,
   f.phase,
@@ -213,9 +219,10 @@ SELECT
   nm.value,
   nm.timestamp
 FROM TrafficFlow f
-JOIN NetworkMetrics nm ON nm.node_name = f.id
+JOIN NetworkMetrics nm
+  ON STARTS_WITH(JSON_VALUE(nm.labels, '$.flow_id'), REPLACE(f.id, 'flow:', ''))
 WHERE f.valid_end_ts IS NULL
-  AND nm.kind = 'flow'
+  AND nm.kind = 'TRAFFIC'
   AND nm.timestamp > TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 5 MINUTE)
 ORDER BY nm.timestamp DESC
 ```
@@ -335,9 +342,11 @@ These metrics track the underlying machine's hardware and network interface util
 - `node_load1` (Gauge): 1-minute load average
 - `node_memory_SwapFree_bytes` (Gauge)
 - `node_memory_MemTotal_bytes` (Gauge)
+- `node_memory_MemAvailable_bytes` (Gauge): Available memory (used for GNN `mem` feature)
 - `node_network_up` (Gauge): Interface operational state
 - `node_network_carrier` (Gauge): Link status
 - `node_network_carrier_changes_total` (Counter)
+- `node_network_mtu_bytes` (Gauge): Interface MTU (used for GNN `mtu_norm` feature)
 - `node_network_receive_bytes_total` (Counter)
 - `node_network_receive_drop_total` (Counter)
 - `node_network_receive_errs_total` (Counter)
@@ -346,6 +355,7 @@ These metrics track the underlying machine's hardware and network interface util
 - `node_network_transmit_drop_total` (Counter)
 - `node_network_transmit_errs_total` (Counter)
 - `node_network_transmit_packets_total` (Counter)
+- `node_network_transmit_queue_length` (Gauge): TX queue depth (used for GNN `tx_queue_len_norm` feature)
 
 **Routing Metrics**
 These metrics track the FRR routing daemon's operation and BGP/OSPF/BFD statuses:
@@ -353,6 +363,7 @@ These metrics track the FRR routing daemon's operation and BGP/OSPF/BFD statuses
 - `frr_collector_up` (Gauge)
 - `frr_ospf_neighbor_adjacencies` (Gauge)
 - `frr_ospf_neighbors` (Gauge)
+- `frr_bgp_update_total` (Counter): BGP UPDATE message count (used for GNN `bgp_update_rate` feature)
 - `frr_route_total` (Gauge)
 - `frr_route_total_fib` (Gauge)
 - `process_open_fds` (Gauge): File descriptors opened by the routing process
@@ -388,7 +399,7 @@ Embeddings from GNNs are stored in Spanner with node and graph properties as sho
 
 | Table | Description | Key Fields | Key Relationships |
 | :--- | :--- | :--- | :--- |
-| `NodeEmbedding` | GNN-generated vector embeddings and anomaly scores for graph nodes. | `id`, `node_id`,  `hetgnn_embedding`, `hetgnn_score`, `timestamp` | Linked to `PhysicalRouter` via `RouterHasEmbedding`. Linked to `PhysicalInterface` via `InterfaceHasEmbedding`. |
+| `NodeEmbedding` | GNN-generated vector embeddings and anomaly scores for graph nodes. | `id`, `node_id`, `node_type`, `hetgnn_embedding`, `hetgnn_score`, `anomaly_explanation`, `timestamp` | Linked to `PhysicalRouter` via `RouterHasEmbedding`. Linked to `PhysicalInterface` via `InterfaceHasEmbedding`. |
 
 ## 3. Querying the Data
 

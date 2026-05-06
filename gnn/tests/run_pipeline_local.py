@@ -140,7 +140,7 @@ def step_ingest(args, snapshots_dir: Path) -> list:
 
     # Compute temporal gradient/delta features across the ordered snapshot sequence
     SpannerDataset.compute_temporal_features(snapshots, interval_seconds=interval * 60)
-    logger.info("Temporal features (rx_err_gradient, prefix_count_delta, session_uptime_norm) computed")
+    logger.info("Temporal features (rx_err_gradient, prefix_count_delta, vrf_route_count_delta, throughput_delta) computed")
 
     for i, snap in enumerate(snapshots):
         # ── Debug: check values are non-zero before serialisation ─────────

@@ -29,10 +29,10 @@ class HetGNN(nn.Module):
         # Projections
         self.lin_dict = nn.ModuleDict()
         
-        # We define specialized decoders. Instead of just a generic reconstruction, 
-        # HetGNN isolates Root Causes by segregating the loss.
-        # This implementation expects node types to map into 3 root schema classes:
-        # e.g., 'Router_Config', 'Protocol_State', 'Interface_Metrics'
+        # Type-specific decoders — one Linear(hidden_dim, input_dim) per node type.
+        # Each decoder reconstructs the original features for its node type, enabling
+        # reconstruction error to be isolated by layer (router / interface / bgp_session
+        # / vrf / flow).  Node types and input dims are registered via set_input_dims().
         self.decoder_dict = nn.ModuleDict()
 
     def set_input_dims(self, input_dims):

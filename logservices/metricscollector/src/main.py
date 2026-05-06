@@ -49,6 +49,7 @@ SELECTED_METRICS = [
   'prometheus.googleapis.com/node_network_transmit_drop_total/counter',
   'prometheus.googleapis.com/node_network_transmit_errs_total/counter',
   'prometheus.googleapis.com/node_network_transmit_packets_total/counter',
+  'prometheus.googleapis.com/node_network_transmit_queue_length/gauge',
   # ROUTING metrics
   'prometheus.googleapis.com/frr_bfd_peer_count/gauge',
   'prometheus.googleapis.com/frr_collector_up/gauge',
@@ -56,6 +57,7 @@ SELECTED_METRICS = [
   'prometheus.googleapis.com/frr_ospf_neighbors/gauge',
   'prometheus.googleapis.com/frr_bgp_peer_prefixes_advertised_count_total/gauge',
   'prometheus.googleapis.com/frr_bgp_peer_uptime_seconds/gauge',
+  'prometheus.googleapis.com/frr_bgp_update_total/counter',
   'prometheus.googleapis.com/frr_route_total/gauge',
   'prometheus.googleapis.com/frr_route_total_fib/gauge',
   'prometheus.googleapis.com/process_open_fds/gauge',

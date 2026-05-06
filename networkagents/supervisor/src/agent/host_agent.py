@@ -15,7 +15,7 @@
 import httpx
 from uuid import uuid4
 import json
-from typing import Any
+from typing import Any, AsyncGenerator
 import logging
 import os
 import agent.prompts.supervisor as prompts
@@ -27,11 +27,13 @@ from a2a.types import (
     SendStreamingMessageRequest,
     TaskState,
     MessageSendParams,
-    SendMessageRequest
 )
-from google.adk import Agent
+from google.adk import Agent, Runner
 from google.adk.agents.readonly_context import ReadonlyContext
 from google.adk.tools.tool_context import ToolContext
+from google.adk.sessions import InMemorySessionService
+from google.adk.agents import RunConfig
+from google.adk.agents.run_config import StreamingMode
 from google.genai import types
 from utils.error_handler import (
     SupervisorAgentError,
@@ -41,8 +43,6 @@ from utils.error_handler import (
 )
 
 from .remote_agent_connection import RemoteAgentConnections
-from agent_library.agentmiddleware.adk import ADKAgent
-from ag_ui.core import RunAgentInput
 
 logger = logging.getLogger(__name__)
 
@@ -68,7 +68,7 @@ class HostAgent:
         """
         Init agent and runner
         """
-        self.credentials,self.projectid = get_credentials()
+        self.credentials, self.projectid = get_credentials()
 
         self.app_name = "host_network_agent"
 
@@ -83,17 +83,17 @@ class HostAgent:
         # dict with sid->sio for sending messages back to dashboard socket session
         self.sio_sessions = {}
 
+        # ADK session service and runner 
+        self.session_service = InMemorySessionService()
         self.host_agent = self.create_agent()
+        self.runner = Runner(
+            app_name=self.app_name,
+            agent=self.host_agent,
+            session_service=self.session_service,
+        )
+
         # list of loaded remote agents
         self.agents = None
-
-        # Initialize ADKAgent wrapper for AG-UI protocol support
-        # Let ADKAgent manage its own session and artifact services
-        self.adk_agent = ADKAgent(
-            adk_agent=self.host_agent,
-            app_name=self.app_name,
-            use_in_memory_services=True
-        )
 
 
     async def load_remote_agents(self):
@@ -116,9 +116,9 @@ class HostAgent:
                 try:
                     async with httpx.AsyncClient() as httpx_client:
                         try:
-                            card_resolver = A2ACardResolver(httpx_client=httpx_client,base_url=address)
+                            card_resolver = A2ACardResolver(httpx_client=httpx_client, base_url=address)
                             card = await card_resolver.get_agent_card()
-                            card.url=address
+                            card.url = address
                             logger.info("CARD INFO----------------")
                             logger.info(card)
                             remote_connection = RemoteAgentConnections(self, card, address)
@@ -128,15 +128,12 @@ class HostAgent:
 
                         except httpx.HTTPError as e:
                             logger.error(f"HTTP error loading remote agent at {address}: {str(e)}", exc_info=True)
-                            # Continue to the next address
                             continue
                         except Exception as e:
                             logger.error(f"Error loading remote agent at {address}: {str(e)}", exc_info=True)
-                            # Continue to the next address
                             continue
                 except Exception as e:
                     logger.error(f"Unexpected error loading remote agent at {address}: {str(e)}", exc_info=True)
-                    # Continue to the next address
                     continue
 
             agent_info = []
@@ -159,8 +156,7 @@ class HostAgent:
         Returns:
             Gemini agent with list of remote agents and task to route
         """
-        # Create the base agent
-        base_agent = Agent(
+        return Agent(
             model='gemini-2.5-flash',
             name=self.app_name,
             instruction=self.root_instruction,
@@ -173,28 +169,115 @@ class HostAgent:
                 self.send_task,
             ],
         )
-                
-        return base_agent
 
     def root_instruction(self, context: ReadonlyContext) -> str:
         """
         Build the root instruction for the host agent
         """
         current_agent = self.check_state(context)
-        return prompts.supervisor_prompt.format(agents=self.agents, current_agent=current_agent['active_agent'], current_time=datetime.datetime.now().isoformat(),current_task_status=current_agent['task_status'])
+        return prompts.supervisor_prompt.format(
+            agents=self.agents,
+            current_agent=current_agent['active_agent'],
+            current_time=datetime.datetime.now().isoformat(),
+            current_task_status=current_agent['task_status']
+        )
 
     def check_state(self, context: ReadonlyContext):
         state = context.state
-        returnObj={
+        returnObj = {
             'active_agent': 'Supervisor',
             'task_status': None
         }
-        if ('agent' in state):
-            returnObj['active_agent']=f'{state["agent"]}'
-        if ('task_status' in state):
-            returnObj['task_status']=f'{state["task_status"]}'
+        if 'agent' in state:
+            returnObj['active_agent'] = f'{state["agent"]}'
+        if 'task_status' in state:
+            returnObj['task_status'] = f'{state["task_status"]}'
 
         return returnObj
+
+    async def get_or_create_session(self, session_id: str):
+        """
+        Retrieve an existing ADK session or create a new one.
+
+        Args:
+            session_id: The session / thread ID (from the socket client)
+
+        Returns:
+            Tuple of (session, user_id)
+        """
+        user_id = f"user_{session_id}"
+        session = await self.session_service.get_session(
+            app_name=self.app_name,
+            user_id=user_id,
+            session_id=session_id
+        )
+        if session is None:
+            session = await self.session_service.create_session(
+                app_name=self.app_name,
+                user_id=user_id,
+                session_id=session_id,
+                state={'session_id': session_id}
+            )
+            logger.info(f"Created new session {session_id} for user {user_id}")
+        return session, user_id
+
+    async def run(self, session_id: str, text: str) -> AsyncGenerator[str, None]:
+        """
+        Run the host agent for a user message and stream text responses.
+
+        Args:
+            session_id: The session / thread ID (from the socket client)
+            text: The user message text
+
+        Yields:
+            Text chunks from the agent response
+        """
+        logger.info("run: session_id=%s, text=%s", session_id, text[:100])
+
+        _, user_id = await self.get_or_create_session(session_id)
+
+        new_message = types.Content(
+            role='user',
+            parts=[types.Part(text=text)]
+        )
+
+        run_config = RunConfig(streaming_mode=StreamingMode.SSE)
+
+        emitted_any = False
+        try:
+            async for event in self.runner.run_async(
+                user_id=user_id,
+                session_id=session_id,
+                new_message=new_message,
+                run_config=run_config
+            ):
+                logger.debug("ADK event: is_final=%s, has_content=%s", event.is_final_response(), bool(event.content))
+
+                # Emit partial (streaming) text events; skip the duplicated final aggregate
+                if event.content and event.content.parts and not event.is_final_response():
+                    for part in event.content.parts:
+                        if hasattr(part, 'text') and part.text:
+                            emitted_any = True
+                            yield part.text
+
+            # If no partial events arrived (e.g. all-or-nothing model response),
+            # re-run without streaming to get the final text.
+            if not emitted_any:
+                logger.debug("No partial events received; re-running without streaming for final text")
+                async for event in self.runner.run_async(
+                    user_id=user_id,
+                    session_id=session_id,
+                    new_message=None,  # session already has the message
+                    run_config=RunConfig(streaming_mode=StreamingMode.NONE)
+                ):
+                    if event.is_final_response() and event.content and event.content.parts:
+                        for part in event.content.parts:
+                            if hasattr(part, 'text') and part.text:
+                                yield part.text
+
+        except Exception as e:
+            logger.error(f"Error running agent for session {session_id}: {e}", exc_info=True)
+            raise
 
     async def add_remote_agent(self, agent_url: str):
         """
@@ -212,9 +295,9 @@ class HostAgent:
             response = {}
             async with httpx.AsyncClient() as httpx_client:
                 try:
-                    card_resolver = A2ACardResolver(httpx_client=httpx_client,base_url=agent_url)
+                    card_resolver = A2ACardResolver(httpx_client=httpx_client, base_url=agent_url)
                     card = await card_resolver.get_agent_card()
-                    response['id'] = str(uuid4())  # Add an ID for the agent
+                    response['id'] = str(uuid4())
                     response['name'] = card.name
                     response['description'] = card.description
                     response['url'] = agent_url
@@ -223,7 +306,6 @@ class HostAgent:
 
                     return response
                 except httpx.HTTPError as e:
-                    # Remove the agent URL since it failed
                     if agent_url in self.remote_agent_addresses:
                         self.remote_agent_addresses.remove(agent_url)
                     
@@ -235,7 +317,6 @@ class HostAgent:
                         original_exception=e
                     )
                 except Exception as e:
-                    # Remove the agent URL since it failed
                     if agent_url in self.remote_agent_addresses:
                         self.remote_agent_addresses.remove(agent_url)
                     
@@ -247,7 +328,6 @@ class HostAgent:
                         original_exception=e
                     )
         except SupervisorAgentError:
-            # Re-raise SupervisorAgentError instances
             raise
         except Exception as e:
             logger.error(f"Unexpected error adding remote agent: {str(e)}", exc_info=True)
@@ -270,10 +350,7 @@ class HostAgent:
         
         if agent_url in self.remote_agent_addresses:
             self.remote_agent_addresses.remove(agent_url)
-            
-            # Reload the remote agents to reflect the deletion
             await self.load_remote_agents()
-            
             return True
         else:
             logger.warning("Agent URL %s not found in remote_agent_addresses", agent_url)
@@ -294,7 +371,6 @@ class HostAgent:
         for card in self.cards.values():
             for skill in card.skills:
                 if 'chat' in skill.tags:
-                    # Generate a unique ID for each agent if not already present
                     agent_id = str(uuid4())
                     remote_agent_info.append(
                         {'id': agent_id, 'name': card.name, 'description': card.description, 'url': card.url}
@@ -304,7 +380,7 @@ class HostAgent:
 
     def list_all_remote_agents(self):
         """
-        List all the available remote agents with chat skills you can use to delegate chat tasks.
+        List all the available remote agents.
 
         Returns:
             list of dicts
@@ -315,7 +391,6 @@ class HostAgent:
         remote_agent_info = []
         for card in self.cards.values():
             for skill in card.skills:
-                # Generate a unique ID for each agent if not already present
                 agent_id = str(uuid4())
                 remote_agent_info.append(
                     {'id': agent_id, 'name': card.name, 'description': card.description, 'url': card.url}
@@ -346,96 +421,34 @@ class HostAgent:
 
     async def updateState(self, session_id: str, agent_name: str | None = None, task_status: str | None = None, task_id: str | None = None):
         """
-        Update the state of the current task, user, session.
+        Update the state of the current task/session directly via the session service.
         """
+        logger.info("Update state for session %s: agent=%s, status=%s, task_id=%s",
+                    session_id, agent_name, task_status, task_id)
 
-        logger.info("Update the agent %s state of the task %s, to %s ", agent_name, task_id, task_status)
-
-        # Use ADK session manager for state updates
+        user_id = f"user_{session_id}"
         try:
-            # Get the session manager from the ADK agent
-            session_manager = self.adk_agent._session_manager
-            app_name = self.adk_agent._get_app_name(None) if hasattr(self.adk_agent, '_get_app_name') else self.app_name
-            user_id = f"thread_user_{session_id}"  # Use consistent user_id format
-            
-            # Update individual state values
-            if agent_name is not None:
-                await session_manager.set_state_value(session_id, app_name, user_id, 'agent', agent_name)
-            
-            if task_status is not None:
-                await session_manager.set_state_value(session_id, app_name, user_id, 'task_status', task_status)
-            
-            if task_id is not None:
-                await session_manager.set_state_value(session_id, app_name, user_id, 'task_id', task_id)
-                
-            logger.info(f"Successfully updated state for session {session_id}")
-            
-        except Exception as e:
-            logger.error(f"Error updating state for session {session_id}: {e}", exc_info=True)
-            # No fallback needed - ADKAgent manages all session state
-
-
-    async def handleToolResult(self, session_id: str, tool_call_id: str, content: str):
-        """
-        Handle tool result from AG-UI and forward to ADK agent
-        
-        Args:
-            session_id: Session ID from the UI
-            tool_call_id: ID of the tool call being responded to
-            content: User's response content
-        """
-        try:
-            logger.info(f"Handling tool result for session {session_id}, tool_call_id: {tool_call_id}, content: {content}")
-            
-            # Use ADK agent to handle the tool result
-            await self.adk_agent.handle_tool_result(session_id, tool_call_id, content)
-            logger.info(f"Successfully handled tool result for {tool_call_id}")
-            
-        except Exception as e:
-            logger.error(f"Error handling tool result: {e}", exc_info=True)
-
-    async def sendApproval(self, agent_name: str, approval: str, task_id: str, context_id: str):
-        """
-        Send non-streaming approval to background agents from thumbs up/down in UI.
-
-        Args:
-            approval: approve/reject
-            task_id: id of the task to provide input
-            context_id: context id of the session with the remote agent
-        """
-        logger.info(f"send approval {approval} to {agent_name}")
-        try:
-            # find the remote agent with name
-            if agent_name not in self.remote_agent_connections:
-                logger.error(f"Agent {agent_name} not found")
+            session = await self.session_service.get_session(
+                app_name=self.app_name,
+                user_id=user_id,
+                session_id=session_id
+            )
+            if session is None:
+                logger.warning(f"Session {session_id} not found for state update — skipping")
                 return
 
-            # build a send request with the approval text
-            payload: dict[str, Any] = {
-                'message': {
-                    'role': 'user',
-                    'parts': [{'kind': 'text', 'text': approval }],
-                    'messageId': uuid4().hex,
-                },
-            }
-            payload['message']['taskId'] = task_id
-            payload['message']['contextId'] = context_id
+            # InMemorySessionService: mutate state dict directly (it's an in-memory reference)
+            if agent_name is not None:
+                session.state['agent'] = agent_name
+            if task_status is not None:
+                session.state['task_status'] = task_status
+            if task_id is not None:
+                session.state['task_id'] = task_id
 
-            logger.info(payload)
-
-            params = MessageSendParams(**payload)
-            request = SendMessageRequest(id=uuid4().hex, params=params)
-
-            client = self.remote_agent_connections[agent_name]
-            if not client:
-                logger.error(f"no client for agent {agent_name}")
-                return 
-
-            taskStatus = await client.send_task(request)
-            logger.info(taskStatus)
+            logger.info(f"Successfully updated state for session {session_id}")
 
         except Exception as e:
-            logger.error(f"Unexpected error in send_task: {str(e)}", exc_info=True)
+            logger.error(f"Error updating state for session {session_id}: {e}", exc_info=True)
 
 
     async def send_task(self, agent_name: str, message: str, tool_context: ToolContext):
@@ -453,7 +466,7 @@ class HostAgent:
           A dictionary of JSON data from the agent.
         """
 
-        logger.info("send task %s to %s",message, agent_name)
+        logger.info("send task %s to %s", message, agent_name)
 
         try:
             state = tool_context.state
@@ -471,10 +484,9 @@ class HostAgent:
                     await send_error_message(self.sio_sessions, error)
                 
                 return {
-                        "status" : "Task Error",
-                        "text": f'Agent {agent_name} not found'
+                    "status": "Task Error",
+                    "text": f'Agent {agent_name} not found'
                 }
-
 
             client = self.remote_agent_connections[agent_name]
             if not client:
@@ -488,8 +500,8 @@ class HostAgent:
                     await send_error_message(self.sio_sessions, error)
                 
                 return {
-                        "status" : "Task Error",
-                        "text": f'Client not available for {agent_name}'
+                    "status": "Task Error",
+                    "text": f'Client not available for {agent_name}'
                 }
 
             task_id = None
@@ -498,80 +510,74 @@ class HostAgent:
 
             state['task_status'] = "running"
 
-            # create message payload with ids
-            # Use session_id as context_id for remote agent conversation continuity
             send_payload = self.create_send_message_payload(
                 text=message,
-                context_id=session_id,  # This should be the thread_id for conversation continuity
+                context_id=session_id,
                 task_id=task_id
             )
             
             request = SendStreamingMessageRequest(
-                id = str(uuid4()),
+                id=str(uuid4()),
                 params=MessageSendParams(**send_payload)
             )
 
             try:
-                taskStatus = await client.send_streaming_task(request, session_id, self.sio_sessions)
+                taskStatus, new_task_id = await client.send_streaming_task(request, session_id, self.sio_sessions)
                 logger.info("TASK STATUS FROM CLIENT SEND")
                 logger.info(taskStatus)
 
+                # Persist task_id through tool_context.state so ADK records it as an
+                # event.  Direct mutations via updateState() bypass ADK's event system
+                # and are overwritten when ADK reconstructs session.state from event
+                # history on the next runner turn — causing the designer to receive a
+                # message with no taskId, create a fresh task, and restart the planner.
+                if new_task_id:
+                    state['task_id'] = new_task_id
+                    logger.info("Persisted task_id %s via tool_context.state", new_task_id)
+
                 if taskStatus is not None:
-                    # if task is waiting for info update the state
                     if taskStatus.state == TaskState.input_required:
-                        await self.updateState(session_id=session_id,task_status="input_needed")
-                        text = taskStatus.message.parts[0].root.text
-                        # Distinguish plan approval ([PLAN] prefix) from clarification
-                        # questions ([QUESTION] prefix).  The supervisor prompt uses
-                        # different keys to route each case:
-                        #   require_user_approval → call requestTaskApproval widget
-                        #   require_user_input    → display question text to user
-                        if text.startswith('[PLAN]'):
-                            return {
-                                "status": "Plan Approval Required",
-                                "text": text,
-                                "require_user_approval": True,
-                            }
-                        else:
-                            return {
-                                "status": "Input Required from User",
-                                "text": text,
-                                "require_user_input": True,
-                            }
+                        await self.updateState(session_id=session_id, task_status="input_needed")
+                        return {
+                            "status": "Input Required from User",
+                            "text": taskStatus.message.parts[0].root.text,
+                            "require_user_input": True,
+                        }
                     elif taskStatus.state == TaskState.completed:
-                        # task is done so remove the agent from the state and reset back to "None"
+                        # Reset task_id through tool_context.state so subsequent
+                        # send_task calls start a fresh task on the designer side.
+                        state['task_id'] = 'None'
                         await self.updateState(session_id=session_id, agent_name="None", task_status="None", task_id="None")
                         return {
-                                "status" : "Task Completed",
-                                "text": taskStatus.message.parts[0].root.text
+                            "status": "Task Completed",
+                            "text": taskStatus.message.parts[0].root.text
                         }
                     elif taskStatus.state == TaskState.failed:
-                        # Task failed, update state and return error
-                        await self.updateState(session_id=session_id,task_status="failed")
+                        state['task_id'] = 'None'
+                        await self.updateState(session_id=session_id, task_status="failed")
                         error_message = "Task failed"
                         if taskStatus.message and taskStatus.message.parts and taskStatus.message.parts[0].root.text:
                             error_message = taskStatus.message.parts[0].root.text
                         
                         return {
-                                "status" : "Task Failed",
-                                "text": error_message
+                            "status": "Task Failed",
+                            "text": error_message
                         }
                     else:
                         logger.error("Unexpected task state found")
                         return {
-                                "status" : "Task Error",
-                                "text": f"Unexpected task state: {taskStatus.state}"
+                            "status": "Task Error",
+                            "text": f"Unexpected task state: {taskStatus.state}"
                         }
                 else:
                     return {
-                            "status" : "Task Completed",
-                            "text": "Completed"
+                        "status": "Task Completed",
+                        "text": "Completed"
                     }
             except SupervisorAgentError as e:
-                # SupervisorAgentError instances are already handled by the remote_agent_connection
                 return {
-                        "status" : "Task Error",
-                        "text": e.message
+                    "status": "Task Error",
+                    "text": e.message
                 }
         except Exception as e:
             logger.error(f"Unexpected error in send_task: {str(e)}", exc_info=True)
@@ -581,62 +587,16 @@ class HostAgent:
                 original_exception=e
             )
             
-            # Try to get the session ID to send the error message
             try:
                 state = tool_context.state
                 session_id = state.get('session_id')
                 
                 if session_id and session_id in self.sio_sessions:
                     await send_error_message(self.sio_sessions, error)
-            except:
-                # If we can't get the session ID, just log the error
+            except Exception:
                 pass
             
             return {
-                    "status" : "Task Error",
-                    "text": f"Unexpected error: {str(e)}"
+                "status": "Task Error",
+                "text": f"Unexpected error: {str(e)}"
             }
-
-    # reset_conversation and create_session methods removed - ADKAgent manages sessions automatically based on thread IDs
-
-    async def send_message(self, sio, sid, text):
-        """
-        Utility function to send AG-UI events back to the dashboard ui
-        """
-        if text != '':
-            # Send AG-UI TEXT_MESSAGE_CONTENT event instead of legacy chat_message
-            agui_event = {
-                'type': 'TEXT_MESSAGE_CONTENT',
-                'messageId': f'response-{datetime.datetime.now().timestamp()}',
-                'delta': text,
-                'timestamp': datetime.datetime.now().isoformat()
-            }
-            await sio.emit('agui_event', agui_event, room=sid)
-
-    async def run_agui(self, input: RunAgentInput):
-        """
-        Entry point to run AG-UI protocol conversation with the host agent.
-        
-        Args:
-            input: AG-UI RunAgentInput containing messages, tools, context, etc.
-            
-        Yields:
-            AG-UI protocol events (TEXT_MESSAGE_START/CONTENT/END, TOOL_CALL_*, etc.)
-        """
-        logger.info("AG-UI input from user - thread id %s, run id %s", input.thread_id, input.run_id)
-        
-        try:
-            # Use the ADKAgent wrapper to handle the AG-UI protocol
-            async for event in self.adk_agent.run(input):
-                logger.info(f"AG-UI event: {type(event).__name__}")
-                yield event
-                
-        except Exception as e:
-            logger.error(f"Error in AG-UI run: {str(e)}", exc_info=True)
-            # Import here to avoid circular imports
-            from ag_ui.core import RunErrorEvent, EventType
-            yield RunErrorEvent(
-                type=EventType.RUN_ERROR,
-                message=f"Error processing AG-UI request: {str(e)}",
-                code="AGUI_PROCESSING_ERROR"
-            )

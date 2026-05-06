@@ -1,293 +1,416 @@
-# L3VPN traffic tests — BLUE hub-spoke 
+# L3VPN traffic tests — BLUE VPN, hub-spoke, TIME-COMPRESSED
 #
-# BLUE VPN (d1-blue, d2-blue, d3-blue ↔ dh-blue) — hub-spoke tests.
+# ── Topology ────────────────────────────────────────────────────────────────
 #
-# L3VPN traffic tests — d1-blue and d2-blue spoke sites ↔ dh-blue
+#   dh-blue   Nottingham  (pe2 / Cambridge-DC1)   — HUB
+#   d1-blue   Sheffield   (pe1 / Oxford-DC1)       — SPOKE
+#   d2-blue   Liverpool   (pe3 / Brighton-DC1)     — SPOKE
+#   d3-blue   Huddersfield(pe4 / Cardiff-DC1)      — SPOKE
 #
-# Four TrafficTest resources give the GNN / RCA pipeline a rich multi-dimensional
-# dataset spanning two protocols and two traffic models:
+#   VPN topology: hub-spoke — all three spokes reach each other only through
+#   the Nottingham hub.  Every spoke-hub pair is fully exercised.
+#   PE-CE uplink budget: 100 Mbit per interface.
 #
-#   d1-to-hub-tcp         — 10 concurrent TCP flows, multi_sine pattern (unidirectional).
-#                           Daily + weekly sine superposition (wall_clock anchored).
+# ── Time compression ────────────────────────────────────────────────────────
 #
-#   d2-to-hub-udp         — 10 concurrent UDP flows, schedule pattern (unidirectional).
-#                           Business-hours piecewise-linear profile, daily repeat.
+#   15 real seconds  = 1 simulated hour
+#   360 real seconds = 1 simulated day   (6 minutes)
+#   2520 real seconds= 1 simulated week  (42 minutes)
+#   172 800 seconds  = 48 real hours ≈ 480 simulated days ≈ 1.3 simulated years
 #
-#   d1-hub-tcp-bidir      — Bidirectional TCP, multi_sine pattern.
-#                           Simulates realistic enterprise spoke↔hub traffic:
-#                           spoke uploads (d1→hub) and hub content responses (hub→d1).
-#                           hub→spoke carries ~60% more bandwidth (downloads > uploads).
+#   All patterns use time_reference: elapsed so the waveform counts from t=0
+#   on test start — no wall-clock anchoring needed for compressed cycles.
 #
-#   d2-hub-udp-bidir      — Bidirectional UDP, schedule + constant patterns.
-#                           Simulates UDP media/monitoring: spoke sends business-hours
-#                           uplink; hub pushes back steady low-rate monitoring/control.
+#   Phase-offset formula:  offset = period/4 - peak_elapsed_second
 #
-# All flow metrics (throughput_bps, latency_ms, jitter_ms, packet_loss_pct,
-# active_sessions) are exported on port 9091 by the traffic-agent and scraped
-# automatically by the Ops Agent into Cloud Monitoring — no metrics_enabled /
-# metrics_interval fields are needed in the spec.
+# ── Traffic character (BLUE = consumer mobile / cell backhaul) ─────────────
 #
-# Bidirectional flows produce Prometheus metrics with two flow_id series per device:
-#   flow_id="d1-hub-tcp-bidir_d1"      role=source      (d1 uploads to hub)
-#   flow_id="d1-hub-tcp-bidir_d1_rev"  role=destination (d1 receives from hub)
-#   (and mirror series with role swapped on dh)
+#   Bimodal daily pattern: morning commute peak (08:00 sim) and evening
+#   entertainment peak (20:00 sim), with a midday lull and deep overnight
+#   valley.  Weekend streaming lifts the Saturday/Sunday evening load.
+#
+#   The bimodal shape is achieved with a half-day sine component (period=180)
+#   whose half-wavelength naturally produces two equal peaks per compressed day.
+#   A full-day component (period=360) creates asymmetry — the evening peak is
+#   slightly heavier than the morning peak, modelling higher streaming demand.
+#
+#   Phase offsets (elapsed):
+#
+#     Half-day component (period=180), AM peak at 08:00 sim = 8×15 = 120 s:
+#       phase_offset = 180/4 − 120 = 45 − 120 = −75
+#       (PM peak automatically at 120 + 180 = 300 s = 20:00 simulated ✓)
+#
+#     Daily PM-bias component (period=360), peak at 20:00 sim = 300 s:
+#       phase_offset = 360/4 − 300 = 90 − 300 = −210
+#
+#     Weekly weekend-lift component (period=2520), Sat evening = 5×360 + 300 = 2100 s:
+#       phase_offset = 2520/4 − 2100 = 630 − 2100 = −1470
+#
+# ── Traffic asymmetry ───────────────────────────────────────────────────────
+#
+#   Hub → spoke (downloads): 2–3× heavier than spoke → hub (uploads).
+#   This reflects the cell backhaul reality: the hub delivers content
+#   (video, app updates, streaming) and the spokes upload user data
+#   (telemetry, small request packets, session signalling).
+#
+# ── Flow map ────────────────────────────────────────────────────────────────
+#
+#   d1-hub-bidir-tcp    TCP  d1-blue ↔ dh-blue   Sheffield spoke ↔ hub
+#   d2-hub-bidir-udp    UDP  d2-blue ↔ dh-blue   Liverpool spoke ↔ hub (quality + push)
+#   d3-hub-bidir-tcp    TCP  d3-blue ↔ dh-blue   Huddersfield spoke ↔ hub  [NEW]
+#   all-spokes-hub-udp  UDP  d1+d2+d3 → dh-blue  Aggregate hub load probe  [NEW]
+#
+# ── Saturation design ───────────────────────────────────────────────────────
+#
+#   Hub PE-CE link (pe2-ce1-hub, 100 Mbit) receives aggregate from all spokes:
+#
+#     Uploads into hub at 20:00 sim peak:
+#       d1→hub ~35 Mbps + d2→hub ~22 Mbps + d3→hub ~28 Mbps
+#       + all-spokes aggregate ~21 Mbps (3 sources × 7 Mbps)  ≈ 106 Mbps
+#
+#     Downloads from hub (outbound on hub PE-CE):
+#       hub→d1 ~88 Mbps + hub→d2 ~10 Mbps (constant) + hub→d3 ~80 Mbps
+#       ≈ 178 Mbps shared across 3 downstream PE-CE 100 Mbit links
+#
+#   Hub inbound reaches ~100 Mbit on the hub PE-CE at evening peak, generating
+#   the congestion and queuing events the GNN needs.  Each spoke PE-CE link
+#   saturates independently on the hub-to-spoke download direction.
+#
+# ── Metrics ─────────────────────────────────────────────────────────────────
+#
+#   All flow metrics (throughput_bps, latency_ms, jitter_ms, packet_loss_pct,
+#   active_sessions) are exported on port 9091 by the traffic-agent and scraped
+#   automatically by the Ops Agent into Cloud Monitoring.
+#
+#   Bidirectional flows produce two Prometheus series per device, e.g.:
+#     flow_id="d1-hub-bidir-tcp_d1-blue"      role=source
+#     flow_id="d1-hub-bidir-tcp_d1-blue_rev"  role=destination
 
+# ════════════════════════════════════════════════════════════════════════════
+# SPOKE 1 — d1-blue ↔ dh-blue : TCP bidirectional, Sheffield cell backhaul
+#
+#   Sheffield (pe1/Oxford) → Nottingham hub (pe2/Cambridge) via p1.
+#
+#   Forward  (d1→hub): user-plane uploads — session data, telemetry, signalling.
+#                      Base 12 Mbps; peaks ~35 Mbps at 08:00 and 20:00 simulated.
+#   Reverse  (hub→d1): content delivery — video, app updates, streaming cache.
+#                      Base 30 Mbps; peaks ~88 Mbps at 20:00 simulated.
+#                      PM peak is heavier (streaming dominates evening demand).
+#
+#   Composite forward waveform:
+#     bw(t) = 12 + 8×sin(2π(t+75)/180)   # bimodal (AM + PM)
+#               + 3×sin(2π(t+210)/360)    # PM asymmetry
+#               + 2×sin(2π(t+1470)/2520)  # weekend lift
+#               + noise ±5%
+#
+#   Prometheus flow IDs:
+#     d1-hub-bidir-tcp_d1-blue      role=source
+#     d1-hub-bidir-tcp_d1-blue_rev  role=destination
+# ════════════════════════════════════════════════════════════════════════════
 ---
-# ── d1 → dh : TCP throughput, multi_sine time-of-day model ─────────────────
 apiVersion: google.dev/v1
 kind: TrafficTest
 metadata:
-  name: d1-to-hub-tcp
+  name: d1-hub-bidir-tcp
   namespace: default
   labels:
     scenario: l3vpn-spoke-hub
-    source: d1
-    pattern: multi_sine
-spec:
-  vpnRef: l3vpn-blue-service
-  source_devices:
-    - d1-blue
-  destination_device: dh-blue
-  protocol: TCP
-
-  # 7 days — captures one full weekly sine cycle and multiple daily cycles.
-  duration: 604800  # 7 days in seconds
-
-  # Composite waveform:
-  #   bw(t) = 25Mbps
-  #           + 20Mbps × sin(2π(t − 28800) / 86400)   # daily, peak 14:00 UTC
-  #           +  8Mbps × sin(2π  t          / 604800)  # weekly
-  #           + Gaussian noise (±3%)
-  #
-  # Result: ~5 Mbps overnight, ~45 Mbps weekday business-hours peak.
-  bandwidth: 50Mbps
-  pattern_type: multi_sine
-  pattern_config:
-    time_reference: wall_clock    # waveform locked to UTC wall-clock time
-    base_rate: 25Mbps
-    components:
-      - period: 86400             # 24-hour daily cycle
-        amplitude: 20Mbps
-        phase_offset: -28800      # peak at 14:00 UTC (21600 − 50400 = −28800)
-      - period: 604800            # 7-day weekly cycle
-        amplitude: 8Mbps
-        phase_offset: 0           # peak Monday 00:00 UTC
-    noise_stddev_pct: 3.0         # ±3% Gaussian noise for realistic variation
-    min_rate: 3Mbps               # floor: keep L3VPN LSP alive overnight
-    max_rate: 100Mbps             # ceiling: L3VPN interface capacity
-
-  # 10 independent TCP sessions from dev1 — simulates 10 branch-office users.
-  concurrent_users: 10
-
----
-# ── d2 → dh : UDP quality, business-hours schedule ──────────────────────────
-apiVersion: google.dev/v1
-kind: TrafficTest
-metadata:
-  name: d2-to-hub-udp
-  namespace: default
-  labels:
-    scenario: l3vpn-spoke-hub
-    source: d2
-    pattern: schedule
-spec:
-  vpnRef: l3vpn-blue-service
-  source_devices:
-    - d2-blue
-  destination_device: dh-blue
-  protocol: UDP     # UDP populates latency_ms, jitter_ms, packet_loss_pct
-
-  duration: 604800  # 7 days — same measurement window as dev1-to-hub-tcp
-
-  # Piecewise-linear business-hours profile, repeating daily (UTC):
-  #
-  #  00:00 →  2 Mbps  overnight minimum (keepalive / monitoring)
-  #  07:30 → 15 Mbps  pre-business ramp (early logins, mail sync)
-  #  09:00 → 40 Mbps  start of business day
-  #  12:00 → 30 Mbps  lunch-hour dip
-  #  13:30 → 45 Mbps  afternoon peak (video calls, file sync)
-  #  17:00 → 25 Mbps  end-of-day wind-down
-  #  19:00 → 10 Mbps  evening (VPN, remote work)
-  #  22:00 →  4 Mbps  late-night taper
-  bandwidth: 50Mbps
-  pattern_type: schedule
-  pattern_config:
-    time_reference: wall_clock
-    interpolation: linear
-    repeat: daily
-    waypoints:
-      - time: "00:00"
-        rate: "2Mbps"
-      - time: "07:30"
-        rate: "15Mbps"
-      - time: "09:00"
-        rate: "40Mbps"
-      - time: "12:00"
-        rate: "30Mbps"
-      - time: "13:30"
-        rate: "45Mbps"
-      - time: "17:00"
-        rate: "25Mbps"
-      - time: "19:00"
-        rate: "10Mbps"
-      - time: "22:00"
-        rate: "4Mbps"
-
-  # 10 concurrent UDP sessions — each contributes independently to
-  # latency_ms, jitter_ms, and packet_loss_pct in Cloud Monitoring.
-  concurrent_users: 10
-
----
-# ── d1 ↔ dh : TCP bidirectional, multi_sine ─────────────────────────────────
-#
-# Models realistic enterprise spoke↔hub traffic asymmetry:
-#
-#   d1 → dh (forward):  branch-office uploads — DB writes, file sync,
-#                        VPN telemetry.  Same multi_sine shape as
-#                        d1-to-hub-tcp (base 25 Mbps).
-#
-#   dh → d1 (reverse):  hub content distribution — file downloads,
-#                        software updates, config push, query results.
-#                        Downloads are typically larger than uploads so the
-#                        reverse base_rate is set to 40 Mbps (~60% higher).
-#                        Same daily/weekly sine envelope anchored to wall_clock.
-#
-# Prometheus flow IDs:
-#   d1-hub-tcp-bidir_d1      role=source      d1 → hub uploads
-#   d1-hub-tcp-bidir_d1_rev  role=destination d1 ← hub downloads
-#   (dh carries the mirror roles)
-apiVersion: google.dev/v1
-kind: TrafficTest
-metadata:
-  name: d1-hub-tcp-bidir
-  namespace: default
-  labels:
-    scenario: l3vpn-spoke-hub
-    source: d1
+    vpn: blue-spoke
+    source: d1-blue
+    destination: dh-blue
     pattern: multi_sine
     direction: bidirectional
+    compression: 240x
 spec:
   vpnRef: l3vpn-blue-service
   source_devices:
     - d1-blue
   destination_device: dh-blue
   protocol: TCP
-  duration: 604800  # 7 days — same window as unidirectional tests
+  duration: 172800    # 48 real hours ≈ 480 compressed days ≈ 1.3 compressed years
 
-  # ── d1 → dh: branch uploads ──────────────────────────────────────────────
-  # bw(t) = 25Mbps
-  #         + 20Mbps × sin(2π(t − 28800) / 86400)   # daily, peak 14:00 UTC
-  #         +  8Mbps × sin(2π  t          / 604800)  # weekly
-  # Result: ~5 Mbps overnight, ~45 Mbps weekday peak
-  bandwidth: 50Mbps
+  # ── d1-blue → dh-blue : user-plane uploads / signalling ─────────────────
+  # bw(t) = 12 + 8×sin(2π(t−75)/180) + 3×sin(2π(t−210)/360) + 2×sin(2π(t−1470)/2520)
+  # AM peak ~35 Mbps at 08:00 sim; PM peak ~35 Mbps at 20:00 sim;
+  # overnight floor ~2 Mbps; weekend evenings ~5 Mbps heavier
+  bandwidth: 40Mbps
   pattern_type: multi_sine
   pattern_config:
-    time_reference: wall_clock
-    base_rate: 25Mbps
+    time_reference: elapsed
+    base_rate: 12Mbps
     components:
-      - period: 86400
-        amplitude: 20Mbps
-        phase_offset: -28800      # peak at 14:00 UTC
-      - period: 604800
+      - period: 180          # half-day: creates TWO peaks per compressed day
         amplitude: 8Mbps
-        phase_offset: 0
-    noise_stddev_pct: 3.0
-    min_rate: 3Mbps
-    max_rate: 100Mbps
+        phase_offset: -75    # first peak at 08:00 simulated (120 s elapsed)
+                             # second peak at 20:00 simulated (300 s elapsed) ✓
+      - period: 360          # full-day PM-bias: evening peak slightly heavier
+        amplitude: 3Mbps
+        phase_offset: -210   # peak at 20:00 simulated (300 s elapsed)
+      - period: 2520         # weekly weekend lift
+        amplitude: 2Mbps
+        phase_offset: -1470  # peak Saturday evening simulated (2100 s elapsed)
+    noise_stddev_pct: 5.0
+    min_rate: 2Mbps
+    max_rate: 70Mbps
 
-  # ── dh → d1: hub content distribution (downloads) ────────────────────────
-  # bw(t) = 40Mbps
-  #         + 30Mbps × sin(2π(t − 28800) / 86400)   # daily, same peak 14:00 UTC
-  #         + 10Mbps × sin(2π  t          / 604800)  # weekly
-  # Result: ~8 Mbps overnight, ~70 Mbps weekday peak — larger than upload
+  # ── dh-blue → d1-blue : content delivery / video streaming ──────────────
+  # bw(t) = 30 + 20×sin(2π(t−75)/180) + 8×sin(2π(t−210)/360) + 5×sin(2π(t−1470)/2520)
+  # PM peak ~88 Mbps (streaming demand) > AM peak ~68 Mbps;
+  # overnight floor ~5 Mbps (background updates, config push)
   bidirectional: true
-  reverse_bandwidth: 80Mbps
+  reverse_bandwidth: 90Mbps
   reverse_pattern_type: multi_sine
   reverse_pattern_config:
-    time_reference: wall_clock
-    base_rate: 40Mbps
+    time_reference: elapsed
+    base_rate: 30Mbps
     components:
-      - period: 86400
-        amplitude: 30Mbps
-        phase_offset: -28800      # peak at 14:00 UTC — correlated with upload peak
-      - period: 604800
-        amplitude: 10Mbps
-        phase_offset: 0
-    noise_stddev_pct: 3.0
-    min_rate: 5Mbps               # hub always pushes some data (monitoring, config)
-    max_rate: 100Mbps
+      - period: 180
+        amplitude: 20Mbps
+        phase_offset: -75    # bimodal: AM ~68 Mbps, PM ~88 Mbps (with PM-bias)
+      - period: 360
+        amplitude: 8Mbps
+        phase_offset: -210   # PM bias: evening streaming heavier
+      - period: 2520
+        amplitude: 5Mbps
+        phase_offset: -1470  # weekend streaming boost
+    noise_stddev_pct: 4.0
+    min_rate: 5Mbps
+    max_rate: 95Mbps
 
-  concurrent_users: 10
+  concurrent_users: 20
 
+# ════════════════════════════════════════════════════════════════════════════
+# SPOKE 2 — d2-blue ↔ dh-blue : UDP bidirectional, Liverpool streaming quality
+#
+#   Liverpool (pe3/Brighton) → Nottingham hub (pe2/Cambridge) via p3-p1/p4-p2.
+#
+#   Forward  (d2→hub): UDP uplink — video call quality probe, streaming signal.
+#                      Base 8 Mbps; bimodal peaks ~22 Mbps.
+#   Reverse  (hub→d2): constant 10 Mbps hub push — config delivery, monitoring
+#                      telemetry, firmware update chunks.
+#                      Deliberate constant rate so deviations are easy to detect.
+#
+#   UDP generates latency_ms, jitter_ms, packet_loss_pct — critical quality
+#   metrics for the GNN's flow node features.
+#
+#   Prometheus flow IDs:
+#     d2-hub-bidir-udp_d2-blue      role=source
+#     d2-hub-bidir-udp_d2-blue_rev  role=destination
+# ════════════════════════════════════════════════════════════════════════════
 ---
-# ── d2 ↔ dh : UDP bidirectional, schedule + constant ────────────────────────
-#
-# Models UDP spoke↔hub asymmetry:
-#
-#   d2 → dh (forward):  business-hours UDP uplink — same schedule
-#                        as d2-to-hub-udp (2–45 Mbps, daily repeat).
-#                        Generates latency_ms, jitter_ms, packet_loss_pct
-#                        for the spoke→hub direction.
-#
-#   dh → d2 (reverse):  hub monitoring / control push — steady low-rate
-#                        constant UDP traffic (8 Mbps).  Represents hub
-#                        streaming telemetry, SNMP polling responses,
-#                        firmware update delivery.  Deliberately constant
-#                        so deviations (e.g. congestion-induced drops) are
-#                        easy to detect in Cloud Monitoring.
-#
-# Prometheus flow IDs:
-#   d2-hub-udp-bidir_d2      role=source      d2 → hub uplink
-#   d2-hub-udp-bidir_d2_rev  role=destination d2 ← hub monitoring push
 apiVersion: google.dev/v1
 kind: TrafficTest
 metadata:
-  name: d2-hub-udp-bidir
+  name: d2-hub-bidir-udp
   namespace: default
   labels:
     scenario: l3vpn-spoke-hub
-    source: d2
-    pattern: schedule
+    vpn: blue-spoke
+    source: d2-blue
+    destination: dh-blue
+    pattern: multi_sine
     direction: bidirectional
+    compression: 240x
 spec:
   vpnRef: l3vpn-blue-service
   source_devices:
     - d2-blue
   destination_device: dh-blue
-  protocol: UDP     # UDP populates latency_ms, jitter_ms, packet_loss_pct
-  duration: 604800  # 7 days — same window as unidirectional tests
+  protocol: UDP
+  duration: 172800
 
-  # ── d2 → dh: business-hours UDP uplink ──────────────────────────────────
-  bandwidth: 50Mbps
-  pattern_type: schedule
+  # ── d2-blue → dh-blue : streaming quality / UDP uplink ──────────────────
+  # bw(t) = 8 + 6×sin(2π(t−75)/180) + 2×sin(2π(t−210)/360) + 2×sin(2π(t−1470)/2520)
+  # AM peak ~22 Mbps; PM peak ~22 Mbps; overnight ~1 Mbps
+  bandwidth: 30Mbps
+  pattern_type: multi_sine
   pattern_config:
-    time_reference: wall_clock
-    interpolation: linear
-    repeat: daily
-    waypoints:
-      - time: "00:00"
-        rate: "2Mbps"
-      - time: "07:30"
-        rate: "15Mbps"
-      - time: "09:00"
-        rate: "40Mbps"
-      - time: "12:00"
-        rate: "30Mbps"
-      - time: "13:30"
-        rate: "45Mbps"
-      - time: "17:00"
-        rate: "25Mbps"
-      - time: "19:00"
-        rate: "10Mbps"
-      - time: "22:00"
-        rate: "4Mbps"
+    time_reference: elapsed
+    base_rate: 8Mbps
+    components:
+      - period: 180          # bimodal AM/PM peaks
+        amplitude: 6Mbps
+        phase_offset: -75    # 08:00 and 20:00 simulated peaks
+      - period: 360
+        amplitude: 2Mbps
+        phase_offset: -210   # PM slight boost
+      - period: 2520
+        amplitude: 2Mbps
+        phase_offset: -1470  # weekend lift
+    noise_stddev_pct: 4.0
+    min_rate: 1Mbps
+    max_rate: 40Mbps
 
-  # ── dh → d2: steady hub monitoring / control push ────────────────────────
-  # Constant rate makes anomalies (drops, jitter spikes) easy to detect —
-  # any deviation from 8 Mbps or latency spike is a clear signal for RCA.
+  # ── dh-blue → d2-blue : hub monitoring / config push (constant) ─────────
+  # Constant 10 Mbps — any deviation from this rate is a clear anomaly signal.
+  # Deliberate steady baseline makes congestion drops and jitter spikes visible.
   bidirectional: true
-  reverse_bandwidth: 8Mbps
+  reverse_bandwidth: 10Mbps
   reverse_pattern_type: constant
 
-  concurrent_users: 10
+  concurrent_users: 12
 
+# ════════════════════════════════════════════════════════════════════════════
+# SPOKE 3 — d3-blue ↔ dh-blue : TCP bidirectional, Huddersfield cell backhaul
+#
+#   NEW FLOW — third spoke, previously untested.
+#   Huddersfield (pe4/Cardiff) → Nottingham hub (pe2/Cambridge) via p4-p2/p4-p3-p1.
+#
+#   Similar consumer bimodal character to d1-hub, but slightly lower base rates
+#   (smaller cell cluster), and 1-hour phase lag on the PM-bias component to
+#   create diversity between spoke congestion windows and prevent all three
+#   spoke-hub flows from peaking simultaneously.
+#
+#   Forward  (d3→hub): base 10 Mbps; peaks ~28 Mbps at 08:00 and 20:00 sim.
+#   Reverse  (hub→d3): base 28 Mbps; peaks ~80 Mbps (content delivery).
+#
+#   PM-bias phase shifted to 21:00 simulated (315 s elapsed):
+#     phase_offset = 360/4 − 315 = 90 − 315 = −225
+#   (shifts the d3 PM peak 1 simulated hour later than d1, staggering congestion)
+#
+#   Prometheus flow IDs:
+#     d3-hub-bidir-tcp_d3-blue      role=source
+#     d3-hub-bidir-tcp_d3-blue_rev  role=destination
+# ════════════════════════════════════════════════════════════════════════════
+---
+apiVersion: google.dev/v1
+kind: TrafficTest
+metadata:
+  name: d3-hub-bidir-tcp
+  namespace: default
+  labels:
+    scenario: l3vpn-spoke-hub
+    vpn: blue-spoke
+    source: d3-blue
+    destination: dh-blue
+    pattern: multi_sine
+    direction: bidirectional
+    compression: 240x
+spec:
+  vpnRef: l3vpn-blue-service
+  source_devices:
+    - d3-blue
+  destination_device: dh-blue
+  protocol: TCP
+  duration: 172800
+
+  # ── d3-blue → dh-blue : user-plane uploads / signalling ─────────────────
+  # bw(t) = 10 + 7×sin(2π(t−75)/180) + 3×sin(2π(t−225)/360) + 2×sin(2π(t−1470)/2520)
+  # AM peak ~27 Mbps at 08:00 sim; PM peak ~29 Mbps at 21:00 sim (shifted 1 hr);
+  # overnight floor ~2 Mbps
+  bandwidth: 35Mbps
+  pattern_type: multi_sine
+  pattern_config:
+    time_reference: elapsed
+    base_rate: 10Mbps
+    components:
+      - period: 180          # bimodal AM/PM peaks
+        amplitude: 7Mbps
+        phase_offset: -75    # 08:00 and 20:00 simulated peaks
+      - period: 360          # PM bias shifted 1 simulated hour later than d1-hub
+        amplitude: 3Mbps
+        phase_offset: -225   # peak at 21:00 simulated (315 s elapsed)
+      - period: 2520
+        amplitude: 2Mbps
+        phase_offset: -1470  # weekend lift
+    noise_stddev_pct: 5.0
+    min_rate: 2Mbps
+    max_rate: 60Mbps
+
+  # ── dh-blue → d3-blue : content delivery / video streaming ──────────────
+  # bw(t) = 28 + 18×sin(2π(t−75)/180) + 7×sin(2π(t−225)/360) + 4×sin(2π(t−1470)/2520)
+  # PM peak ~80 Mbps; AM peak ~65 Mbps; overnight ~5 Mbps
+  bidirectional: true
+  reverse_bandwidth: 85Mbps
+  reverse_pattern_type: multi_sine
+  reverse_pattern_config:
+    time_reference: elapsed
+    base_rate: 28Mbps
+    components:
+      - period: 180
+        amplitude: 18Mbps
+        phase_offset: -75
+      - period: 360
+        amplitude: 7Mbps
+        phase_offset: -225   # matches d3 PM bias shift
+      - period: 2520
+        amplitude: 4Mbps
+        phase_offset: -1470
+    noise_stddev_pct: 4.0
+    min_rate: 4Mbps
+    max_rate: 90Mbps
+
+  concurrent_users: 18
+
+# ════════════════════════════════════════════════════════════════════════════
+# AGGREGATE — all-spokes → dh-blue : UDP multi-source hub load probe
+#
+#   NEW FLOW — all three spokes simultaneously send UDP probe traffic to the hub.
+#   This test drives aggregate hub ingress load independently of the TCP tests,
+#   and gives the GNN a "combined spoke load" view through a single flow_id set.
+#
+#   Uses the multi-source source_devices array: a separate traffic-agent
+#   instance runs on each spoke, each maintaining its own independent connection
+#   to dh-blue. The hub sees three simultaneous UDP sessions.
+#
+#   Bimodal consumer pattern — same AM/PM shape but smaller per-source rate,
+#   so the aggregate tracks the combined activity of all three cell clusters.
+#
+#   At PM peak: 3 × ~7 Mbps ≈ 21 Mbps additional UDP inbound on hub PE-CE.
+#
+#   Unidirectional: hub does not need to respond (probe only).
+#
+#   Prometheus series (one per source device):
+#     flow_id="all-spokes-hub-udp_d1-blue"   role=source
+#     flow_id="all-spokes-hub-udp_d2-blue"   role=source
+#     flow_id="all-spokes-hub-udp_d3-blue"   role=source
+# ════════════════════════════════════════════════════════════════════════════
+---
+apiVersion: google.dev/v1
+kind: TrafficTest
+metadata:
+  name: all-spokes-hub-udp
+  namespace: default
+  labels:
+    scenario: l3vpn-spoke-hub
+    vpn: blue-spoke
+    source: all-spokes
+    destination: dh-blue
+    pattern: multi_sine
+    direction: unidirectional
+    compression: 240x
+spec:
+  vpnRef: l3vpn-blue-service
+  source_devices:
+    - d1-blue
+    - d2-blue
+    - d3-blue
+  destination_device: dh-blue
+  protocol: UDP
+  duration: 172800
+
+  # ── all spokes → hub : aggregate consumer activity probe ─────────────────
+  # Per-source: bw(t) = 4 + 3×sin(2π(t−75)/180) + 1×sin(2π(t−210)/360)
+  #                       + 1×sin(2π(t−1470)/2520) + noise
+  # Per-source peak ~9 Mbps at 08:00 and 20:00 sim.
+  # Aggregate (3 sources): peak ~27 Mbps into hub — adds meaningful inbound pressure.
+  bandwidth: 12Mbps
+  pattern_type: multi_sine
+  pattern_config:
+    time_reference: elapsed
+    base_rate: 4Mbps
+    components:
+      - period: 180          # bimodal: identical shape across all three sources
+        amplitude: 3Mbps
+        phase_offset: -75    # 08:00 and 20:00 simulated peaks
+      - period: 360
+        amplitude: 1Mbps
+        phase_offset: -210   # PM bias
+      - period: 2520
+        amplitude: 1Mbps
+        phase_offset: -1470  # weekend lift
+    noise_stddev_pct: 4.0
+    min_rate: 500Kbps
+    max_rate: 15Mbps
+
+  concurrent_users: 8
