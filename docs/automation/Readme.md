@@ -1,6 +1,6 @@
 # Network Automation
 
-The lifecycle automation code that manages the linux networing to deploy a virtual network is provided as a GKE k8s operator (`operator/`). 
+The lifecycle automation code that manages the linux networking to deploy a virtual network is provided as a GKE k8s operator (`operator/`). 
 
 The Kubernetes operator is built on the [kopf](https://kopf.readthedocs.io/en/latest/) framework. It manages the full lifecycle of virtual network functions and lab infrastructure by watching Custom Resources and driving Ansible playbooks against the Network VM. 
 

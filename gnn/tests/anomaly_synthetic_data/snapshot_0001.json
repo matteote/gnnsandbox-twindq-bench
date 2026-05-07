@@ -1,0 +1,3933 @@
+{
+  "timestamp": "2026-04-14T20:00:20",
+  "nodes": [
+    {
+      "id": "router:ce1-hub",
+      "type": "router",
+      "hostname": "ce1-hub",
+      "role": "CE",
+      "state": 1.0,
+      "cpu": 0.6,
+      "mem": 1.0,
+      "ospf_num_routes": 10.0,
+      "pfx_count_norm": 14.0
+    },
+    {
+      "id": "router:ce1-spoke",
+      "type": "router",
+      "hostname": "ce1-spoke",
+      "role": "CE",
+      "state": 1.0,
+      "cpu": 0.37,
+      "mem": 1.0,
+      "ospf_num_routes": 7.0,
+      "pfx_count_norm": 8.0
+    },
+    {
+      "id": "router:ce2-spoke",
+      "type": "router",
+      "hostname": "ce2-spoke",
+      "role": "CE",
+      "state": 1.0,
+      "cpu": 0.66,
+      "mem": 1.0,
+      "ospf_num_routes": 5.5,
+      "pfx_count_norm": 5.0
+    },
+    {
+      "id": "router:ce3-spoke",
+      "type": "router",
+      "hostname": "ce3-spoke",
+      "role": "CE",
+      "state": 1.0,
+      "cpu": 0.66,
+      "mem": 1.0,
+      "ospf_num_routes": 7.0,
+      "pfx_count_norm": 8.0
+    },
+    {
+      "id": "router:p1",
+      "type": "router",
+      "hostname": "p1",
+      "role": "P",
+      "state": 1.0,
+      "cpu": 0.37,
+      "mem": 1.0,
+      "ospf_num_routes": 21.5,
+      "pfx_count_norm": 0.0
+    },
+    {
+      "id": "router:p2",
+      "type": "router",
+      "hostname": "p2",
+      "role": "P",
+      "state": 1.0,
+      "cpu": 0.37,
+      "mem": 1.0,
+      "ospf_num_routes": 20.0,
+      "pfx_count_norm": 0.0
+    },
+    {
+      "id": "router:p3",
+      "type": "router",
+      "hostname": "p3",
+      "role": "P",
+      "state": 1.0,
+      "cpu": 0.66,
+      "mem": 1.0,
+      "ospf_num_routes": 20.0,
+      "pfx_count_norm": 0.0
+    },
+    {
+      "id": "router:p4",
+      "type": "router",
+      "hostname": "p4",
+      "role": "P",
+      "state": 1.0,
+      "cpu": 0.37,
+      "mem": 1.0,
+      "ospf_num_routes": 20.0,
+      "pfx_count_norm": 0.0
+    },
+    {
+      "id": "router:pe1",
+      "type": "router",
+      "hostname": "pe1",
+      "role": "PE",
+      "state": 1.0,
+      "cpu": 0.66,
+      "mem": 1.0,
+      "ospf_num_routes": 13.5,
+      "pfx_count_norm": 4.4
+    },
+    {
+      "id": "router:pe2",
+      "type": "router",
+      "hostname": "pe2",
+      "role": "PE",
+      "state": 1.0,
+      "cpu": 0.37,
+      "mem": 1.0,
+      "ospf_num_routes": 15.5,
+      "pfx_count_norm": 6.0
+    },
+    {
+      "id": "router:pe3",
+      "type": "router",
+      "hostname": "pe3",
+      "role": "PE",
+      "state": 1.0,
+      "cpu": 0.37,
+      "mem": 1.0,
+      "ospf_num_routes": 12.75,
+      "pfx_count_norm": 3.8
+    },
+    {
+      "id": "router:pe4",
+      "type": "router",
+      "hostname": "pe4",
+      "role": "PE",
+      "state": 1.0,
+      "cpu": 0.4,
+      "mem": 1.0,
+      "ospf_num_routes": 13.5,
+      "pfx_count_norm": 4.4
+    },
+    {
+      "id": "router:rr1",
+      "type": "router",
+      "hostname": "rr1",
+      "role": "P",
+      "state": 1.0,
+      "cpu": 0.37,
+      "mem": 1.0,
+      "ospf_num_routes": 21.5,
+      "pfx_count_norm": 14.5
+    },
+    {
+      "id": "router:rr2",
+      "type": "router",
+      "hostname": "rr2",
+      "role": "P",
+      "state": 1.0,
+      "cpu": 0.66,
+      "mem": 1.0,
+      "ospf_num_routes": 21.5,
+      "pfx_count_norm": 14.5
+    },
+    {
+      "id": "router:ce1-hub:interface:eth0",
+      "type": "interface",
+      "name": "eth0",
+      "device_id": "router:ce1-hub",
+      "speed_bps": 1000000000.0,
+      "state": 1.0,
+      "rx_drops": 0.0,
+      "tx_drops": 0.0,
+      "mtu_norm": 0.16666666666666666,
+      "rx_errs_rate": 0.0,
+      "rx_bytes_rate": 104.0,
+      "tx_bytes_rate": 1249.5333333333333,
+      "rx_err_gradient": 0.0,
+      "tx_util": 9.996266666666666e-06,
+      "rx_util": 8.32e-07
+    },
+    {
+      "id": "router:ce1-hub:interface:eth1",
+      "type": "interface",
+      "name": "eth1",
+      "device_id": "router:ce1-hub",
+      "speed_bps": 1000000000.0,
+      "state": 1.0,
+      "rx_drops": 0.0,
+      "tx_drops": 0.0,
+      "mtu_norm": 0.16666666666666666,
+      "rx_errs_rate": 0.0,
+      "rx_bytes_rate": 12989206.0,
+      "tx_bytes_rate": 118631.2,
+      "rx_err_gradient": 0.0,
+      "tx_util": 0.0009490496,
+      "rx_util": 0.103913648
+    },
+    {
+      "id": "router:ce1-hub:interface:eth2",
+      "type": "interface",
+      "name": "eth2",
+      "device_id": "router:ce1-hub",
+      "speed_bps": 1000000000.0,
+      "state": 1.0,
+      "rx_drops": 0.0,
+      "tx_drops": 0.0,
+      "mtu_norm": 0.16666666666666666,
+      "rx_errs_rate": 0.0,
+      "rx_bytes_rate": 118631.2,
+      "tx_bytes_rate": 12989413.333333334,
+      "rx_err_gradient": 0.0,
+      "tx_util": 0.10391530666666667,
+      "rx_util": 0.0009490496
+    },
+    {
+      "id": "router:ce1-hub:interface:lo",
+      "type": "interface",
+      "name": "lo",
+      "device_id": "router:ce1-hub",
+      "speed_bps": 1000000000.0,
+      "state": 0.0,
+      "rx_drops": 0.0,
+      "tx_drops": 0.0,
+      "mtu_norm": 7.281777777777778,
+      "rx_errs_rate": 0.0,
+      "rx_bytes_rate": 0.0,
+      "tx_bytes_rate": 0.0,
+      "rx_err_gradient": 0.0,
+      "tx_util": 0.0,
+      "rx_util": 0.0
+    },
+    {
+      "id": "router:ce1-spoke:interface:eth0",
+      "type": "interface",
+      "name": "eth0",
+      "device_id": "router:ce1-spoke",
+      "speed_bps": 1000000000.0,
+      "state": 1.0,
+      "rx_drops": 0.0,
+      "tx_drops": 0.0,
+      "mtu_norm": 0.16666666666666666,
+      "rx_errs_rate": 0.0,
+      "rx_bytes_rate": 112.8,
+      "tx_bytes_rate": 1269.021053333332,
+      "rx_err_gradient": 0.0,
+      "tx_util": 1.0152168426666657e-05,
+      "rx_util": 9.023999999999999e-07
+    },
+    {
+      "id": "router:ce1-spoke:interface:eth1",
+      "type": "interface",
+      "name": "eth1",
+      "device_id": "router:ce1-spoke",
+      "speed_bps": 1000000000.0,
+      "state": 1.0,
+      "rx_drops": 0.0,
+      "tx_drops": 0.0,
+      "mtu_norm": 0.16666666666666666,
+      "rx_errs_rate": 0.0,
+      "rx_bytes_rate": 59465.75519999663,
+      "tx_bytes_rate": 6507643.582657877,
+      "rx_err_gradient": 0.0,
+      "tx_util": 0.05206114866126302,
+      "rx_util": 0.000475726041599973
+    },
+    {
+      "id": "router:ce1-spoke:interface:eth2",
+      "type": "interface",
+      "name": "eth2",
+      "device_id": "router:ce1-spoke",
+      "speed_bps": 1000000000.0,
+      "state": 1.0,
+      "rx_drops": 0.0,
+      "tx_drops": 0.0,
+      "mtu_norm": 0.16666666666666666,
+      "rx_errs_rate": 0.0,
+      "rx_bytes_rate": 6228925.329377746,
+      "tx_bytes_rate": 59463.944906671844,
+      "rx_err_gradient": 0.0,
+      "tx_util": 0.00047571155925337476,
+      "rx_util": 0.04983140263502197
+    },
+    {
+      "id": "router:ce1-spoke:interface:lo",
+      "type": "interface",
+      "name": "lo",
+      "device_id": "router:ce1-spoke",
+      "speed_bps": 1000000000.0,
+      "state": 0.0,
+      "rx_drops": 0.0,
+      "tx_drops": 0.0,
+      "mtu_norm": 7.281777777777778,
+      "rx_errs_rate": 0.0,
+      "rx_bytes_rate": 0.0,
+      "tx_bytes_rate": 0.0,
+      "rx_err_gradient": 0.0,
+      "tx_util": 0.0,
+      "rx_util": 0.0
+    },
+    {
+      "id": "router:ce2-spoke:interface:eth0",
+      "type": "interface",
+      "name": "eth0",
+      "device_id": "router:ce2-spoke",
+      "speed_bps": 1000000000.0,
+      "state": 1.0,
+      "rx_drops": 0.0,
+      "tx_drops": 0.0,
+      "mtu_norm": 0.16666666666666666,
+      "rx_errs_rate": 0.0,
+      "rx_bytes_rate": 112.8,
+      "tx_bytes_rate": 1224.2,
+      "rx_err_gradient": 0.0,
+      "tx_util": 9.7936e-06,
+      "rx_util": 9.023999999999999e-07
+    },
+    {
+      "id": "router:ce2-spoke:interface:eth1",
+      "type": "interface",
+      "name": "eth1",
+      "device_id": "router:ce2-spoke",
+      "speed_bps": 1000000000.0,
+      "state": 1.0,
+      "rx_drops": 0.0,
+      "tx_drops": 0.0,
+      "mtu_norm": 0.16666666666666666,
+      "rx_errs_rate": 0.0,
+      "rx_bytes_rate": 0.0,
+      "tx_bytes_rate": 0.0,
+      "rx_err_gradient": 0.0,
+      "tx_util": 0.0,
+      "rx_util": 0.0
+    },
+    {
+      "id": "router:ce2-spoke:interface:eth2",
+      "type": "interface",
+      "name": "eth2",
+      "device_id": "router:ce2-spoke",
+      "speed_bps": 1000000000.0,
+      "state": 1.0,
+      "rx_drops": 0.0,
+      "tx_drops": 0.0,
+      "mtu_norm": 0.16666666666666666,
+      "rx_errs_rate": 0.0,
+      "rx_bytes_rate": 0.0,
+      "tx_bytes_rate": 0.0,
+      "rx_err_gradient": 0.0,
+      "tx_util": 0.0,
+      "rx_util": 0.0
+    },
+    {
+      "id": "router:ce2-spoke:interface:lo",
+      "type": "interface",
+      "name": "lo",
+      "device_id": "router:ce2-spoke",
+      "speed_bps": 1000000000.0,
+      "state": 0.0,
+      "rx_drops": 0.0,
+      "tx_drops": 0.0,
+      "mtu_norm": 7.281777777777778,
+      "rx_errs_rate": 0.0,
+      "rx_bytes_rate": 0.0,
+      "tx_bytes_rate": 0.0,
+      "rx_err_gradient": 0.0,
+      "tx_util": 0.0,
+      "rx_util": 0.0
+    },
+    {
+      "id": "router:ce3-spoke:interface:eth0",
+      "type": "interface",
+      "name": "eth0",
+      "device_id": "router:ce3-spoke",
+      "speed_bps": 1000000000.0,
+      "state": 1.0,
+      "rx_drops": 0.0,
+      "tx_drops": 0.0,
+      "mtu_norm": 0.16666666666666666,
+      "rx_errs_rate": 0.0,
+      "rx_bytes_rate": 112.8,
+      "tx_bytes_rate": 1224.0,
+      "rx_err_gradient": 0.0,
+      "tx_util": 9.792e-06,
+      "rx_util": 9.023999999999999e-07
+    },
+    {
+      "id": "router:ce3-spoke:interface:eth1",
+      "type": "interface",
+      "name": "eth1",
+      "device_id": "router:ce3-spoke",
+      "speed_bps": 1000000000.0,
+      "state": 1.0,
+      "rx_drops": 0.0,
+      "tx_drops": 0.0,
+      "mtu_norm": 0.16666666666666666,
+      "rx_errs_rate": 0.0,
+      "rx_bytes_rate": 60438.4,
+      "tx_bytes_rate": 6582912.0,
+      "rx_err_gradient": 0.0,
+      "tx_util": 0.052663296,
+      "rx_util": 0.0004835072
+    },
+    {
+      "id": "router:ce3-spoke:interface:eth2",
+      "type": "interface",
+      "name": "eth2",
+      "device_id": "router:ce3-spoke",
+      "speed_bps": 1000000000.0,
+      "state": 1.0,
+      "rx_drops": 0.0,
+      "tx_drops": 0.0,
+      "mtu_norm": 0.16666666666666666,
+      "rx_errs_rate": 0.0,
+      "rx_bytes_rate": 6301096.4,
+      "tx_bytes_rate": 60438.4,
+      "rx_err_gradient": 0.0,
+      "tx_util": 0.0004835072,
+      "rx_util": 0.0504087712
+    },
+    {
+      "id": "router:ce3-spoke:interface:lo",
+      "type": "interface",
+      "name": "lo",
+      "device_id": "router:ce3-spoke",
+      "speed_bps": 1000000000.0,
+      "state": 0.0,
+      "rx_drops": 0.0,
+      "tx_drops": 0.0,
+      "mtu_norm": 7.281777777777778,
+      "rx_errs_rate": 0.0,
+      "rx_bytes_rate": 0.0,
+      "tx_bytes_rate": 0.0,
+      "rx_err_gradient": 0.0,
+      "tx_util": 0.0,
+      "rx_util": 0.0
+    },
+    {
+      "id": "router:p1:interface:eth0",
+      "type": "interface",
+      "name": "eth0",
+      "device_id": "router:p1",
+      "speed_bps": 1000000000.0,
+      "state": 1.0,
+      "rx_drops": 0.0,
+      "tx_drops": 0.0,
+      "mtu_norm": 0.16666666666666666,
+      "rx_errs_rate": 0.0,
+      "rx_bytes_rate": 112.8,
+      "tx_bytes_rate": 1325.0,
+      "rx_err_gradient": 0.0,
+      "tx_util": 1.06e-05,
+      "rx_util": 9.023999999999999e-07
+    },
+    {
+      "id": "router:p1:interface:eth1",
+      "type": "interface",
+      "name": "eth1",
+      "device_id": "router:p1",
+      "speed_bps": 1000000000.0,
+      "state": 1.0,
+      "rx_drops": 0.0,
+      "tx_drops": 0.0,
+      "mtu_norm": 0.16666666666666666,
+      "rx_errs_rate": 0.0,
+      "rx_bytes_rate": 6543777.6,
+      "tx_bytes_rate": 70716.53333333333,
+      "rx_err_gradient": 0.0,
+      "tx_util": 0.0005657322666666666,
+      "rx_util": 0.0523502208
+    },
+    {
+      "id": "router:p1:interface:eth2",
+      "type": "interface",
+      "name": "eth2",
+      "device_id": "router:p1",
+      "speed_bps": 1000000000.0,
+      "state": 1.0,
+      "rx_drops": 0.0,
+      "tx_drops": 0.0,
+      "mtu_norm": 0.16666666666666666,
+      "rx_errs_rate": 0.0,
+      "rx_bytes_rate": 46.733333333333334,
+      "tx_bytes_rate": 51.666666666666664,
+      "rx_err_gradient": 0.0,
+      "tx_util": 4.1333333333333333e-07,
+      "rx_util": 3.738666666666667e-07
+    },
+    {
+      "id": "router:p1:interface:eth3",
+      "type": "interface",
+      "name": "eth3",
+      "device_id": "router:p1",
+      "speed_bps": 1000000000.0,
+      "state": 1.0,
+      "rx_drops": 0.0,
+      "tx_drops": 0.0,
+      "mtu_norm": 0.16666666666666666,
+      "rx_errs_rate": 0.0,
+      "rx_bytes_rate": 6543796.0,
+      "tx_bytes_rate": 66928.13333333333,
+      "rx_err_gradient": 0.0,
+      "tx_util": 0.0005354250666666666,
+      "rx_util": 0.052350368
+    },
+    {
+      "id": "router:p1:interface:eth4",
+      "type": "interface",
+      "name": "eth4",
+      "device_id": "router:p1",
+      "speed_bps": 1000000000.0,
+      "state": 1.0,
+      "rx_drops": 0.0,
+      "tx_drops": 0.0,
+      "mtu_norm": 0.16666666666666666,
+      "rx_errs_rate": 0.0,
+      "rx_bytes_rate": 39.53333333333333,
+      "tx_bytes_rate": 47.8,
+      "rx_err_gradient": 0.0,
+      "tx_util": 3.824e-07,
+      "rx_util": 3.1626666666666664e-07
+    },
+    {
+      "id": "router:p1:interface:eth5",
+      "type": "interface",
+      "name": "eth5",
+      "device_id": "router:p1",
+      "speed_bps": 1000000000.0,
+      "state": 1.0,
+      "rx_drops": 0.0,
+      "tx_drops": 0.0,
+      "mtu_norm": 0.16666666666666666,
+      "rx_errs_rate": 0.0,
+      "rx_bytes_rate": 141202.13333333333,
+      "tx_bytes_rate": 13052673.333333334,
+      "rx_err_gradient": 0.0,
+      "tx_util": 0.10442138666666667,
+      "rx_util": 0.0011296170666666666
+    },
+    {
+      "id": "router:p1:interface:lo",
+      "type": "interface",
+      "name": "lo",
+      "device_id": "router:p1",
+      "speed_bps": 1000000000.0,
+      "state": 0.0,
+      "rx_drops": 0.0,
+      "tx_drops": 0.0,
+      "mtu_norm": 7.281777777777778,
+      "rx_errs_rate": 0.0,
+      "rx_bytes_rate": 0.0,
+      "tx_bytes_rate": 0.0,
+      "rx_err_gradient": 0.0,
+      "tx_util": 0.0,
+      "rx_util": 0.0
+    },
+    {
+      "id": "router:p2:interface:eth0",
+      "type": "interface",
+      "name": "eth0",
+      "device_id": "router:p2",
+      "speed_bps": 1000000000.0,
+      "state": 1.0,
+      "rx_drops": 0.0,
+      "tx_drops": 0.0,
+      "mtu_norm": 0.16666666666666666,
+      "rx_errs_rate": 0.0,
+      "rx_bytes_rate": 104.0,
+      "tx_bytes_rate": 1270.7333333333333,
+      "rx_err_gradient": 0.0,
+      "tx_util": 1.0165866666666667e-05,
+      "rx_util": 8.32e-07
+    },
+    {
+      "id": "router:p2:interface:eth1",
+      "type": "interface",
+      "name": "eth1",
+      "device_id": "router:p2",
+      "speed_bps": 1000000000.0,
+      "state": 1.0,
+      "rx_drops": 0.0,
+      "tx_drops": 0.0,
+      "mtu_norm": 0.16666666666666666,
+      "rx_errs_rate": 0.0,
+      "rx_bytes_rate": 71688.93333333333,
+      "tx_bytes_rate": 6635942.933333334,
+      "rx_err_gradient": 0.0,
+      "tx_util": 0.05308754346666667,
+      "rx_util": 0.0005735114666666666
+    },
+    {
+      "id": "router:p2:interface:eth2",
+      "type": "interface",
+      "name": "eth2",
+      "device_id": "router:p2",
+      "speed_bps": 1000000000.0,
+      "state": 1.0,
+      "rx_drops": 0.0,
+      "tx_drops": 0.0,
+      "mtu_norm": 0.16666666666666666,
+      "rx_errs_rate": 0.0,
+      "rx_bytes_rate": 35.06666666666666,
+      "tx_bytes_rate": 40.53333333333333,
+      "rx_err_gradient": 0.0,
+      "tx_util": 3.2426666666666666e-07,
+      "rx_util": 2.805333333333333e-07
+    },
+    {
+      "id": "router:p2:interface:eth3",
+      "type": "interface",
+      "name": "eth3",
+      "device_id": "router:p2",
+      "speed_bps": 1000000000.0,
+      "state": 1.0,
+      "rx_drops": 0.0,
+      "tx_drops": 0.0,
+      "mtu_norm": 0.16666666666666666,
+      "rx_errs_rate": 0.0,
+      "rx_bytes_rate": 40.53333333333333,
+      "tx_bytes_rate": 40.53333333333333,
+      "rx_err_gradient": 0.0,
+      "tx_util": 3.2426666666666666e-07,
+      "rx_util": 3.2426666666666666e-07
+    },
+    {
+      "id": "router:p2:interface:eth4",
+      "type": "interface",
+      "name": "eth4",
+      "device_id": "router:p2",
+      "speed_bps": 1000000000.0,
+      "state": 1.0,
+      "rx_drops": 0.0,
+      "tx_drops": 0.0,
+      "mtu_norm": 0.16666666666666666,
+      "rx_errs_rate": 0.0,
+      "rx_bytes_rate": 6635944.533333333,
+      "tx_bytes_rate": 68012.0,
+      "rx_err_gradient": 0.0,
+      "tx_util": 0.000544096,
+      "rx_util": 0.05308755626666667
+    },
+    {
+      "id": "router:p2:interface:lo",
+      "type": "interface",
+      "name": "lo",
+      "device_id": "router:p2",
+      "speed_bps": 1000000000.0,
+      "state": 0.0,
+      "rx_drops": 0.0,
+      "tx_drops": 0.0,
+      "mtu_norm": 7.281777777777778,
+      "rx_errs_rate": 0.0,
+      "rx_bytes_rate": 0.0,
+      "tx_bytes_rate": 0.0,
+      "rx_err_gradient": 0.0,
+      "tx_util": 0.0,
+      "rx_util": 0.0
+    },
+    {
+      "id": "router:p3:interface:eth0",
+      "type": "interface",
+      "name": "eth0",
+      "device_id": "router:p3",
+      "speed_bps": 1000000000.0,
+      "state": 1.0,
+      "rx_drops": 0.0,
+      "tx_drops": 0.0,
+      "mtu_norm": 0.16666666666666666,
+      "rx_errs_rate": 0.0,
+      "rx_bytes_rate": 104.0,
+      "tx_bytes_rate": 1322.8666666666666,
+      "rx_err_gradient": 0.0,
+      "tx_util": 1.0582933333333332e-05,
+      "rx_util": 8.32e-07
+    },
+    {
+      "id": "router:p3:interface:eth1",
+      "type": "interface",
+      "name": "eth1",
+      "device_id": "router:p3",
+      "speed_bps": 1000000000.0,
+      "state": 1.0,
+      "rx_drops": 0.0,
+      "tx_drops": 0.0,
+      "mtu_norm": 0.16666666666666666,
+      "rx_errs_rate": 0.0,
+      "rx_bytes_rate": 43.333333333333336,
+      "tx_bytes_rate": 38.93333333333333,
+      "rx_err_gradient": 0.0,
+      "tx_util": 3.1146666666666665e-07,
+      "rx_util": 3.466666666666667e-07
+    },
+    {
+      "id": "router:p3:interface:eth2",
+      "type": "interface",
+      "name": "eth2",
+      "device_id": "router:p3",
+      "speed_bps": 1000000000.0,
+      "state": 1.0,
+      "rx_drops": 0.0,
+      "tx_drops": 0.0,
+      "mtu_norm": 0.16666666666666666,
+      "rx_errs_rate": 0.0,
+      "rx_bytes_rate": 46.2,
+      "tx_bytes_rate": 46.733333333333334,
+      "rx_err_gradient": 0.0,
+      "tx_util": 3.738666666666667e-07,
+      "rx_util": 3.6960000000000003e-07
+    },
+    {
+      "id": "router:p3:interface:eth3",
+      "type": "interface",
+      "name": "eth3",
+      "device_id": "router:p3",
+      "speed_bps": 1000000000.0,
+      "state": 1.0,
+      "rx_drops": 0.0,
+      "tx_drops": 0.0,
+      "mtu_norm": 0.16666666666666666,
+      "rx_errs_rate": 0.0,
+      "rx_bytes_rate": 40.53333333333333,
+      "tx_bytes_rate": 40.53333333333333,
+      "rx_err_gradient": 0.0,
+      "tx_util": 3.2426666666666666e-07,
+      "rx_util": 3.2426666666666666e-07
+    },
+    {
+      "id": "router:p3:interface:eth4",
+      "type": "interface",
+      "name": "eth4",
+      "device_id": "router:p3",
+      "speed_bps": 1000000000.0,
+      "state": 1.0,
+      "rx_drops": 0.0,
+      "tx_drops": 0.0,
+      "mtu_norm": 0.16666666666666666,
+      "rx_errs_rate": 0.0,
+      "rx_bytes_rate": 41.266666666666666,
+      "tx_bytes_rate": 50.6,
+      "rx_err_gradient": 0.0,
+      "tx_util": 4.048e-07,
+      "rx_util": 3.301333333333333e-07
+    },
+    {
+      "id": "router:p3:interface:lo",
+      "type": "interface",
+      "name": "lo",
+      "device_id": "router:p3",
+      "speed_bps": 1000000000.0,
+      "state": 0.0,
+      "rx_drops": 0.0,
+      "tx_drops": 0.0,
+      "mtu_norm": 7.281777777777778,
+      "rx_errs_rate": 0.0,
+      "rx_bytes_rate": 0.0,
+      "tx_bytes_rate": 0.0,
+      "rx_err_gradient": 0.0,
+      "tx_util": 0.0,
+      "rx_util": 0.0
+    },
+    {
+      "id": "router:p4:interface:eth0",
+      "type": "interface",
+      "name": "eth0",
+      "device_id": "router:p4",
+      "speed_bps": 1000000000.0,
+      "state": 1.0,
+      "rx_drops": 0.0,
+      "tx_drops": 0.0,
+      "mtu_norm": 0.16666666666666666,
+      "rx_errs_rate": 0.0,
+      "rx_bytes_rate": 112.8,
+      "tx_bytes_rate": 1317.1598444444437,
+      "rx_err_gradient": 0.0,
+      "tx_util": 1.053727875555555e-05,
+      "rx_util": 9.023999999999999e-07
+    },
+    {
+      "id": "router:p4:interface:eth1",
+      "type": "interface",
+      "name": "eth1",
+      "device_id": "router:p4",
+      "speed_bps": 1000000000.0,
+      "state": 1.0,
+      "rx_drops": 0.0,
+      "tx_drops": 0.0,
+      "mtu_norm": 0.16666666666666666,
+      "rx_errs_rate": 0.0,
+      "rx_bytes_rate": 28.536568888889935,
+      "tx_bytes_rate": 23.93655111110614,
+      "rx_err_gradient": 0.0,
+      "tx_util": 1.9149240888884911e-07,
+      "rx_util": 2.2829255111111948e-07
+    },
+    {
+      "id": "router:p4:interface:eth2",
+      "type": "interface",
+      "name": "eth2",
+      "device_id": "router:p4",
+      "speed_bps": 1000000000.0,
+      "state": 1.0,
+      "rx_drops": 0.0,
+      "tx_drops": 0.0,
+      "mtu_norm": 0.16666666666666666,
+      "rx_errs_rate": 0.0,
+      "rx_bytes_rate": 28.314622222220834,
+      "tx_bytes_rate": 23.71460444443704,
+      "rx_err_gradient": 0.0,
+      "tx_util": 1.8971683555549632e-07,
+      "rx_util": 2.2651697777776668e-07
+    },
+    {
+      "id": "router:p4:interface:eth3",
+      "type": "interface",
+      "name": "eth3",
+      "device_id": "router:p4",
+      "speed_bps": 1000000000.0,
+      "state": 1.0,
+      "rx_drops": 0.0,
+      "tx_drops": 0.0,
+      "mtu_norm": 0.16666666666666666,
+      "rx_errs_rate": 0.0,
+      "rx_bytes_rate": 28.314622219403585,
+      "tx_bytes_rate": 23.71460418701172,
+      "rx_err_gradient": 0.0,
+      "tx_util": 1.8971683349609376e-07,
+      "rx_util": 2.2651697775522867e-07
+    },
+    {
+      "id": "router:p4:interface:eth4",
+      "type": "interface",
+      "name": "eth4",
+      "device_id": "router:p4",
+      "speed_bps": 1000000000.0,
+      "state": 1.0,
+      "rx_drops": 0.0,
+      "tx_drops": 0.0,
+      "mtu_norm": 0.16666666666666666,
+      "rx_errs_rate": 0.0,
+      "rx_bytes_rate": 28.18779602050781,
+      "tx_bytes_rate": 23.936551109949747,
+      "rx_err_gradient": 0.0,
+      "tx_util": 1.9149240887959798e-07,
+      "rx_util": 2.255023681640625e-07
+    },
+    {
+      "id": "router:p4:interface:lo",
+      "type": "interface",
+      "name": "lo",
+      "device_id": "router:p4",
+      "speed_bps": 1000000000.0,
+      "state": 0.0,
+      "rx_drops": 0.0,
+      "tx_drops": 0.0,
+      "mtu_norm": 7.281777777777778,
+      "rx_errs_rate": 0.0,
+      "rx_bytes_rate": 0.0,
+      "tx_bytes_rate": 0.0,
+      "rx_err_gradient": 0.0,
+      "tx_util": 0.0,
+      "rx_util": 0.0
+    },
+    {
+      "id": "router:pe1:interface:eth0",
+      "type": "interface",
+      "name": "eth0",
+      "device_id": "router:pe1",
+      "speed_bps": 1000000000.0,
+      "state": 1.0,
+      "rx_drops": 0.0,
+      "tx_drops": 0.0,
+      "mtu_norm": 0.16666666666666666,
+      "rx_errs_rate": 0.0,
+      "rx_bytes_rate": 112.8,
+      "tx_bytes_rate": 1290.2,
+      "rx_err_gradient": 0.0,
+      "tx_util": 1.03216e-05,
+      "rx_util": 9.023999999999999e-07
+    },
+    {
+      "id": "router:pe1:interface:eth1",
+      "type": "interface",
+      "name": "eth1",
+      "device_id": "router:pe1",
+      "speed_bps": 1000000000.0,
+      "state": 1.0,
+      "rx_drops": 0.0,
+      "tx_drops": 0.0,
+      "mtu_norm": 0.16666666666666666,
+      "rx_errs_rate": 0.0,
+      "rx_bytes_rate": 66863.46666666666,
+      "tx_bytes_rate": 6543796.0,
+      "rx_err_gradient": 0.0,
+      "tx_util": 0.052350368,
+      "rx_util": 0.0005349077333333332
+    },
+    {
+      "id": "router:pe1:interface:eth2",
+      "type": "interface",
+      "name": "eth2",
+      "device_id": "router:pe1",
+      "speed_bps": 1000000000.0,
+      "state": 1.0,
+      "rx_drops": 0.0,
+      "tx_drops": 0.0,
+      "mtu_norm": 0.16666666666666666,
+      "rx_errs_rate": 0.0,
+      "rx_bytes_rate": 6491482.666666667,
+      "tx_bytes_rate": 59593.6,
+      "rx_err_gradient": 0.0,
+      "tx_util": 0.0004767488,
+      "rx_util": 0.051931861333333336
+    },
+    {
+      "id": "router:pe1:interface:lo",
+      "type": "interface",
+      "name": "lo",
+      "device_id": "router:pe1",
+      "speed_bps": 1000000000.0,
+      "state": 0.0,
+      "rx_drops": 0.0,
+      "tx_drops": 0.0,
+      "mtu_norm": 7.281777777777778,
+      "rx_errs_rate": 0.0,
+      "rx_bytes_rate": 0.0,
+      "tx_bytes_rate": 0.0,
+      "rx_err_gradient": 0.0,
+      "tx_util": 0.0,
+      "rx_util": 0.0
+    },
+    {
+      "id": "router:pe2:interface:eth0",
+      "type": "interface",
+      "name": "eth0",
+      "device_id": "router:pe2",
+      "speed_bps": 1000000000.0,
+      "state": 1.0,
+      "rx_drops": 0.0,
+      "tx_drops": 0.0,
+      "mtu_norm": 0.16666666666666666,
+      "rx_errs_rate": 0.0,
+      "rx_bytes_rate": 108.39999999999999,
+      "tx_bytes_rate": 1318.8,
+      "rx_err_gradient": 0.0,
+      "tx_util": 1.05504e-05,
+      "rx_util": 8.671999999999999e-07
+    },
+    {
+      "id": "router:pe2:interface:eth1",
+      "type": "interface",
+      "name": "eth1",
+      "device_id": "router:pe2",
+      "speed_bps": 1000000000.0,
+      "state": 1.0,
+      "rx_drops": 0.0,
+      "tx_drops": 0.0,
+      "mtu_norm": 0.16666666666666666,
+      "rx_errs_rate": 0.0,
+      "rx_bytes_rate": 13052673.333333334,
+      "tx_bytes_rate": 141176.13333333333,
+      "rx_err_gradient": 0.0,
+      "tx_util": 0.0011294090666666666,
+      "rx_util": 0.10442138666666667
+    },
+    {
+      "id": "router:pe2:interface:eth2",
+      "type": "interface",
+      "name": "eth2",
+      "device_id": "router:pe2",
+      "speed_bps": 1000000000.0,
+      "state": 1.0,
+      "rx_drops": 0.0,
+      "tx_drops": 0.0,
+      "mtu_norm": 0.16666666666666666,
+      "rx_errs_rate": 0.0,
+      "rx_bytes_rate": 38.93333333333333,
+      "tx_bytes_rate": 43.333333333333336,
+      "rx_err_gradient": 0.0,
+      "tx_util": 3.466666666666667e-07,
+      "rx_util": 3.1146666666666665e-07
+    },
+    {
+      "id": "router:pe2:interface:eth3",
+      "type": "interface",
+      "name": "eth3",
+      "device_id": "router:pe2",
+      "speed_bps": 1000000000.0,
+      "state": 1.0,
+      "rx_drops": 0.0,
+      "tx_drops": 0.0,
+      "mtu_norm": 0.16666666666666666,
+      "rx_errs_rate": 0.0,
+      "rx_bytes_rate": 119424.8,
+      "tx_bytes_rate": 12982965.333333334,
+      "rx_err_gradient": 0.0,
+      "tx_util": 0.10386372266666667,
+      "rx_util": 0.0009553984
+    },
+    {
+      "id": "router:pe2:interface:lo",
+      "type": "interface",
+      "name": "lo",
+      "device_id": "router:pe2",
+      "speed_bps": 1000000000.0,
+      "state": 0.0,
+      "rx_drops": 0.0,
+      "tx_drops": 0.0,
+      "mtu_norm": 7.281777777777778,
+      "rx_errs_rate": 0.0,
+      "rx_bytes_rate": 0.0,
+      "tx_bytes_rate": 0.0,
+      "rx_err_gradient": 0.0,
+      "tx_util": 0.0,
+      "rx_util": 0.0
+    },
+    {
+      "id": "router:pe3:interface:eth0",
+      "type": "interface",
+      "name": "eth0",
+      "device_id": "router:pe3",
+      "speed_bps": 1000000000.0,
+      "state": 1.0,
+      "rx_drops": 0.0,
+      "tx_drops": 0.0,
+      "mtu_norm": 0.16666666666666666,
+      "rx_errs_rate": 0.0,
+      "rx_bytes_rate": 112.8,
+      "tx_bytes_rate": 1334.2215777777135,
+      "rx_err_gradient": 0.0,
+      "tx_util": 1.0673772622221709e-05,
+      "rx_util": 9.023999999999999e-07
+    },
+    {
+      "id": "router:pe3:interface:eth1",
+      "type": "interface",
+      "name": "eth1",
+      "device_id": "router:pe3",
+      "speed_bps": 1000000000.0,
+      "state": 1.0,
+      "rx_drops": 0.0,
+      "tx_drops": 0.0,
+      "mtu_norm": 0.16666666666666666,
+      "rx_errs_rate": 0.0,
+      "rx_bytes_rate": 25.166844447453816,
+      "tx_bytes_rate": 28.52262217203776,
+      "rx_err_gradient": 0.0,
+      "tx_util": 2.2818097737630208e-07,
+      "rx_util": 2.0133475557963053e-07
+    },
+    {
+      "id": "router:pe3:interface:eth2",
+      "type": "interface",
+      "name": "eth2",
+      "device_id": "router:pe3",
+      "speed_bps": 1000000000.0,
+      "state": 1.0,
+      "rx_drops": 0.0,
+      "tx_drops": 0.0,
+      "mtu_norm": 0.16666666666666666,
+      "rx_errs_rate": 0.0,
+      "rx_bytes_rate": 0.0,
+      "tx_bytes_rate": 0.0,
+      "rx_err_gradient": 0.0,
+      "tx_util": 0.0,
+      "rx_util": 0.0
+    },
+    {
+      "id": "router:pe3:interface:lo",
+      "type": "interface",
+      "name": "lo",
+      "device_id": "router:pe3",
+      "speed_bps": 1000000000.0,
+      "state": 0.0,
+      "rx_drops": 0.0,
+      "tx_drops": 0.0,
+      "mtu_norm": 7.281777777777778,
+      "rx_errs_rate": 0.0,
+      "rx_bytes_rate": 0.0,
+      "tx_bytes_rate": 0.0,
+      "rx_err_gradient": 0.0,
+      "tx_util": 0.0,
+      "rx_util": 0.0
+    },
+    {
+      "id": "router:pe4:interface:eth0",
+      "type": "interface",
+      "name": "eth0",
+      "device_id": "router:pe4",
+      "speed_bps": 1000000000.0,
+      "state": 1.0,
+      "rx_drops": 0.0,
+      "tx_drops": 0.0,
+      "mtu_norm": 0.16666666666666666,
+      "rx_errs_rate": 0.0,
+      "rx_bytes_rate": 108.69802666666607,
+      "tx_bytes_rate": 1338.5920711110036,
+      "rx_err_gradient": 0.0,
+      "tx_util": 1.0708736568888029e-05,
+      "rx_util": 8.695842133333286e-07
+    },
+    {
+      "id": "router:pe4:interface:eth1",
+      "type": "interface",
+      "name": "eth1",
+      "device_id": "router:pe4",
+      "speed_bps": 1000000000.0,
+      "state": 1.0,
+      "rx_drops": 0.0,
+      "tx_drops": 0.0,
+      "mtu_norm": 0.16666666666666666,
+      "rx_errs_rate": 0.0,
+      "rx_bytes_rate": 67554.57322666646,
+      "tx_bytes_rate": 6629689.564800008,
+      "rx_err_gradient": 0.0,
+      "tx_util": 0.053037516518400066,
+      "rx_util": 0.0005404365858133317
+    },
+    {
+      "id": "router:pe4:interface:eth2",
+      "type": "interface",
+      "name": "eth2",
+      "device_id": "router:pe4",
+      "speed_bps": 1000000000.0,
+      "state": 1.0,
+      "rx_drops": 0.0,
+      "tx_drops": 0.0,
+      "mtu_norm": 0.16666666666666666,
+      "rx_errs_rate": 0.0,
+      "rx_bytes_rate": 6576719.186488851,
+      "tx_bytes_rate": 60226.19797333876,
+      "rx_err_gradient": 0.0,
+      "tx_util": 0.0004818095837867101,
+      "rx_util": 0.05261375349191081
+    },
+    {
+      "id": "router:pe4:interface:lo",
+      "type": "interface",
+      "name": "lo",
+      "device_id": "router:pe4",
+      "speed_bps": 1000000000.0,
+      "state": 0.0,
+      "rx_drops": 0.0,
+      "tx_drops": 0.0,
+      "mtu_norm": 7.281777777777778,
+      "rx_errs_rate": 0.0,
+      "rx_bytes_rate": 0.0,
+      "tx_bytes_rate": 0.0,
+      "rx_err_gradient": 0.0,
+      "tx_util": 0.0,
+      "rx_util": 0.0
+    },
+    {
+      "id": "router:rr1:interface:eth0",
+      "type": "interface",
+      "name": "eth0",
+      "device_id": "router:rr1",
+      "speed_bps": 1000000000.0,
+      "state": 1.0,
+      "rx_drops": 0.0,
+      "tx_drops": 0.0,
+      "mtu_norm": 0.16666666666666666,
+      "rx_errs_rate": 0.0,
+      "rx_bytes_rate": 111.73461333333204,
+      "tx_bytes_rate": 1308.858524444451,
+      "rx_err_gradient": 0.0,
+      "tx_util": 1.0470868195555607e-05,
+      "rx_util": 8.938769066666562e-07
+    },
+    {
+      "id": "router:rr1:interface:eth1",
+      "type": "interface",
+      "name": "eth1",
+      "device_id": "router:rr1",
+      "speed_bps": 1000000000.0,
+      "state": 1.0,
+      "rx_drops": 0.0,
+      "tx_drops": 0.0,
+      "mtu_norm": 0.16666666666666666,
+      "rx_errs_rate": 0.0,
+      "rx_bytes_rate": 30.743182222219183,
+      "tx_bytes_rate": 26.600177777775873,
+      "rx_err_gradient": 0.0,
+      "tx_util": 2.12801422222207e-07,
+      "rx_util": 2.459454577777535e-07
+    },
+    {
+      "id": "router:rr1:interface:eth2",
+      "type": "interface",
+      "name": "eth2",
+      "device_id": "router:rr1",
+      "speed_bps": 1000000000.0,
+      "state": 1.0,
+      "rx_drops": 0.0,
+      "tx_drops": 0.0,
+      "mtu_norm": 0.16666666666666666,
+      "rx_errs_rate": 0.0,
+      "rx_bytes_rate": 30.33852444444783,
+      "tx_bytes_rate": 34.14254222221983,
+      "rx_err_gradient": 0.0,
+      "tx_util": 2.7314033777775865e-07,
+      "rx_util": 2.4270819555558267e-07
+    },
+    {
+      "id": "router:rr1:interface:lo",
+      "type": "interface",
+      "name": "lo",
+      "device_id": "router:rr1",
+      "speed_bps": 1000000000.0,
+      "state": 0.0,
+      "rx_drops": 0.0,
+      "tx_drops": 0.0,
+      "mtu_norm": 7.281777777777778,
+      "rx_errs_rate": 0.0,
+      "rx_bytes_rate": 0.0,
+      "tx_bytes_rate": 0.0,
+      "rx_err_gradient": 0.0,
+      "tx_util": 0.0,
+      "rx_util": 0.0
+    },
+    {
+      "id": "router:rr2:interface:eth0",
+      "type": "interface",
+      "name": "eth0",
+      "device_id": "router:rr2",
+      "speed_bps": 1000000000.0,
+      "state": 1.0,
+      "rx_drops": 0.0,
+      "tx_drops": 0.0,
+      "mtu_norm": 0.16666666666666666,
+      "rx_errs_rate": 0.0,
+      "rx_bytes_rate": 112.8,
+      "tx_bytes_rate": 1262.0666666666666,
+      "rx_err_gradient": 0.0,
+      "tx_util": 1.0096533333333332e-05,
+      "rx_util": 9.023999999999999e-07
+    },
+    {
+      "id": "router:rr2:interface:eth1",
+      "type": "interface",
+      "name": "eth1",
+      "device_id": "router:rr2",
+      "speed_bps": 1000000000.0,
+      "state": 1.0,
+      "rx_drops": 0.0,
+      "tx_drops": 0.0,
+      "mtu_norm": 0.16666666666666666,
+      "rx_errs_rate": 0.0,
+      "rx_bytes_rate": 37.86666666666667,
+      "tx_bytes_rate": 43.333333333333336,
+      "rx_err_gradient": 0.0,
+      "tx_util": 3.466666666666667e-07,
+      "rx_util": 3.0293333333333335e-07
+    },
+    {
+      "id": "router:rr2:interface:eth2",
+      "type": "interface",
+      "name": "eth2",
+      "device_id": "router:rr2",
+      "speed_bps": 1000000000.0,
+      "state": 1.0,
+      "rx_drops": 0.0,
+      "tx_drops": 0.0,
+      "mtu_norm": 0.16666666666666666,
+      "rx_errs_rate": 0.0,
+      "rx_bytes_rate": 50.6,
+      "tx_bytes_rate": 46.733333333333334,
+      "rx_err_gradient": 0.0,
+      "tx_util": 3.738666666666667e-07,
+      "rx_util": 4.048e-07
+    },
+    {
+      "id": "router:rr2:interface:lo",
+      "type": "interface",
+      "name": "lo",
+      "device_id": "router:rr2",
+      "speed_bps": 1000000000.0,
+      "state": 0.0,
+      "rx_drops": 0.0,
+      "tx_drops": 0.0,
+      "mtu_norm": 7.281777777777778,
+      "rx_errs_rate": 0.0,
+      "rx_bytes_rate": 0.0,
+      "tx_bytes_rate": 0.0,
+      "rx_err_gradient": 0.0,
+      "tx_util": 0.0,
+      "rx_util": 0.0
+    }
+  ],
+  "edges": [
+    {
+      "source": "router:ce1-hub",
+      "target": "router:ce1-hub:interface:eth0",
+      "relation": "has_interface"
+    },
+    {
+      "source": "router:ce1-hub:interface:eth0",
+      "target": "router:ce1-hub",
+      "relation": "interface_of"
+    },
+    {
+      "source": "router:ce1-hub",
+      "target": "router:ce1-hub:interface:eth1",
+      "relation": "has_interface"
+    },
+    {
+      "source": "router:ce1-hub:interface:eth1",
+      "target": "router:ce1-hub",
+      "relation": "interface_of"
+    },
+    {
+      "source": "router:ce1-hub",
+      "target": "router:ce1-hub:interface:eth2",
+      "relation": "has_interface"
+    },
+    {
+      "source": "router:ce1-hub:interface:eth2",
+      "target": "router:ce1-hub",
+      "relation": "interface_of"
+    },
+    {
+      "source": "router:ce1-hub",
+      "target": "router:ce1-hub:interface:lo",
+      "relation": "has_interface"
+    },
+    {
+      "source": "router:ce1-hub:interface:lo",
+      "target": "router:ce1-hub",
+      "relation": "interface_of"
+    },
+    {
+      "source": "router:ce1-spoke",
+      "target": "router:ce1-spoke:interface:eth0",
+      "relation": "has_interface"
+    },
+    {
+      "source": "router:ce1-spoke:interface:eth0",
+      "target": "router:ce1-spoke",
+      "relation": "interface_of"
+    },
+    {
+      "source": "router:ce1-spoke",
+      "target": "router:ce1-spoke:interface:eth1",
+      "relation": "has_interface"
+    },
+    {
+      "source": "router:ce1-spoke:interface:eth1",
+      "target": "router:ce1-spoke",
+      "relation": "interface_of"
+    },
+    {
+      "source": "router:ce1-spoke",
+      "target": "router:ce1-spoke:interface:eth2",
+      "relation": "has_interface"
+    },
+    {
+      "source": "router:ce1-spoke:interface:eth2",
+      "target": "router:ce1-spoke",
+      "relation": "interface_of"
+    },
+    {
+      "source": "router:ce1-spoke",
+      "target": "router:ce1-spoke:interface:lo",
+      "relation": "has_interface"
+    },
+    {
+      "source": "router:ce1-spoke:interface:lo",
+      "target": "router:ce1-spoke",
+      "relation": "interface_of"
+    },
+    {
+      "source": "router:ce2-spoke",
+      "target": "router:ce2-spoke:interface:eth0",
+      "relation": "has_interface"
+    },
+    {
+      "source": "router:ce2-spoke:interface:eth0",
+      "target": "router:ce2-spoke",
+      "relation": "interface_of"
+    },
+    {
+      "source": "router:ce2-spoke",
+      "target": "router:ce2-spoke:interface:eth1",
+      "relation": "has_interface"
+    },
+    {
+      "source": "router:ce2-spoke:interface:eth1",
+      "target": "router:ce2-spoke",
+      "relation": "interface_of"
+    },
+    {
+      "source": "router:ce2-spoke",
+      "target": "router:ce2-spoke:interface:eth2",
+      "relation": "has_interface"
+    },
+    {
+      "source": "router:ce2-spoke:interface:eth2",
+      "target": "router:ce2-spoke",
+      "relation": "interface_of"
+    },
+    {
+      "source": "router:ce2-spoke",
+      "target": "router:ce2-spoke:interface:lo",
+      "relation": "has_interface"
+    },
+    {
+      "source": "router:ce2-spoke:interface:lo",
+      "target": "router:ce2-spoke",
+      "relation": "interface_of"
+    },
+    {
+      "source": "router:ce3-spoke",
+      "target": "router:ce3-spoke:interface:eth0",
+      "relation": "has_interface"
+    },
+    {
+      "source": "router:ce3-spoke:interface:eth0",
+      "target": "router:ce3-spoke",
+      "relation": "interface_of"
+    },
+    {
+      "source": "router:ce3-spoke",
+      "target": "router:ce3-spoke:interface:eth1",
+      "relation": "has_interface"
+    },
+    {
+      "source": "router:ce3-spoke:interface:eth1",
+      "target": "router:ce3-spoke",
+      "relation": "interface_of"
+    },
+    {
+      "source": "router:ce3-spoke",
+      "target": "router:ce3-spoke:interface:eth2",
+      "relation": "has_interface"
+    },
+    {
+      "source": "router:ce3-spoke:interface:eth2",
+      "target": "router:ce3-spoke",
+      "relation": "interface_of"
+    },
+    {
+      "source": "router:ce3-spoke",
+      "target": "router:ce3-spoke:interface:lo",
+      "relation": "has_interface"
+    },
+    {
+      "source": "router:ce3-spoke:interface:lo",
+      "target": "router:ce3-spoke",
+      "relation": "interface_of"
+    },
+    {
+      "source": "router:p1",
+      "target": "router:p1:interface:eth0",
+      "relation": "has_interface"
+    },
+    {
+      "source": "router:p1:interface:eth0",
+      "target": "router:p1",
+      "relation": "interface_of"
+    },
+    {
+      "source": "router:p1",
+      "target": "router:p1:interface:eth1",
+      "relation": "has_interface"
+    },
+    {
+      "source": "router:p1:interface:eth1",
+      "target": "router:p1",
+      "relation": "interface_of"
+    },
+    {
+      "source": "router:p1",
+      "target": "router:p1:interface:eth2",
+      "relation": "has_interface"
+    },
+    {
+      "source": "router:p1:interface:eth2",
+      "target": "router:p1",
+      "relation": "interface_of"
+    },
+    {
+      "source": "router:p1",
+      "target": "router:p1:interface:eth3",
+      "relation": "has_interface"
+    },
+    {
+      "source": "router:p1:interface:eth3",
+      "target": "router:p1",
+      "relation": "interface_of"
+    },
+    {
+      "source": "router:p1",
+      "target": "router:p1:interface:eth4",
+      "relation": "has_interface"
+    },
+    {
+      "source": "router:p1:interface:eth4",
+      "target": "router:p1",
+      "relation": "interface_of"
+    },
+    {
+      "source": "router:p1",
+      "target": "router:p1:interface:eth5",
+      "relation": "has_interface"
+    },
+    {
+      "source": "router:p1:interface:eth5",
+      "target": "router:p1",
+      "relation": "interface_of"
+    },
+    {
+      "source": "router:p1",
+      "target": "router:p1:interface:lo",
+      "relation": "has_interface"
+    },
+    {
+      "source": "router:p1:interface:lo",
+      "target": "router:p1",
+      "relation": "interface_of"
+    },
+    {
+      "source": "router:p2",
+      "target": "router:p2:interface:eth0",
+      "relation": "has_interface"
+    },
+    {
+      "source": "router:p2:interface:eth0",
+      "target": "router:p2",
+      "relation": "interface_of"
+    },
+    {
+      "source": "router:p2",
+      "target": "router:p2:interface:eth1",
+      "relation": "has_interface"
+    },
+    {
+      "source": "router:p2:interface:eth1",
+      "target": "router:p2",
+      "relation": "interface_of"
+    },
+    {
+      "source": "router:p2",
+      "target": "router:p2:interface:eth2",
+      "relation": "has_interface"
+    },
+    {
+      "source": "router:p2:interface:eth2",
+      "target": "router:p2",
+      "relation": "interface_of"
+    },
+    {
+      "source": "router:p2",
+      "target": "router:p2:interface:eth3",
+      "relation": "has_interface"
+    },
+    {
+      "source": "router:p2:interface:eth3",
+      "target": "router:p2",
+      "relation": "interface_of"
+    },
+    {
+      "source": "router:p2",
+      "target": "router:p2:interface:eth4",
+      "relation": "has_interface"
+    },
+    {
+      "source": "router:p2:interface:eth4",
+      "target": "router:p2",
+      "relation": "interface_of"
+    },
+    {
+      "source": "router:p2",
+      "target": "router:p2:interface:lo",
+      "relation": "has_interface"
+    },
+    {
+      "source": "router:p2:interface:lo",
+      "target": "router:p2",
+      "relation": "interface_of"
+    },
+    {
+      "source": "router:p3",
+      "target": "router:p3:interface:eth0",
+      "relation": "has_interface"
+    },
+    {
+      "source": "router:p3:interface:eth0",
+      "target": "router:p3",
+      "relation": "interface_of"
+    },
+    {
+      "source": "router:p3",
+      "target": "router:p3:interface:eth1",
+      "relation": "has_interface"
+    },
+    {
+      "source": "router:p3:interface:eth1",
+      "target": "router:p3",
+      "relation": "interface_of"
+    },
+    {
+      "source": "router:p3",
+      "target": "router:p3:interface:eth2",
+      "relation": "has_interface"
+    },
+    {
+      "source": "router:p3:interface:eth2",
+      "target": "router:p3",
+      "relation": "interface_of"
+    },
+    {
+      "source": "router:p3",
+      "target": "router:p3:interface:eth3",
+      "relation": "has_interface"
+    },
+    {
+      "source": "router:p3:interface:eth3",
+      "target": "router:p3",
+      "relation": "interface_of"
+    },
+    {
+      "source": "router:p3",
+      "target": "router:p3:interface:eth4",
+      "relation": "has_interface"
+    },
+    {
+      "source": "router:p3:interface:eth4",
+      "target": "router:p3",
+      "relation": "interface_of"
+    },
+    {
+      "source": "router:p3",
+      "target": "router:p3:interface:lo",
+      "relation": "has_interface"
+    },
+    {
+      "source": "router:p3:interface:lo",
+      "target": "router:p3",
+      "relation": "interface_of"
+    },
+    {
+      "source": "router:p4",
+      "target": "router:p4:interface:eth0",
+      "relation": "has_interface"
+    },
+    {
+      "source": "router:p4:interface:eth0",
+      "target": "router:p4",
+      "relation": "interface_of"
+    },
+    {
+      "source": "router:p4",
+      "target": "router:p4:interface:eth1",
+      "relation": "has_interface"
+    },
+    {
+      "source": "router:p4:interface:eth1",
+      "target": "router:p4",
+      "relation": "interface_of"
+    },
+    {
+      "source": "router:p4",
+      "target": "router:p4:interface:eth2",
+      "relation": "has_interface"
+    },
+    {
+      "source": "router:p4:interface:eth2",
+      "target": "router:p4",
+      "relation": "interface_of"
+    },
+    {
+      "source": "router:p4",
+      "target": "router:p4:interface:eth3",
+      "relation": "has_interface"
+    },
+    {
+      "source": "router:p4:interface:eth3",
+      "target": "router:p4",
+      "relation": "interface_of"
+    },
+    {
+      "source": "router:p4",
+      "target": "router:p4:interface:eth4",
+      "relation": "has_interface"
+    },
+    {
+      "source": "router:p4:interface:eth4",
+      "target": "router:p4",
+      "relation": "interface_of"
+    },
+    {
+      "source": "router:p4",
+      "target": "router:p4:interface:lo",
+      "relation": "has_interface"
+    },
+    {
+      "source": "router:p4:interface:lo",
+      "target": "router:p4",
+      "relation": "interface_of"
+    },
+    {
+      "source": "router:pe1",
+      "target": "router:pe1:interface:eth0",
+      "relation": "has_interface"
+    },
+    {
+      "source": "router:pe1:interface:eth0",
+      "target": "router:pe1",
+      "relation": "interface_of"
+    },
+    {
+      "source": "router:pe1",
+      "target": "router:pe1:interface:eth1",
+      "relation": "has_interface"
+    },
+    {
+      "source": "router:pe1:interface:eth1",
+      "target": "router:pe1",
+      "relation": "interface_of"
+    },
+    {
+      "source": "router:pe1",
+      "target": "router:pe1:interface:eth2",
+      "relation": "has_interface"
+    },
+    {
+      "source": "router:pe1:interface:eth2",
+      "target": "router:pe1",
+      "relation": "interface_of"
+    },
+    {
+      "source": "router:pe1",
+      "target": "router:pe1:interface:lo",
+      "relation": "has_interface"
+    },
+    {
+      "source": "router:pe1:interface:lo",
+      "target": "router:pe1",
+      "relation": "interface_of"
+    },
+    {
+      "source": "router:pe2",
+      "target": "router:pe2:interface:eth0",
+      "relation": "has_interface"
+    },
+    {
+      "source": "router:pe2:interface:eth0",
+      "target": "router:pe2",
+      "relation": "interface_of"
+    },
+    {
+      "source": "router:pe2",
+      "target": "router:pe2:interface:eth1",
+      "relation": "has_interface"
+    },
+    {
+      "source": "router:pe2:interface:eth1",
+      "target": "router:pe2",
+      "relation": "interface_of"
+    },
+    {
+      "source": "router:pe2",
+      "target": "router:pe2:interface:eth2",
+      "relation": "has_interface"
+    },
+    {
+      "source": "router:pe2:interface:eth2",
+      "target": "router:pe2",
+      "relation": "interface_of"
+    },
+    {
+      "source": "router:pe2",
+      "target": "router:pe2:interface:eth3",
+      "relation": "has_interface"
+    },
+    {
+      "source": "router:pe2:interface:eth3",
+      "target": "router:pe2",
+      "relation": "interface_of"
+    },
+    {
+      "source": "router:pe2",
+      "target": "router:pe2:interface:lo",
+      "relation": "has_interface"
+    },
+    {
+      "source": "router:pe2:interface:lo",
+      "target": "router:pe2",
+      "relation": "interface_of"
+    },
+    {
+      "source": "router:pe3",
+      "target": "router:pe3:interface:eth0",
+      "relation": "has_interface"
+    },
+    {
+      "source": "router:pe3:interface:eth0",
+      "target": "router:pe3",
+      "relation": "interface_of"
+    },
+    {
+      "source": "router:pe3",
+      "target": "router:pe3:interface:eth1",
+      "relation": "has_interface"
+    },
+    {
+      "source": "router:pe3:interface:eth1",
+      "target": "router:pe3",
+      "relation": "interface_of"
+    },
+    {
+      "source": "router:pe3",
+      "target": "router:pe3:interface:eth2",
+      "relation": "has_interface"
+    },
+    {
+      "source": "router:pe3:interface:eth2",
+      "target": "router:pe3",
+      "relation": "interface_of"
+    },
+    {
+      "source": "router:pe3",
+      "target": "router:pe3:interface:lo",
+      "relation": "has_interface"
+    },
+    {
+      "source": "router:pe3:interface:lo",
+      "target": "router:pe3",
+      "relation": "interface_of"
+    },
+    {
+      "source": "router:pe4",
+      "target": "router:pe4:interface:eth0",
+      "relation": "has_interface"
+    },
+    {
+      "source": "router:pe4:interface:eth0",
+      "target": "router:pe4",
+      "relation": "interface_of"
+    },
+    {
+      "source": "router:pe4",
+      "target": "router:pe4:interface:eth1",
+      "relation": "has_interface"
+    },
+    {
+      "source": "router:pe4:interface:eth1",
+      "target": "router:pe4",
+      "relation": "interface_of"
+    },
+    {
+      "source": "router:pe4",
+      "target": "router:pe4:interface:eth2",
+      "relation": "has_interface"
+    },
+    {
+      "source": "router:pe4:interface:eth2",
+      "target": "router:pe4",
+      "relation": "interface_of"
+    },
+    {
+      "source": "router:pe4",
+      "target": "router:pe4:interface:lo",
+      "relation": "has_interface"
+    },
+    {
+      "source": "router:pe4:interface:lo",
+      "target": "router:pe4",
+      "relation": "interface_of"
+    },
+    {
+      "source": "router:rr1",
+      "target": "router:rr1:interface:eth0",
+      "relation": "has_interface"
+    },
+    {
+      "source": "router:rr1:interface:eth0",
+      "target": "router:rr1",
+      "relation": "interface_of"
+    },
+    {
+      "source": "router:rr1",
+      "target": "router:rr1:interface:eth1",
+      "relation": "has_interface"
+    },
+    {
+      "source": "router:rr1:interface:eth1",
+      "target": "router:rr1",
+      "relation": "interface_of"
+    },
+    {
+      "source": "router:rr1",
+      "target": "router:rr1:interface:eth2",
+      "relation": "has_interface"
+    },
+    {
+      "source": "router:rr1:interface:eth2",
+      "target": "router:rr1",
+      "relation": "interface_of"
+    },
+    {
+      "source": "router:rr1",
+      "target": "router:rr1:interface:lo",
+      "relation": "has_interface"
+    },
+    {
+      "source": "router:rr1:interface:lo",
+      "target": "router:rr1",
+      "relation": "interface_of"
+    },
+    {
+      "source": "router:rr2",
+      "target": "router:rr2:interface:eth0",
+      "relation": "has_interface"
+    },
+    {
+      "source": "router:rr2:interface:eth0",
+      "target": "router:rr2",
+      "relation": "interface_of"
+    },
+    {
+      "source": "router:rr2",
+      "target": "router:rr2:interface:eth1",
+      "relation": "has_interface"
+    },
+    {
+      "source": "router:rr2:interface:eth1",
+      "target": "router:rr2",
+      "relation": "interface_of"
+    },
+    {
+      "source": "router:rr2",
+      "target": "router:rr2:interface:eth2",
+      "relation": "has_interface"
+    },
+    {
+      "source": "router:rr2:interface:eth2",
+      "target": "router:rr2",
+      "relation": "interface_of"
+    },
+    {
+      "source": "router:rr2",
+      "target": "router:rr2:interface:lo",
+      "relation": "has_interface"
+    },
+    {
+      "source": "router:rr2:interface:lo",
+      "target": "router:rr2",
+      "relation": "interface_of"
+    },
+    {
+      "source": "router:ce1-hub:interface:eth0",
+      "target": "router:ce1-spoke:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:ce1-spoke:interface:eth0",
+      "target": "router:ce1-hub:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:ce1-hub:interface:eth0",
+      "target": "router:ce2-spoke:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:ce2-spoke:interface:eth0",
+      "target": "router:ce1-hub:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:ce1-spoke:interface:eth0",
+      "target": "router:ce2-spoke:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:ce2-spoke:interface:eth0",
+      "target": "router:ce1-spoke:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:ce1-hub:interface:eth0",
+      "target": "router:ce3-spoke:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:ce3-spoke:interface:eth0",
+      "target": "router:ce1-hub:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:ce2-spoke:interface:eth0",
+      "target": "router:ce3-spoke:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:ce3-spoke:interface:eth0",
+      "target": "router:ce2-spoke:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:ce1-spoke:interface:eth0",
+      "target": "router:ce3-spoke:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:ce3-spoke:interface:eth0",
+      "target": "router:ce1-spoke:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:ce1-hub:interface:eth0",
+      "target": "router:p1:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:p1:interface:eth0",
+      "target": "router:ce1-hub:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:ce3-spoke:interface:eth0",
+      "target": "router:p1:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:p1:interface:eth0",
+      "target": "router:ce3-spoke:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:ce2-spoke:interface:eth0",
+      "target": "router:p1:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:p1:interface:eth0",
+      "target": "router:ce2-spoke:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:ce1-spoke:interface:eth0",
+      "target": "router:p1:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:p1:interface:eth0",
+      "target": "router:ce1-spoke:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:ce1-hub:interface:eth0",
+      "target": "router:p2:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:p2:interface:eth0",
+      "target": "router:ce1-hub:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:p1:interface:eth0",
+      "target": "router:p2:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:p2:interface:eth0",
+      "target": "router:p1:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:ce3-spoke:interface:eth0",
+      "target": "router:p2:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:p2:interface:eth0",
+      "target": "router:ce3-spoke:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:ce2-spoke:interface:eth0",
+      "target": "router:p2:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:p2:interface:eth0",
+      "target": "router:ce2-spoke:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:ce1-spoke:interface:eth0",
+      "target": "router:p2:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:p2:interface:eth0",
+      "target": "router:ce1-spoke:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:p1:interface:eth1",
+      "target": "router:p2:interface:eth1",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:p2:interface:eth1",
+      "target": "router:p1:interface:eth1",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:ce1-hub:interface:eth0",
+      "target": "router:p3:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:p3:interface:eth0",
+      "target": "router:ce1-hub:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:p2:interface:eth0",
+      "target": "router:p3:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:p3:interface:eth0",
+      "target": "router:p2:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:p1:interface:eth0",
+      "target": "router:p3:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:p3:interface:eth0",
+      "target": "router:p1:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:ce3-spoke:interface:eth0",
+      "target": "router:p3:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:p3:interface:eth0",
+      "target": "router:ce3-spoke:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:ce2-spoke:interface:eth0",
+      "target": "router:p3:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:p3:interface:eth0",
+      "target": "router:ce2-spoke:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:ce1-spoke:interface:eth0",
+      "target": "router:p3:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:p3:interface:eth0",
+      "target": "router:ce1-spoke:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:p1:interface:eth2",
+      "target": "router:p3:interface:eth2",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:p3:interface:eth2",
+      "target": "router:p1:interface:eth2",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:ce1-hub:interface:eth0",
+      "target": "router:p4:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:p4:interface:eth0",
+      "target": "router:ce1-hub:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:p3:interface:eth0",
+      "target": "router:p4:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:p4:interface:eth0",
+      "target": "router:p3:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:p2:interface:eth0",
+      "target": "router:p4:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:p4:interface:eth0",
+      "target": "router:p2:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:p1:interface:eth0",
+      "target": "router:p4:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:p4:interface:eth0",
+      "target": "router:p1:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:ce3-spoke:interface:eth0",
+      "target": "router:p4:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:p4:interface:eth0",
+      "target": "router:ce3-spoke:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:ce2-spoke:interface:eth0",
+      "target": "router:p4:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:p4:interface:eth0",
+      "target": "router:ce2-spoke:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:ce1-spoke:interface:eth0",
+      "target": "router:p4:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:p4:interface:eth0",
+      "target": "router:ce1-spoke:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:p2:interface:eth2",
+      "target": "router:p4:interface:eth2",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:p4:interface:eth2",
+      "target": "router:p2:interface:eth2",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:p3:interface:eth3",
+      "target": "router:p4:interface:eth3",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:p4:interface:eth3",
+      "target": "router:p3:interface:eth3",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:ce1-hub:interface:eth0",
+      "target": "router:pe1:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:pe1:interface:eth0",
+      "target": "router:ce1-hub:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:p4:interface:eth0",
+      "target": "router:pe1:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:pe1:interface:eth0",
+      "target": "router:p4:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:p3:interface:eth0",
+      "target": "router:pe1:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:pe1:interface:eth0",
+      "target": "router:p3:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:p2:interface:eth0",
+      "target": "router:pe1:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:pe1:interface:eth0",
+      "target": "router:p2:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:p1:interface:eth0",
+      "target": "router:pe1:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:pe1:interface:eth0",
+      "target": "router:p1:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:ce3-spoke:interface:eth0",
+      "target": "router:pe1:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:pe1:interface:eth0",
+      "target": "router:ce3-spoke:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:ce2-spoke:interface:eth0",
+      "target": "router:pe1:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:pe1:interface:eth0",
+      "target": "router:ce2-spoke:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:ce1-spoke:interface:eth0",
+      "target": "router:pe1:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:pe1:interface:eth0",
+      "target": "router:ce1-spoke:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:p1:interface:eth3",
+      "target": "router:pe1:interface:eth1",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:pe1:interface:eth1",
+      "target": "router:p1:interface:eth3",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:ce1-spoke:interface:eth1",
+      "target": "router:pe1:interface:eth2",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:pe1:interface:eth2",
+      "target": "router:ce1-spoke:interface:eth1",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:ce1-hub:interface:eth0",
+      "target": "router:pe2:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:pe2:interface:eth0",
+      "target": "router:ce1-hub:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:pe1:interface:eth0",
+      "target": "router:pe2:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:pe2:interface:eth0",
+      "target": "router:pe1:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:p4:interface:eth0",
+      "target": "router:pe2:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:pe2:interface:eth0",
+      "target": "router:p4:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:p3:interface:eth0",
+      "target": "router:pe2:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:pe2:interface:eth0",
+      "target": "router:p3:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:p2:interface:eth0",
+      "target": "router:pe2:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:pe2:interface:eth0",
+      "target": "router:p2:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:p1:interface:eth0",
+      "target": "router:pe2:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:pe2:interface:eth0",
+      "target": "router:p1:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:ce3-spoke:interface:eth0",
+      "target": "router:pe2:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:pe2:interface:eth0",
+      "target": "router:ce3-spoke:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:ce2-spoke:interface:eth0",
+      "target": "router:pe2:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:pe2:interface:eth0",
+      "target": "router:ce2-spoke:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:ce1-spoke:interface:eth0",
+      "target": "router:pe2:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:pe2:interface:eth0",
+      "target": "router:ce1-spoke:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:p1:interface:eth5",
+      "target": "router:pe2:interface:eth1",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:pe2:interface:eth1",
+      "target": "router:p1:interface:eth5",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:p3:interface:eth1",
+      "target": "router:pe2:interface:eth2",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:pe2:interface:eth2",
+      "target": "router:p3:interface:eth1",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:ce1-hub:interface:eth1",
+      "target": "router:pe2:interface:eth3",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:pe2:interface:eth3",
+      "target": "router:ce1-hub:interface:eth1",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:ce1-hub:interface:eth0",
+      "target": "router:pe3:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:pe3:interface:eth0",
+      "target": "router:ce1-hub:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:pe2:interface:eth0",
+      "target": "router:pe3:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:pe3:interface:eth0",
+      "target": "router:pe2:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:pe1:interface:eth0",
+      "target": "router:pe3:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:pe3:interface:eth0",
+      "target": "router:pe1:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:p4:interface:eth0",
+      "target": "router:pe3:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:pe3:interface:eth0",
+      "target": "router:p4:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:p3:interface:eth0",
+      "target": "router:pe3:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:pe3:interface:eth0",
+      "target": "router:p3:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:p2:interface:eth0",
+      "target": "router:pe3:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:pe3:interface:eth0",
+      "target": "router:p2:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:p1:interface:eth0",
+      "target": "router:pe3:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:pe3:interface:eth0",
+      "target": "router:p1:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:ce3-spoke:interface:eth0",
+      "target": "router:pe3:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:pe3:interface:eth0",
+      "target": "router:ce3-spoke:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:ce2-spoke:interface:eth0",
+      "target": "router:pe3:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:pe3:interface:eth0",
+      "target": "router:ce2-spoke:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:ce1-spoke:interface:eth0",
+      "target": "router:pe3:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:pe3:interface:eth0",
+      "target": "router:ce1-spoke:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:p4:interface:eth4",
+      "target": "router:pe3:interface:eth1",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:pe3:interface:eth1",
+      "target": "router:p4:interface:eth4",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:ce2-spoke:interface:eth1",
+      "target": "router:pe3:interface:eth2",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:pe3:interface:eth2",
+      "target": "router:ce2-spoke:interface:eth1",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:ce1-hub:interface:eth0",
+      "target": "router:pe4:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:pe4:interface:eth0",
+      "target": "router:ce1-hub:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:pe3:interface:eth0",
+      "target": "router:pe4:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:pe4:interface:eth0",
+      "target": "router:pe3:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:pe2:interface:eth0",
+      "target": "router:pe4:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:pe4:interface:eth0",
+      "target": "router:pe2:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:pe1:interface:eth0",
+      "target": "router:pe4:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:pe4:interface:eth0",
+      "target": "router:pe1:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:p4:interface:eth0",
+      "target": "router:pe4:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:pe4:interface:eth0",
+      "target": "router:p4:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:p3:interface:eth0",
+      "target": "router:pe4:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:pe4:interface:eth0",
+      "target": "router:p3:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:p2:interface:eth0",
+      "target": "router:pe4:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:pe4:interface:eth0",
+      "target": "router:p2:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:p1:interface:eth0",
+      "target": "router:pe4:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:pe4:interface:eth0",
+      "target": "router:p1:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:ce3-spoke:interface:eth0",
+      "target": "router:pe4:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:pe4:interface:eth0",
+      "target": "router:ce3-spoke:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:ce2-spoke:interface:eth0",
+      "target": "router:pe4:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:pe4:interface:eth0",
+      "target": "router:ce2-spoke:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:ce1-spoke:interface:eth0",
+      "target": "router:pe4:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:pe4:interface:eth0",
+      "target": "router:ce1-spoke:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:p2:interface:eth4",
+      "target": "router:pe4:interface:eth1",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:pe4:interface:eth1",
+      "target": "router:p2:interface:eth4",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:ce3-spoke:interface:eth1",
+      "target": "router:pe4:interface:eth2",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:pe4:interface:eth2",
+      "target": "router:ce3-spoke:interface:eth1",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:ce1-hub:interface:eth0",
+      "target": "router:rr1:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:rr1:interface:eth0",
+      "target": "router:ce1-hub:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:pe4:interface:eth0",
+      "target": "router:rr1:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:rr1:interface:eth0",
+      "target": "router:pe4:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:pe3:interface:eth0",
+      "target": "router:rr1:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:rr1:interface:eth0",
+      "target": "router:pe3:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:pe2:interface:eth0",
+      "target": "router:rr1:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:rr1:interface:eth0",
+      "target": "router:pe2:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:pe1:interface:eth0",
+      "target": "router:rr1:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:rr1:interface:eth0",
+      "target": "router:pe1:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:p4:interface:eth0",
+      "target": "router:rr1:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:rr1:interface:eth0",
+      "target": "router:p4:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:p3:interface:eth0",
+      "target": "router:rr1:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:rr1:interface:eth0",
+      "target": "router:p3:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:p2:interface:eth0",
+      "target": "router:rr1:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:rr1:interface:eth0",
+      "target": "router:p2:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:p1:interface:eth0",
+      "target": "router:rr1:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:rr1:interface:eth0",
+      "target": "router:p1:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:ce3-spoke:interface:eth0",
+      "target": "router:rr1:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:rr1:interface:eth0",
+      "target": "router:ce3-spoke:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:ce2-spoke:interface:eth0",
+      "target": "router:rr1:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:rr1:interface:eth0",
+      "target": "router:ce2-spoke:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:ce1-spoke:interface:eth0",
+      "target": "router:rr1:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:rr1:interface:eth0",
+      "target": "router:ce1-spoke:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:p2:interface:eth3",
+      "target": "router:rr1:interface:eth1",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:rr1:interface:eth1",
+      "target": "router:p2:interface:eth3",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:p1:interface:eth4",
+      "target": "router:rr1:interface:eth2",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:rr1:interface:eth2",
+      "target": "router:p1:interface:eth4",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:ce1-hub:interface:eth0",
+      "target": "router:rr2:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:rr2:interface:eth0",
+      "target": "router:ce1-hub:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:rr1:interface:eth0",
+      "target": "router:rr2:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:rr2:interface:eth0",
+      "target": "router:rr1:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:pe4:interface:eth0",
+      "target": "router:rr2:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:rr2:interface:eth0",
+      "target": "router:pe4:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:pe3:interface:eth0",
+      "target": "router:rr2:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:rr2:interface:eth0",
+      "target": "router:pe3:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:pe2:interface:eth0",
+      "target": "router:rr2:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:rr2:interface:eth0",
+      "target": "router:pe2:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:pe1:interface:eth0",
+      "target": "router:rr2:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:rr2:interface:eth0",
+      "target": "router:pe1:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:p4:interface:eth0",
+      "target": "router:rr2:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:rr2:interface:eth0",
+      "target": "router:p4:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:p3:interface:eth0",
+      "target": "router:rr2:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:rr2:interface:eth0",
+      "target": "router:p3:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:p2:interface:eth0",
+      "target": "router:rr2:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:rr2:interface:eth0",
+      "target": "router:p2:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:p1:interface:eth0",
+      "target": "router:rr2:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:rr2:interface:eth0",
+      "target": "router:p1:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:ce3-spoke:interface:eth0",
+      "target": "router:rr2:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:rr2:interface:eth0",
+      "target": "router:ce3-spoke:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:ce2-spoke:interface:eth0",
+      "target": "router:rr2:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:rr2:interface:eth0",
+      "target": "router:ce2-spoke:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:ce1-spoke:interface:eth0",
+      "target": "router:rr2:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:rr2:interface:eth0",
+      "target": "router:ce1-spoke:interface:eth0",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:p4:interface:eth1",
+      "target": "router:rr2:interface:eth1",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:rr2:interface:eth1",
+      "target": "router:p4:interface:eth1",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:p3:interface:eth4",
+      "target": "router:rr2:interface:eth2",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:rr2:interface:eth2",
+      "target": "router:p3:interface:eth4",
+      "relation": "connected_to"
+    },
+    {
+      "source": "router:ce1-spoke",
+      "target": "router:pe2",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:pe2",
+      "target": "router:ce1-spoke",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:p2",
+      "target": "router:pe3",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:pe3",
+      "target": "router:p2",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:p4",
+      "target": "router:rr1",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:rr1",
+      "target": "router:p4",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:p2",
+      "target": "router:pe2",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:pe2",
+      "target": "router:p2",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:ce3-spoke",
+      "target": "router:p1",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:p1",
+      "target": "router:ce3-spoke",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:pe1",
+      "target": "router:rr2",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:rr2",
+      "target": "router:pe1",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:ce1-hub",
+      "target": "router:p3",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:p3",
+      "target": "router:ce1-hub",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:p2",
+      "target": "router:p4",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:p4",
+      "target": "router:p2",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:ce1-hub",
+      "target": "router:pe3",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:pe3",
+      "target": "router:ce1-hub",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:pe4",
+      "target": "router:rr1",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:rr1",
+      "target": "router:pe4",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:ce2-spoke",
+      "target": "router:p2",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:p2",
+      "target": "router:ce2-spoke",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:p1",
+      "target": "router:pe3",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:pe3",
+      "target": "router:p1",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:p2",
+      "target": "router:pe1",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:pe1",
+      "target": "router:p2",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:ce1-spoke",
+      "target": "router:pe3",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:pe3",
+      "target": "router:ce1-spoke",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:pe1",
+      "target": "router:pe3",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:pe3",
+      "target": "router:pe1",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:p1",
+      "target": "router:rr1",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:rr1",
+      "target": "router:p1",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:ce3-spoke",
+      "target": "router:rr2",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:rr2",
+      "target": "router:ce3-spoke",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:p4",
+      "target": "router:pe2",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:pe2",
+      "target": "router:p4",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:pe4",
+      "target": "router:rr2",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:rr2",
+      "target": "router:pe4",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:ce1-hub",
+      "target": "router:pe1",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:pe1",
+      "target": "router:ce1-hub",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:p3",
+      "target": "router:pe3",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:pe3",
+      "target": "router:p3",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:p3",
+      "target": "router:p4",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:p4",
+      "target": "router:p3",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:ce3-spoke",
+      "target": "router:pe3",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:pe3",
+      "target": "router:ce3-spoke",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:ce2-spoke",
+      "target": "router:p1",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:p1",
+      "target": "router:ce2-spoke",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:pe2",
+      "target": "router:rr1",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:rr1",
+      "target": "router:pe2",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:ce3-spoke",
+      "target": "router:pe1",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:pe1",
+      "target": "router:ce3-spoke",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:ce1-spoke",
+      "target": "router:ce2-spoke",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:ce2-spoke",
+      "target": "router:ce1-spoke",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:pe1",
+      "target": "router:rr1",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:rr1",
+      "target": "router:pe1",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:p4",
+      "target": "router:pe4",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:pe4",
+      "target": "router:p4",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:ce1-spoke",
+      "target": "router:rr1",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:rr1",
+      "target": "router:ce1-spoke",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:pe3",
+      "target": "router:pe4",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:pe4",
+      "target": "router:pe3",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:pe2",
+      "target": "router:pe3",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:pe3",
+      "target": "router:pe2",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:ce1-spoke",
+      "target": "router:pe4",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:pe4",
+      "target": "router:ce1-spoke",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:p1",
+      "target": "router:p3",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:p3",
+      "target": "router:p1",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:p1",
+      "target": "router:p2",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:p2",
+      "target": "router:p1",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:p3",
+      "target": "router:pe1",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:pe1",
+      "target": "router:p3",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:ce2-spoke",
+      "target": "router:ce3-spoke",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:ce3-spoke",
+      "target": "router:ce2-spoke",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:p4",
+      "target": "router:pe3",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:pe3",
+      "target": "router:p4",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:ce3-spoke",
+      "target": "router:pe4",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:pe4",
+      "target": "router:ce3-spoke",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:ce1-spoke",
+      "target": "router:pe1",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:pe1",
+      "target": "router:ce1-spoke",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:ce2-spoke",
+      "target": "router:p3",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:p3",
+      "target": "router:ce2-spoke",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:ce3-spoke",
+      "target": "router:p3",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:p3",
+      "target": "router:ce3-spoke",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:ce3-spoke",
+      "target": "router:pe2",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:pe2",
+      "target": "router:ce3-spoke",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:ce2-spoke",
+      "target": "router:rr2",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:rr2",
+      "target": "router:ce2-spoke",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:ce1-hub",
+      "target": "router:pe2",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:pe2",
+      "target": "router:ce1-hub",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:ce1-hub",
+      "target": "router:ce3-spoke",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:ce3-spoke",
+      "target": "router:ce1-hub",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:p3",
+      "target": "router:rr1",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:rr1",
+      "target": "router:p3",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:ce1-hub",
+      "target": "router:p1",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:p1",
+      "target": "router:ce1-hub",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:p2",
+      "target": "router:pe4",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:pe4",
+      "target": "router:p2",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:p1",
+      "target": "router:pe4",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:pe4",
+      "target": "router:p1",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:p1",
+      "target": "router:pe2",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:pe2",
+      "target": "router:p1",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:p1",
+      "target": "router:p4",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:p4",
+      "target": "router:p1",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:ce1-spoke",
+      "target": "router:p1",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:p1",
+      "target": "router:ce1-spoke",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:pe1",
+      "target": "router:pe2",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:pe2",
+      "target": "router:pe1",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:p2",
+      "target": "router:rr2",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:rr2",
+      "target": "router:p2",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:ce1-spoke",
+      "target": "router:ce3-spoke",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:ce3-spoke",
+      "target": "router:ce1-spoke",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:pe3",
+      "target": "router:rr1",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:rr1",
+      "target": "router:pe3",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:ce3-spoke",
+      "target": "router:p2",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:p2",
+      "target": "router:ce3-spoke",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:p3",
+      "target": "router:pe4",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:pe4",
+      "target": "router:p3",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:pe2",
+      "target": "router:pe4",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:pe4",
+      "target": "router:pe2",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:ce1-hub",
+      "target": "router:p4",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:p4",
+      "target": "router:ce1-hub",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:ce1-hub",
+      "target": "router:rr1",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:rr1",
+      "target": "router:ce1-hub",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:p3",
+      "target": "router:pe2",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:pe2",
+      "target": "router:p3",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:ce1-spoke",
+      "target": "router:p2",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:p2",
+      "target": "router:ce1-spoke",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:ce2-spoke",
+      "target": "router:pe2",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:pe2",
+      "target": "router:ce2-spoke",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:ce1-spoke",
+      "target": "router:p3",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:p3",
+      "target": "router:ce1-spoke",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:ce3-spoke",
+      "target": "router:p4",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:p4",
+      "target": "router:ce3-spoke",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:ce1-hub",
+      "target": "router:p2",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:p2",
+      "target": "router:ce1-hub",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:rr1",
+      "target": "router:rr2",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:rr2",
+      "target": "router:rr1",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:pe1",
+      "target": "router:pe4",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:pe4",
+      "target": "router:pe1",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:ce1-hub",
+      "target": "router:ce1-spoke",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:ce1-spoke",
+      "target": "router:ce1-hub",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:p1",
+      "target": "router:rr2",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:rr2",
+      "target": "router:p1",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:p2",
+      "target": "router:rr1",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:rr1",
+      "target": "router:p2",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:ce2-spoke",
+      "target": "router:p4",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:p4",
+      "target": "router:ce2-spoke",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:pe3",
+      "target": "router:rr2",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:rr2",
+      "target": "router:pe3",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:ce2-spoke",
+      "target": "router:pe1",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:pe1",
+      "target": "router:ce2-spoke",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:ce1-hub",
+      "target": "router:pe4",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:pe4",
+      "target": "router:ce1-hub",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:ce1-hub",
+      "target": "router:ce2-spoke",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:ce2-spoke",
+      "target": "router:ce1-hub",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:p4",
+      "target": "router:pe1",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:pe1",
+      "target": "router:p4",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:ce2-spoke",
+      "target": "router:pe3",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:pe3",
+      "target": "router:ce2-spoke",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:ce2-spoke",
+      "target": "router:rr1",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:rr1",
+      "target": "router:ce2-spoke",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:p2",
+      "target": "router:p3",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:p3",
+      "target": "router:p2",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:ce1-hub",
+      "target": "router:rr2",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:rr2",
+      "target": "router:ce1-hub",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:ce2-spoke",
+      "target": "router:pe4",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:pe4",
+      "target": "router:ce2-spoke",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:p3",
+      "target": "router:rr2",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:rr2",
+      "target": "router:p3",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:pe2",
+      "target": "router:rr2",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:rr2",
+      "target": "router:pe2",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:ce1-spoke",
+      "target": "router:rr2",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:rr2",
+      "target": "router:ce1-spoke",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:p4",
+      "target": "router:rr2",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:rr2",
+      "target": "router:p4",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:p1",
+      "target": "router:pe1",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:pe1",
+      "target": "router:p1",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:ce3-spoke",
+      "target": "router:rr1",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:rr1",
+      "target": "router:ce3-spoke",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:ce1-spoke",
+      "target": "router:p4",
+      "relation": "ospf_peer"
+    },
+    {
+      "source": "router:p4",
+      "target": "router:ce1-spoke",
+      "relation": "ospf_peer"
+    }
+  ]
+}

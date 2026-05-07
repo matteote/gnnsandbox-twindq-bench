@@ -114,8 +114,6 @@ def step_ingest(args, snapshots_dir: Path) -> list:
         num_snapshots=args.num_snapshots,
         interval_minutes=interval,
         project_id=args.project,
-        from_time=getattr(args, "from_time", None),
-        to_time=getattr(args, "to_time", None),
     )
 
     timestamps = dataset._get_timestamps()
