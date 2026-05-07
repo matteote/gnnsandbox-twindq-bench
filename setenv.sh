@@ -18,10 +18,10 @@
 # file.
 #
 # Prior to running the installation script, you must set and export the following environment variables (see ./setenv.sh):
-export GOOGLE_PROJECT=<YOUR PROJECT>  # the GCP project name hosting the NW Agent demo (You MUST create it first on GCP)
-export GOOGLE_USER=<GCP_USERNAME>  # the user you authenticate with on GCP. It MUST be the owner of the GOOGLE_PROJECT (e.g. john.doe@mydomain.com)
-export GOOGLE_VM_USER=<GCE_VM_USERNAME>  # the default user name on GCE VMs (usually john_doe_mydomain_com but to be sure create a VM, SSH connect from the web console, type whoami', delete VM)
-export GOOGLE_REGION=<YOUR_REGION>  # the GCP region to host the demo environment (e.g. europe-west1)
-export GOOGLE_ZONE=<YOUR_ZONE>  # the GCP zone in the region to host the demo environment (e.g.europe-west1-c)
-export WEBAPPS_LOGIN=<YOUR_WEB_LOGIN>  # the login name to access web apps like the NW Agent UI or the Gitops Web UI
-export WEBAPPS_PWD=<YOUR_WEB_PWD>  # the password to access the web apps
+export GOOGLE_PROJECT=gnn-networks  # the GCP project name hosting the NW Agent demo (You MUST create it first on GCP)
+export GOOGLE_USER=alvaro@alvarossl.altostrat.com  # the user you authenticate with on GCP. It MUST be the owner of the GOOGLE_PROJECT (e.g. john.doe@mydomain.com)
+export GOOGLE_VM_USER=alvaro_alvarossl_altostrat_com  # the default user name on GCE VMs (usually john_doe_mydomain_com but to be sure create a VM, SSH connect from the web console, type whoami', delete VM)
+export GOOGLE_REGION=europe-west1  # the GCP region to host the demo environment (e.g. europe-west1)
+export GOOGLE_ZONE=europe-west1-c  # the GCP zone in the region to host the demo environment (e.g.europe-west1-c)
+export WEBAPPS_LOGIN=networkagent # the login name to access web apps like the NW Agent UI or the Gitops Web UI
+export WEBAPPS_PWD=password123  # the password to access the web apps
