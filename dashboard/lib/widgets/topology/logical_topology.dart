@@ -1,5 +1,6 @@
 import 'dart:math';
 import 'package:flutter/material.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:provider/provider.dart';
 import '../../appstate.dart';
 import '../../models/network_node.dart';
@@ -433,15 +434,7 @@ class _LogicalTopologyWidgetState extends State<LogicalTopologyWidget>
                                                          !widget.highlightedNodeIds.contains(node.id))
                                                    ? 0.4
                                                    : 1.0,
-                                               child: CircleAvatar(
-                                                 backgroundColor: getNodeColor(node),
-                                                 radius: 20,
-                                                 child: Icon(
-                                                   getNodeIcon(node),
-                                                   color: Colors.white,
-                                                   size: 24,
-                                                 ),
-                                               ),
+                                               child: _buildNodeIcon(node),
                                              ),
                                            ),
                                            Positioned(
@@ -577,6 +570,48 @@ class _LogicalTopologyWidgetState extends State<LogicalTopologyWidget>
        ),
     );
   }
+  /// Returns the appropriate icon widget for a given node type.
+  /// P routers use the Cisco router SVG, PE routers use the provider edge SVG,
+  /// CE routers use the customer edge SVG, and devices use a CircleAvatar.
+  Widget _buildNodeIcon(NetworkNode node) {
+    switch (node.type) {
+      case NodeType.P:
+        return SvgPicture.asset(
+          'assets/images/cisco_router.svg',
+          width: 40,
+          height: 40,
+        );
+      case NodeType.PE:
+        return SvgPicture.asset(
+          'assets/images/provider_edge_router.svg',
+          width: 40,
+          height: 40,
+        );
+      case NodeType.CE:
+        return SvgPicture.asset(
+          'assets/images/customer_edge_router.svg',
+          width: 40,
+          height: 40,
+        );
+      case NodeType.RR:
+        return SvgPicture.asset(
+          'assets/images/route_reflector.svg',
+          width: 40,
+          height: 40,
+        );
+      case NodeType.Device:
+        return CircleAvatar(
+          backgroundColor: getNodeColor(node),
+          radius: 20,
+          child: Icon(
+            getNodeIcon(node),
+            color: Colors.white,
+            size: 24,
+          ),
+        );
+    }
+  }
+
   Widget _buildLegendItem(Color color, String label) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 2),

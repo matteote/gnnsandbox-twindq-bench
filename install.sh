@@ -843,7 +843,7 @@ Kill()
     gcloud run services delete network-dashboard --region=$GOOGLE_REGION --quiet
 
     # delete pubsub subscription and topic
-    gcloud beta run worker-pools delete metricscollector --region=$GOOGLE_REGION --quiet
+    gcloud beta run worker-pools delete metricscollector --region=$GOOGLE_REGION --quiet --async
 
     echo "#####################"
     echo "Deleting GKE Cluster"
@@ -995,7 +995,8 @@ DeployMetricsCollector()
     --update-env-vars GOOGLE_SPANNER_DATABASE=$GOOGLE_SPANNER_DATABASE \
     --update-env-vars POLL_INTERVAL=15 \
     --update-env-vars NETWORK_AGENT_FILE="/app/networkagent.json" \
-    --update-env-vars GOOGLE_APPLICATION_CREDENTIALS="/app/networkagent.json"
+    --update-env-vars GOOGLE_APPLICATION_CREDENTIALS="/app/networkagent.json" \
+    --async
     cd ../..
     sleep 5
 }

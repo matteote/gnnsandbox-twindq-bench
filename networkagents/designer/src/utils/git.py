@@ -45,9 +45,9 @@ USER = os.environ['WEBAPPS_LOGIN']
 PWD = os.environ['WEBAPPS_PWD']
 
 DESIGN_REPO = 'networkdesign'
-INCIDENT_REPO = 'incidents'
 SERVICE_REPO = 'network'
 MASTER_BRANCH = 'master'
+UPDATE_BRANCH = 'update'
 PORT=3000
 
 # Get the Gitea URL from the K8s resource description
@@ -134,11 +134,11 @@ def commit_git_file(file_path, message, content):
     if (file := git_file_exists(repo, file_path)) is not None:
       logger.debug(f"Changing git file path: {file.path}, sha: {file.sha}")
       ret = repo.change_file(file.path, file.sha, content=b64_content.decode("ascii"), 
-                        data={'branch': MASTER_BRANCH, 'message': message+' - Updated'})
+                        data={'branch': UPDATE_BRANCH, 'message': message+' - Updated'})
     else:
       logger.debug(f"Creating git file path: {file_path}")
       ret = repo.create_file(file_path, content=b64_content.decode("ascii"), 
-                      data={'branch': MASTER_BRANCH, 'message': message})
+                      data={'branch': UPDATE_BRANCH, 'message': message})
     logger.debug(ret)
     return True
   except Exception as e:

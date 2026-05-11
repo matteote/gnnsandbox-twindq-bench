@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:provider/provider.dart';
 import '../../appstate.dart';
 import '../../models/network_node.dart';
@@ -279,11 +280,7 @@ class _NodeDetailsDialogState extends State<NodeDetailsDialog> {
                     // Header with node type icon and name
                     Row(
                       children: [
-                        Icon(
-                          getNodeIcon(widget.node),
-                          color: getNodeColor(widget.node),
-                          size: 36,
-                        ),
+                        _buildDialogNodeIcon(widget.node),
                         const SizedBox(width: 16),
                         Expanded(
                           child: Column(
@@ -492,6 +489,40 @@ class _NodeDetailsDialogState extends State<NodeDetailsDialog> {
                     ),
                   ],
                 ),
+    );
+  }
+
+  /// Returns the SVG icon for router node types, or a CircleAvatar for devices.
+  Widget _buildDialogNodeIcon(NetworkNode node) {
+    String? svgAsset;
+    switch (node.type) {
+      case NodeType.P:
+        svgAsset = 'assets/images/cisco_router.svg';
+        break;
+      case NodeType.PE:
+        svgAsset = 'assets/images/provider_edge_router.svg';
+        break;
+      case NodeType.CE:
+        svgAsset = 'assets/images/customer_edge_router.svg';
+        break;
+      case NodeType.RR:
+        svgAsset = 'assets/images/route_reflector.svg';
+        break;
+      case NodeType.Device:
+        return CircleAvatar(
+          backgroundColor: getNodeColor(node),
+          radius: 22,
+          child: Icon(
+            getNodeIcon(node),
+            color: Colors.white,
+            size: 26,
+          ),
+        );
+    }
+    return SvgPicture.asset(
+      svgAsset,
+      width: 48,
+      height: 48,
     );
   }
 

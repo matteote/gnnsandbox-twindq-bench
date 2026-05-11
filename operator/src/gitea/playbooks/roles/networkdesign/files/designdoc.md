@@ -498,7 +498,7 @@ apiVersion: google.dev/v1
 kind: VyOSInfrastructure
 metadata:
   name: <infra-name>
-  namespace: default
+  namespace: network
 spec:
   networks:
     # Core P2P links (one entry per link pair)
@@ -594,7 +594,7 @@ apiVersion: google.dev/v1
 kind: VyOSUnderlay
 metadata:
   name: <underlay-name>
-  namespace: default
+  namespace: network
 spec:
   infrastructureRef: <infra-name>
   routing:
@@ -685,7 +685,7 @@ apiVersion: google.dev/v1
 kind: VyOSL3VPN
 metadata:
   name: <l3vpn-name>
-  namespace: default
+  namespace: network
 spec:
   underlayRef: <underlay-name>
   services:

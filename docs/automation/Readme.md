@@ -82,7 +82,7 @@ apiVersion: google.dev/v1
 kind: VyOSInfrastructure
 metadata:
   name: l3vpn-hub-spoke-infra
-  namespace: default
+  namespace: network
 spec:
   description: "L3VPN Hub-and-Spoke Infrastructure"
   networks:
@@ -160,7 +160,7 @@ apiVersion: google.dev/v1
 kind: VyOSUnderlay
 metadata:
   name: l3vpn-hub-spoke-underlay
-  namespace: default
+  namespace: network
 spec:
   infrastructureRef: l3vpn-hub-spoke-infra
   routing:
@@ -235,7 +235,7 @@ apiVersion: google.dev/v1
 kind: VyOSL3VPN
 metadata:
   name: l3vpn-blue-service
-  namespace: default
+  namespace: network
 spec:
   underlayRef: l3vpn-hub-spoke-underlay
   services:
@@ -370,7 +370,7 @@ apiVersion: google.dev/v1
 kind: Device
 metadata:
   name: dev1
-  namespace: default
+  namespace: network
 spec:
   network_name: "lan-spoke1"
   ip_address: "10.100.1.10"

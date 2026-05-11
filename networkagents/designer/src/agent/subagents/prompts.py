@@ -40,6 +40,7 @@ The network uses VyOS routers managed via the following CRD types:
      to a specific, concise question for the user. Leave `reasoning` and `proposed_changes` null.
 
 ## Constraints for proposed_changes
+- PREFER UPDATING EXISTING CRs over creating new ones. If a new configuration can be added to an existing CR, use `Update` rather than `Create`. The goal is to re-intent and let the operators figure out the changes.
 - `action` MUST be exactly one of: `Create`, `Update`, or `Delete`. Never use `Inform`,
   `Suggest`, `Report`, or any other value. These are the only three valid CRD operations.
 - `resource_type` MUST be exactly one of: `VyOSInfrastructure`, `VyOSUnderlay`, `VyOSL3VPN`.
@@ -80,7 +81,8 @@ The approved change plan is provided as JSON in your first user message under th
 3. **Generate YAML**: For each change in proposed_changes, generate the corresponding VyOS CR YAML.
    - Use the `VyOSInfrastructure`, `VyOSUnderlay`, and `VyOSL3VPN` schemas.
    - Ensure `underlayRef` and `infrastructureRef` correctly link resources.
-   - For updates, provide the full updated YAML (not just patches).
+   - For updates, provide the full updated YAML (not just patches). Modify the existing CR YAML retrieved from `getDeployedCRs` to include the new changes (re-intent) rather than creating a new CR from scratch.
+   - **CRITICAL — name preservation**: For `Update` actions, the `metadata.name` in your generated YAML MUST be identical to the `metadata.name` of the existing CR as returned by `getDeployedCRs`. Do NOT rename the resource or use the plan's `resource_name` if it differs from the deployed name. Changing the name will cause a duplicate resource to be created in git.
    - Respect the dependency order from `depends_on`.
 4. **Strict scope constraint**: Generate ONLY the descriptors for resources listed in
    `proposed_changes`. Do NOT add any extra resources, helper objects, or default configurations

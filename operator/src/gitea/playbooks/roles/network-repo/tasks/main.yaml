@@ -73,3 +73,21 @@
   args:
     chdir: /opt/network-repo
 
+###############################################
+# Update Branch
+###############################################
+- name: checkout update branch
+  command: sudo -u git git checkout -B update
+  args:
+    chdir: /opt/network-repo
+
+- name: create empty commit on update branch
+  command: sudo -u git git commit --allow-empty -m "initialize update branch"
+  args:
+    chdir: /opt/network-repo
+
+- name: push update to repo
+  command: sudo -u git git -c http.sslVerify=false push -u origin update
+  args:
+    chdir: /opt/network-repo
+

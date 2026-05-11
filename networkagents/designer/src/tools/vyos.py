@@ -71,7 +71,7 @@ def getDeployedCRs() -> list[dict]:
     for kind in ["VyOSInfrastructure", "VyOSUnderlay", "VyOSL3VPN", "TrafficTest"]:
         try:
             api = client.resources.get(api_version="google.dev/v1", kind=kind)
-            resources = api.get(namespace='default')
+            resources = api.get(namespace='network')
             for item in resources.items:
                 instances.append(item.to_dict())
         except Exception as e:
@@ -96,7 +96,7 @@ def deploySpec(descriptor: dict) -> str:
         client = kubernetes.dynamic.DynamicClient(get_k8s_client())
         kind = descriptor.get("kind")
         name = descriptor.get("metadata", {}).get("name")
-        namespace = descriptor.get("metadata", {}).get("namespace", "default")
+        namespace = descriptor.get("metadata", {}).get("namespace", "network")
         
         resource_api = client.resources.get(
             api_version="google.dev/v1", 
@@ -124,7 +124,7 @@ def deploySpec(descriptor: dict) -> str:
         return f"Error deploying {descriptor.get('kind', 'Unknown')}: {str(e)}"
 
 
-def deleteSpec(kind: str, name: str, namespace: str = "default") -> str:
+def deleteSpec(kind: str, name: str, namespace: str = "network") -> str:
     """
     Delete a VyOS Custom Resource from the cluster.
 
@@ -155,7 +155,7 @@ def deleteSpec(kind: str, name: str, namespace: str = "default") -> str:
         return f"Error deleting {kind}/{name}: {str(e)}"
 
 
-def getDeploymentStatus(kind: str, name: str, namespace: str = "default") -> dict:
+def getDeploymentStatus(kind: str, name: str, namespace: str = "network") -> dict:
     """
     Retrieve the current status of a deployed VyOS resource.
 

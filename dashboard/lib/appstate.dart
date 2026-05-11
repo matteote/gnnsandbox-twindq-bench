@@ -539,6 +539,8 @@ class Appstate extends ChangeNotifier {
             type = NodeType.PE;
           } else if (roleStr == 'ce' || roleStr == 'customer_edge') {
             type = NodeType.CE;
+          } else if (roleStr == 'rr' || roleStr == 'route_reflector') {
+            type = NodeType.RR;
           }
         }
         

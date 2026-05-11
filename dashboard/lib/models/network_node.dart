@@ -4,6 +4,7 @@ enum NodeType {
   P,
   PE,
   CE,
+  RR,
   Device
 }
 
@@ -133,6 +134,8 @@ class NetworkNode {
         return NodeType.PE;
       case 'CE':
         return NodeType.CE;
+      case 'RR':
+        return NodeType.RR;
       case 'P':
       default:
         return NodeType.P;
