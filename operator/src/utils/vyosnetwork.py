@@ -752,7 +752,7 @@ async def patch_vyos_router(name: str, namespace: str, patch: Dict[str, Any]):
         raise
 
 async def check_and_update_parent_status(parent_name: str, parent_kind: str, namespace: str, logger):
-    """Check if all child VyOSRouters and LinuxNetworks are Ready and update parent status accordingly"""
+    """Check if all child VyOSRouters and Devices are Ready and update parent status accordingly"""
     logger.info(f"Checking parent {parent_kind} {parent_name} status for child readiness")
     
     try:
@@ -760,6 +760,7 @@ async def check_and_update_parent_status(parent_name: str, parent_kind: str, nam
         client = kubernetes.dynamic.DynamicClient(kubernetes.client.ApiClient())
         parent_api = client.resources.get(api_version='google.dev/v1', kind=parent_kind)
         vyosrouter_api = client.resources.get(api_version='google.dev/v1', kind='VyOSRouter')
+        device_api = client.resources.get(api_version='google.dev/v1', kind='Device')
         
         # Get the parent
         try:
@@ -789,8 +790,24 @@ async def check_and_update_parent_status(parent_name: str, parent_kind: str, nam
                 if owner.get('kind') == parent_kind and owner.get('name') == parent_name:
                     child_routers.append(router)
                     break
-                
-        if not child_routers:
+
+        # Get all child Devices that belong to this parent
+        child_devices = []
+        try:
+            all_devices = device_api.get(namespace=namespace)
+            for device in all_devices.items:
+                owner_references = device.get('metadata', {}).get('ownerReferences', [])
+                for owner in owner_references:
+                    if owner.get('kind') == parent_kind and owner.get('name') == parent_name:
+                        child_devices.append(device)
+                        break
+        except kubernetes.client.rest.ApiException as e:
+            if e.status == 404:
+                pass  # Device CRD not installed — no children of this kind
+            else:
+                raise
+
+        if not child_routers and not child_devices:
             logger.warning(f"No child resources found for {parent_kind} {parent_name}")
             return
         
@@ -807,17 +824,47 @@ async def check_and_update_parent_status(parent_name: str, parent_kind: str, nam
                 ready_routers.append(router_name)
             else:
                 not_ready_routers.append(f"{router_name}({router_phase})")
-                
+
+        # Check if all child Devices are Ready (status.phase == "Ready")
+        ready_devices = []
+        not_ready_devices = []
+
+        for device in child_devices:
+            device_name = device.get('metadata', {}).get('name', 'unknown')
+            device_status = device.get('status', {})
+            device_phase = device_status.get('phase', 'Unknown')
+
+            if device_phase == 'Ready':
+                ready_devices.append(device_name)
+            else:
+                not_ready_devices.append(f"{device_name}({device_phase})")
+
         total_routers = len(child_routers)
         ready_router_count = len(ready_routers)
-        
-        all_ready = (ready_router_count == total_routers)
+        total_devices = len(child_devices)
+        ready_device_count = len(ready_devices)
+
+        all_ready = (ready_router_count == total_routers) and (ready_device_count == total_devices)
         
         if all_ready:
-            success_message = f"All {total_routers} routers are ready"
+            parts = []
+            if total_routers:
+                parts.append(f"{total_routers} router(s)")
+            if total_devices:
+                parts.append(f"{total_devices} device(s)")
+            success_message = f"All {' and '.join(parts)} are ready"
             await update_status(parent_name, namespace, parent_kind, "Ready", success_message)
         else:
-            status_message = f"Waiting for: {', '.join(not_ready_routers)} ({ready_router_count}/{total_routers} ready)"
+            waiting_parts = []
+            if not_ready_routers:
+                waiting_parts.append(
+                    f"routers: {', '.join(not_ready_routers)} ({ready_router_count}/{total_routers} ready)"
+                )
+            if not_ready_devices:
+                waiting_parts.append(
+                    f"devices: {', '.join(not_ready_devices)} ({ready_device_count}/{total_devices} ready)"
+                )
+            status_message = f"Waiting for {'; '.join(waiting_parts)}"
             await update_status(parent_name, namespace, parent_kind, "Creating", status_message)
             
     except Exception as e:

@@ -420,6 +420,7 @@ Create()
         cp networkagent.json networkagents/designer/src
         cp networkagent.json networkagents/tester/src
         cp networkagent.json networkagents/logs/src
+        cp networkagent.json networkagents/chaos/src
         cp networkagent.json logservices/metricscollector/src
     else
         echo "#############################################################"
@@ -449,6 +450,7 @@ Create()
     jinja -E GOOGLE_VM_USER -E GOOGLE_PROJECT -E GOOGLE_REGION -E GOOGLE_ZONE -E GOOGLE_REPO networkagents/tester/cloudbuild.j2 > networkagents/tester/cloudbuild.yaml
     jinja -E GOOGLE_VM_USER -E GOOGLE_PROJECT -E GOOGLE_REGION -E GOOGLE_ZONE -E GOOGLE_REPO networkagents/logs/cloudbuild.j2 > networkagents/logs/cloudbuild.yaml
     jinja -E GOOGLE_VM_USER -E GOOGLE_PROJECT -E GOOGLE_REGION -E GOOGLE_ZONE -E GOOGLE_REPO networkagents/supervisor/cloudbuild.j2 > networkagents/supervisor/cloudbuild.yaml
+    jinja -E GOOGLE_VM_USER -E GOOGLE_PROJECT -E GOOGLE_REGION -E GOOGLE_ZONE -E GOOGLE_REPO networkagents/chaos/cloudbuild.j2 > networkagents/chaos/cloudbuild.yaml
     jinja -E GOOGLE_VM_USER -E GOOGLE_PROJECT -E GOOGLE_REGION -E GOOGLE_ZONE -E GOOGLE_REPO dashboard/cloudbuild.j2 > dashboard/cloudbuild.yaml
     jinja -E GOOGLE_VM_USER -E GOOGLE_PROJECT -E GOOGLE_REGION -E GOOGLE_ZONE -E GOOGLE_REPO logservices/metricscollector/cloudbuild.j2 > logservices/metricscollector/cloudbuild.yaml
     jinja -E GOOGLE_PROJECT -E GOOGLE_REGION -E GOOGLE_REPO traffic-agent/cloudbuild.j2 > traffic-agent/cloudbuild.yaml
@@ -734,6 +736,8 @@ Delete()
         networkagents/tester/cloudbuild.yaml \
         networkagents/logs/src/networkagent.json \
         networkagents/logs/cloudbuild.yaml \
+        networkagents/chaos/src/networkagent.json \
+        networkagents/chaos/cloudbuild.yaml \
         \
         dashboard/cloudbuild.yaml \
         \
@@ -837,6 +841,7 @@ Kill()
 
     gcloud run services delete networktools --region=$GOOGLE_REGION --quiet
     gcloud run services delete designeragent --region=$GOOGLE_REGION --quiet
+    gcloud run services delete chaosagent --region=$GOOGLE_REGION --quiet
     gcloud run services delete testagent --region=$GOOGLE_REGION --quiet
     gcloud run services delete logsagent --region=$GOOGLE_REGION --quiet
     gcloud run services delete network-agent-supervisor --region=$GOOGLE_REGION --quiet
@@ -1324,6 +1329,36 @@ Networkagent()
         --update-env-vars GOOGLE_APPLICATION_CREDENTIALS="/agent/networkagent.json" \
         --update-env-vars WEBAPPS_PWD=${WEBAPPS_PWD} \
         --update-env-vars WEBAPPS_LOGIN=${WEBAPPS_LOGIN} \
+        --allow-unauthenticated 
+    fi
+
+    # deploy the chaos agent
+    if [[ "$AGENT_NAMES" == "all" ]] || [[ "$AGENT_NAMES" == *"chaos"* ]]; then
+        agent_processed=true
+        IMAGE_URI="$GOOGLE_REGION-docker.pkg.dev/$GOOGLE_PROJECT/$GOOGLE_REPO/chaosagent:latest"
+        if [[ $YES_FLAG != "y" ]] && [[ $NO_FLAG != "y" ]] && $(gcloud artifacts docker images describe $IMAGE_URI >/dev/null 2>&1); then
+            read -p "Chaos agent image already exists. Rebuild? (y/n) " -n 1 -r
+            echo
+            if [[ $REPLY =~ ^[Yy]$ ]]; then
+                gcloud builds submit --region=$GOOGLE_REGION --config=networkagents/chaos/cloudbuild.yaml .
+            fi
+        elif [[ $NO_FLAG == "y" ]] && $(gcloud artifacts docker images describe $IMAGE_URI >/dev/null 2>&1); then
+            echo "Chaos agent image already exists - not building the image (NO_FLAG set)"
+        elif [[ $NO_FLAG != "y" ]]; then
+            gcloud builds submit --region=$GOOGLE_REGION --config=networkagents/chaos/cloudbuild.yaml .
+        fi
+        gcloud run deploy chaosagent \
+        --image $IMAGE_URI \
+        --region $GOOGLE_REGION \
+        --service-account $GOOGLE_SERVICE_ACCOUNT \
+        --min 1 \
+        --update-env-vars GOOGLE_PROJECT=$GOOGLE_PROJECT \
+        --update-env-vars GOOGLE_REGION=$GOOGLE_REGION \
+        --update-env-vars GOOGLE_ZONE=$GOOGLE_ZONE \
+        --update-env-vars GOOGLE_CLOUD_PROJECT=$GOOGLE_PROJECT \
+        --update-env-vars GOOGLE_CLOUD_LOCATION=$GOOGLE_REGION \
+        --update-env-vars GOOGLE_GENAI_USE_VERTEXAI=1 \
+        --update-env-vars GOOGLE_APPLICATION_CREDENTIALS="/agent/networkagent.json" \
         --allow-unauthenticated 
     fi
 

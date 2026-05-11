@@ -55,7 +55,6 @@ spec:
               type: object
               required:
                 - failureType
-                - infrastructureRef
                 - target
               description: |
                 Specification of the network fault to inject.
@@ -120,15 +119,6 @@ spec:
                       intermittent connectivity throughout the network.
                       Required parameters: target.router, target.interface,
                                           parameters.duplicate_ip
-
-                infrastructureRef:
-                  type: string
-                  description: |
-                    Name of the VyOSInfrastructure resource that defines the network topology
-                    this failure will be injected into. The operator uses this reference to
-                    retrieve router management IP addresses and interface mappings.
-
-                    Example: "l3vpn-hub-spoke-infra"
 
                 target:
                   type: object

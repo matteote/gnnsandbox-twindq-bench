@@ -42,7 +42,6 @@ async def create_network_failure_handler(body, spec, name, namespace, uid, logge
     6. Set status to Active with timestamp
     """
     failure_type = spec.get('failureType')
-    infra_ref = spec.get('infrastructureRef')
     target = spec.get('target', {})
     parameters = spec.get('parameters', {})
     router = target.get('router')
