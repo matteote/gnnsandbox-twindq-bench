@@ -72,7 +72,6 @@ SELECTED_METRICS = [
   'prometheus.googleapis.com/frr_ospf_neighbors/gauge',
   'prometheus.googleapis.com/frr_bgp_peer_prefixes_advertised_count_total/gauge',
   'prometheus.googleapis.com/frr_bgp_peer_uptime_seconds/gauge',
-  'prometheus.googleapis.com/frr_bgp_update_total/counter',
   'prometheus.googleapis.com/frr_route_total/gauge',
   'prometheus.googleapis.com/frr_route_total_fib/gauge',
   'prometheus.googleapis.com/process_open_fds/gauge',
