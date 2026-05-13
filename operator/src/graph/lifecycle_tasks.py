@@ -1507,8 +1507,7 @@ async def sync_device(body, spec, name, uid, logger):
             existing_status = row[6]
             existing_config = row[7]
 
-            # Compare content — normalize status to lowercase since it is stored
-            # lowercase in Spanner but device_status may be mixed-case (e.g. 'Ready').
+            # Compare content
             if (existing_interface_id == interface_id and
                 existing_network == network_name and
                 existing_ip == ip_address and
@@ -1539,11 +1538,7 @@ async def sync_device(body, spec, name, uid, logger):
                     'gateway': gateway,
                     'vlan': vlan,
                     'status': device_status.lower(),
-                    # Pass sanitized_body dict directly — Spanner JSON param accepts
-                    # native Python dicts and returns them as dicts on read, so the
-                    # SCD comparison (existing_config == sanitized_body) works correctly
-                    # without an extra json.loads() round-trip.
-                    'config': sanitized_body
+                    'config': config_json
                 },
                 param_types={
                     'id': spanner.param_types.STRING,
