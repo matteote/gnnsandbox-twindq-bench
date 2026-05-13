@@ -28,8 +28,9 @@ class _ChatPanelState extends State<ChatPanel> {
   static const List<String> _quickQuestions = [
     'Create a new vyos network with 4 p routers, 8 pe routers, 16 ce routers and 2 devices per ce router',
     'Add a new PE router called pe5 to core router P3 and update the underlay and router reflectors to include the new PE router',
-    'Add a new CE router called ce2-spoke to pe5, attach a device to ce2-spoke and extend BLUE_SPOKE VPN to pe25 and ce2-spoke',
     'Add a new mesh vpn called GREEN to pe2 and pe5',
+    'what network failures can i deploy',
+    'Inject a link down bridge network failure between p1 and p2'
   ];
 
   @override

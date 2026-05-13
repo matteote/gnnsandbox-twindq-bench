@@ -15,13 +15,56 @@
 import kopf
 import logging
 import kubernetes
+import json
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any
 
 from networkfailure.lifecycle_tasks import inject_failure, restore_failure
+from networkfailure.operator_injection import inject_failure_operator, restore_failure_operator
 from utils.compute import get_ip
+from graph.lifecycle_tasks import sync_fault_event, close_fault_event
 
 logger = logging.getLogger(__name__)
+
+
+async def _derive_bridge_name(infra_name: str, router_a: str, router_b: str, namespace: str) -> str:
+    """
+    Derive the Linux bridge name connecting two routers by scanning the
+    VyOSInfrastructure spec for the network segment shared by both routers.
+
+    The network segment name in VyOSInfrastructure is the same as the Linux
+    bridge name created by the LinuxNetwork operator on the network VM host.
+
+    Raises ValueError if no shared network is found or if multiple shared
+    networks exist (ambiguous — cannot determine which link to bring down).
+    """
+    client = kubernetes.dynamic.DynamicClient(kubernetes.client.ApiClient())
+    api = client.resources.get(api_version='google.dev/v1', kind='VyOSInfrastructure')
+    infra = api.get(name=infra_name, namespace=namespace)
+
+    shared_networks = []
+    for network in infra.spec.get('networks', []):
+        # Skip loopback and management networks — they are not p2p links
+        network_type = network.get('network_type', '')
+        if network_type in ('loopback', 'management'):
+            continue
+        router_names = {r['router_name'] for r in network.get('connected_routers', [])}
+        if router_a in router_names and router_b in router_names:
+            shared_networks.append(network['name'])
+
+    if not shared_networks:
+        raise ValueError(
+            f"No shared p2p network found between '{router_a}' and '{router_b}' "
+            f"in VyOSInfrastructure '{infra_name}'"
+        )
+    if len(shared_networks) > 1:
+        raise ValueError(
+            f"Multiple shared networks found between '{router_a}' and '{router_b}' "
+            f"in VyOSInfrastructure '{infra_name}': {shared_networks}. "
+            "Cannot determine which link to bring down — use target.interface instead."
+        )
+    return shared_networks[0]
+
 
 #########################################################################
 # NetworkFailure Lifecycle Handlers
@@ -49,7 +92,7 @@ async def create_network_failure_handler(body, spec, name, namespace, uid, logge
     logger.info(f"Creating NetworkFailure '{name}': type={failure_type}, router={router}")
 
     # --- Validate required fields per failure type ---
-    validation_error = _validate_spec(failure_type, target, parameters)
+    validation_error = _validate_spec(failure_type, target, parameters, spec=spec)
     if validation_error:
         await _update_status(name, namespace, "Failed", validation_error)
         raise kopf.PermanentError(validation_error)
@@ -63,13 +106,57 @@ async def create_network_failure_handler(body, spec, name, namespace, uid, logge
         )
     logger.info(f"Network VM address: {ip_address}")
 
-    # --- Mark as Injecting ---
-    await _update_status(name, namespace, "Injecting",
-                         f"Injecting {failure_type} on router '{router}'")
+    injection_mode = spec.get('injectionMode', 'direct')
 
-    # --- Run injection ---
+    # --- Validate injection mode compatibility ---
+    direct_only_types = {'TXQUEUE_STARVATION', 'LINK_DOWN', 'DUPLICATE_IP', 'PROCESS_CRASH'}
+    if injection_mode == 'operator' and failure_type in direct_only_types:
+        error_msg = (
+            f"failureType '{failure_type}' only supports injectionMode 'direct'. "
+            f"This fault type cannot be represented in a VyOS operator CRD."
+        )
+        await _update_status(name, namespace, "Failed", error_msg)
+        raise kopf.PermanentError(error_msg)
+
+    # --- Mark as Injecting and write initial FaultEvent to Spanner ---
+    await _update_status(name, namespace, "Injecting",
+                         f"Injecting {failure_type} on router '{router}' (mode={injection_mode})")
     try:
-        result = await inject_failure(name, ip_address, spec)
+        await sync_fault_event(name=name, spec=spec, phase='Injecting', injected_at=None)
+    except Exception as e:
+        logger.warning(f"Failed to write FaultEvent to Spanner (non-fatal): {e}")
+
+    # --- For LINK_DOWN bridge mode: derive bridge name before injection ---
+    if failure_type == 'LINK_DOWN' and target.get('peer_router'):
+        infra_name = spec.get('infrastructureRef')
+        peer_router = target.get('peer_router')
+        try:
+            bridge_name = await _derive_bridge_name(infra_name, router, peer_router, namespace)
+            logger.info(
+                f"LINK_DOWN bridge mode: derived bridge '{bridge_name}' "
+                f"for {router} ↔ {peer_router}"
+            )
+            # Inject the derived bridge name into a mutable copy of spec so
+            # lifecycle_tasks can pass it to the Ansible playbook as an extravar.
+            spec = dict(spec)
+            spec['_derived_bridge'] = bridge_name
+        except ValueError as e:
+            error_msg = f"LINK_DOWN bridge derivation failed: {e}"
+            logger.error(error_msg)
+            await _update_status(name, namespace, "Failed", error_msg)
+            raise kopf.PermanentError(error_msg)
+        except Exception as e:
+            error_msg = f"Unexpected error deriving bridge name: {e}"
+            logger.error(error_msg)
+            await _update_status(name, namespace, "Failed", error_msg)
+            raise kopf.PermanentError(error_msg)
+
+    # --- Run injection (direct or operator mode) ---
+    try:
+        if injection_mode == 'operator':
+            result = await inject_failure_operator(name, namespace, spec)
+        else:
+            result = await inject_failure(name, ip_address, spec)
     except Exception as e:
         error_msg = f"Unexpected error during fault injection: {e}"
         logger.error(error_msg)
@@ -88,13 +175,21 @@ async def create_network_failure_handler(body, spec, name, namespace, uid, logge
 
     await _update_status(
         name, namespace, "Active",
-        f"Fault '{failure_type}' is active on router '{router}' — original state saved for restoration",
+        f"Fault '{failure_type}' is active on router '{router}' (mode={injection_mode}) — "
+        "original state saved for restoration",
         additional_data={
             'injected_at': injected_at,
             'original_state': original_state,
         }
     )
-    logger.info(f"NetworkFailure '{name}' successfully injected. original_state={original_state}")
+
+    # --- Write Active FaultEvent to Spanner ---
+    try:
+        await sync_fault_event(name=name, spec=spec, phase='Active', injected_at=injected_at)
+    except Exception as e:
+        logger.warning(f"Failed to write Active FaultEvent to Spanner (non-fatal): {e}")
+
+    logger.info(f"NetworkFailure '{name}' successfully injected (mode={injection_mode}). original_state={original_state}")
 
 
 @kopf.on.delete('google.dev', 'v1', 'networkfailure')
@@ -115,6 +210,44 @@ async def delete_network_failure_handler(body, spec, name, namespace, logger, **
     status = body.get('status', {})
     original_state = status.get('original_state', {})
 
+    # kopf's body snapshot may be stale if the status patch from the create handler
+    # has not yet propagated to the informer cache. Re-fetch from the API when empty.
+    if not original_state:
+        try:
+            client = kubernetes.dynamic.DynamicClient(kubernetes.client.ApiClient())
+            api = client.resources.get(api_version='google.dev/v1', kind='NetworkFailure')
+            resource = api.get(name=name, namespace=namespace)
+            original_state = (resource.to_dict().get('status') or {}).get('original_state', {})
+            if original_state:
+                logger.info(
+                    f"Re-fetched original_state for '{name}' from API "
+                    f"(body snapshot was stale): {original_state}"
+                )
+        except Exception as e:
+            logger.warning(f"Could not re-fetch original_state for '{name}': {e}")
+
+    # For LINK_DOWN bridge mode, the bridge name can always be re-derived from the
+    # VyOSInfrastructure spec — it does not depend on saved status. This is the most
+    # reliable path because status may not have been written if the resource was deleted
+    # very quickly after creation (status patch races with deletion).
+    if failure_type == 'LINK_DOWN' and target.get('peer_router'):
+        peer_router = target.get('peer_router')
+        infra_name = spec.get('infrastructureRef')
+        if infra_name and not original_state.get('bridge'):
+            try:
+                bridge_name = await _derive_bridge_name(infra_name, router, peer_router, namespace)
+                logger.info(
+                    f"LINK_DOWN bridge mode: re-derived bridge '{bridge_name}' "
+                    f"for {router} ↔ {peer_router} (status was empty)"
+                )
+                original_state = dict(original_state)
+                original_state['bridge'] = bridge_name
+                original_state.setdefault('mode', 'bridge')
+                original_state.setdefault('router', router)
+                original_state.setdefault('peer_router', peer_router)
+            except Exception as e:
+                logger.warning(f"Could not re-derive bridge name for '{name}': {e}")
+
     logger.info(f"Deleting NetworkFailure '{name}': type={failure_type}, router={router}")
 
     # --- Get Network VM IP address ---
@@ -126,13 +259,18 @@ async def delete_network_failure_handler(body, spec, name, namespace, logger, **
         )
         return
 
+    injection_mode = spec.get('injectionMode', 'direct')
+
     # --- Mark as Restoring ---
     await _update_status(name, namespace, "Restoring",
                          f"Restoring original configuration on router '{router}'")
 
-    # --- Run restoration ---
+    # --- Run restoration (direct or operator mode) ---
     try:
-        result = await restore_failure(name, ip_address, spec, original_state)
+        if injection_mode == 'operator':
+            result = await restore_failure_operator(name, namespace, spec, original_state)
+        else:
+            result = await restore_failure(name, ip_address, spec, original_state)
     except Exception as e:
         error_msg = f"Unexpected error during fault restoration: {e}"
         logger.error(error_msg)
@@ -215,7 +353,8 @@ async def resume_network_failure_handler(body, spec, name, namespace, logger, **
 # Input Validation
 #########################################################################
 
-def _validate_spec(failure_type: str, target: dict, parameters: dict) -> Optional[str]:
+def _validate_spec(failure_type: str, target: dict, parameters: dict,
+                   spec: Optional[dict] = None) -> Optional[str]:
     """
     Validate that all required fields are present for the given failure type.
     Returns an error message string if validation fails, or None if valid.
@@ -224,6 +363,8 @@ def _validate_spec(failure_type: str, target: dict, parameters: dict) -> Optiona
     interface = target.get('interface')
     peer_ip = target.get('peer_ip')
     vrf = target.get('vrf')
+    if spec is None:
+        spec = {}
 
     if not router:
         return "spec.target.router is required for all failure types"
@@ -256,8 +397,17 @@ def _validate_spec(failure_type: str, target: dict, parameters: dict) -> Optiona
             return "spec.parameters.error_rate is required for PACKET_CORRUPTION"
 
     elif failure_type == 'LINK_DOWN':
-        if not interface:
-            return "spec.target.interface is required for LINK_DOWN"
+        has_interface = bool(interface)
+        has_peer_router = bool(target.get('peer_router'))
+        if not has_interface and not has_peer_router:
+            return ("LINK_DOWN requires either spec.target.interface (interface mode) "
+                    "or spec.target.peer_router (bridge mode) — exactly one must be provided")
+        if has_interface and has_peer_router:
+            return ("spec.target.interface and spec.target.peer_router are mutually exclusive "
+                    "for LINK_DOWN — provide exactly one")
+        if has_peer_router and not spec.get('infrastructureRef'):
+            return ("spec.infrastructureRef is required when using LINK_DOWN bridge mode "
+                    "(spec.target.peer_router is set)")
 
     elif failure_type == 'OSPF_AREA_MISMATCH':
         if not interface:
@@ -272,6 +422,28 @@ def _validate_spec(failure_type: str, target: dict, parameters: dict) -> Optiona
             return "spec.target.interface is required for DUPLICATE_IP"
         if not parameters.get('duplicate_ip'):
             return "spec.parameters.duplicate_ip is required for DUPLICATE_IP"
+
+    elif failure_type == 'TXQUEUE_STARVATION':
+        if not interface:
+            return "spec.target.interface is required for TXQUEUE_STARVATION"
+        queue_length = parameters.get('queue_length', 20)
+        if queue_length is None:
+            return "spec.parameters.queue_length is required for TXQUEUE_STARVATION"
+
+    elif failure_type == 'OSPF_COST_INFLATION':
+        if not interface:
+            return "spec.target.interface is required for OSPF_COST_INFLATION"
+        ospf_cost = parameters.get('ospf_cost', 65535)
+        if ospf_cost is None:
+            return "spec.parameters.ospf_cost is required for OSPF_COST_INFLATION"
+
+    elif failure_type == 'VRF_RT_MISCONFIGURATION':
+        if not vrf:
+            return "spec.target.vrf is required for VRF_RT_MISCONFIGURATION"
+        if not parameters.get('wrong_rt'):
+            return "spec.parameters.wrong_rt is required for VRF_RT_MISCONFIGURATION"
+        if not parameters.get('correct_rt'):
+            return "spec.parameters.correct_rt is required for VRF_RT_MISCONFIGURATION"
 
     else:
         return f"Unknown failureType: {failure_type}"

@@ -1,11 +1,22 @@
 # Crash Tests
 
-This directory contains fault-injected variants of the baseline
-[`l3vpn-network/`](../l3vpn-network/) descriptors. Each file is a
-complete, self-contained topology definition with a **single targeted fault**
-introduced to simulate a real-world failure scenario.
+This directory contains fault injection descriptors for the telco-lab L3VPN topology.
+There are **two types** of crash test files:
 
-The crash tests are kept in sync with the baseline files in `l3vpn-network/`:
+1. **VyOS operator CRD variants** (`fault1-mtu.yaml` … `fault5-sfp.yaml`, `missing-config.yaml`) —
+   complete, self-contained topology definitions with a single targeted fault introduced
+   by modifying the VyOS operator CRDs (VyOSInfrastructure, VyOSUnderlay, VyOSL3VPN).
+   These are applied by replacing the baseline CRD in `l3vpn-network/` with the fault variant.
+   Changes are tracked in Spanner via the existing SCD mechanism.
+
+2. **NetworkFailure CRDs** (`fault8-txqueue.yaml`, `fault9-ospf-cost.yaml`) —
+   Kubernetes custom resources that the NetworkFailure operator applies directly.
+   These support two injection modes:
+   - `injectionMode: direct` — Ansible runs commands directly in the VyOS Docker containers
+     (required for kernel-level faults like `TXQUEUE_STARVATION` that are invisible to VyOS config).
+   - `injectionMode: operator` — patches the VyOS operator CRDs (tracked in Spanner).
+
+The VyOS operator CRD variants are kept in sync with the baseline files in `l3vpn-network/`:
 
 | Crash test file | Baseline source |
 |---|---|
@@ -16,16 +27,20 @@ The crash tests are kept in sync with the baseline files in `l3vpn-network/`:
 | `fault5-sfp.yaml` | `l3vpn-network/underlay.yaml` |
 | `missing-config.yaml` | `l3vpn-network/blue-vpn.yaml` |
 
+NetworkFailure CRDs are applied with `kubectl apply -f <file>` and removed with `kubectl delete -f <file>`.
+
 ## File-by-file fault summary
 
-| File | Fault type | What's changed | Affected node(s) |
-|---|---|---|---|
-| `fault1-mtu` | Interface MTU mismatch | `mtu: 1400` added to pe1 eth1 | pe1 ↔ p1 link |
-| `fault2-ce-down` | CE / BGP session down | pe2 BLUE\_HUB BGP neighbors emptied (`[]`) | pe2 / ce1-hub |
-| `fault3-rr1-crash` | Route reflector crash | rr1 BGP config block removed entirely | rr1 |
-| `fault4-rt-import` | Wrong RT import | pe3 BLUE\_SPOKE `rt_import` set to `65035:9999` | pe3 / ce2-spoke |
-| `fault5-sfp` | Physical link degradation | Traffic shaping policy on p1 eth2 (10 ms delay, 5 % loss, 1 % corruption) | p1 ↔ p3 link |
-| `missing-config` | Incomplete VPN config push | pe1 VRF missing `rt_export`, `rt_import` and BGP neighbour entirely | pe1 / ce1-spoke |
+| File | Fault type | Injection mode | What's changed | Affected node(s) |
+|---|---|---|---|---|
+| `fault1-mtu.yaml` | `MTU_MISMATCH` | VyOS CRD | `mtu: 1400` added to pe1 eth1 | pe1 ↔ p1 link |
+| `fault2-ce-down.yaml` | `BGP_SESSION_DOWN` | VyOS CRD | pe2 BLUE\_HUB BGP neighbors emptied (`[]`) | pe2 / ce1-hub |
+| `fault3-rr1-crash.yaml` | `PROCESS_CRASH` | VyOS CRD | rr1 BGP config block removed entirely | rr1 |
+| `fault4-rt-import.yaml` | `VRF_RT_MISCONFIGURATION` | VyOS CRD | pe3 BLUE\_SPOKE `rt_import` set to `65035:9999` | pe3 / ce2-spoke |
+| `fault5-sfp.yaml` | `PACKET_CORRUPTION` | VyOS CRD | Traffic shaping policy on p1 eth2 (10 ms delay, 5 % loss, 1 % corruption) | p1 ↔ p3 link |
+| `missing-config.yaml` | Incomplete VPN config push | VyOS CRD | pe1 VRF missing `rt_export`, `rt_import` and BGP neighbour entirely | pe1 / ce1-spoke |
+| `fault8-txqueue.yaml` | `TXQUEUE_STARVATION` | **direct** (required) | `ip link set pe2-eth2 txqueuelen 20` in pe2 container | pe2 / eth2 |
+| `fault9-ospf-cost.yaml` | `OSPF_COST_INFLATION` | **operator** (default) | OSPF cost 1→65535 on p2/eth1 via VyOSUnderlay CRD | p2 / eth1 |
 
 ---
 

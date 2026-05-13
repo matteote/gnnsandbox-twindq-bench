@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 #   - Monitor:     status checks                (3 slots)
 # Total = 10, same as before — but now guaranteed split.
 ########################################################
-ANSIBLE_OPERATIONAL_LIMIT = 10
+ANSIBLE_OPERATIONAL_LIMIT = 20
 ANSIBLE_MONITOR_LIMIT     = 3
 
 ansible_operational_semaphore = asyncio.Semaphore(ANSIBLE_OPERATIONAL_LIMIT)

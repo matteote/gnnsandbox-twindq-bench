@@ -44,6 +44,7 @@ async def inject_failure(name: str, networkvm_ip_address: str, spec: Dict[str, A
     interface = target.get('interface', '')
     peer_ip = target.get('peer_ip', '')
     vrf = target.get('vrf', 'global')
+    peer_router = target.get('peer_router', '')
 
     # Apply defaults for optional parameters
     mtu = parameters.get('mtu', 1400)
@@ -53,6 +54,20 @@ async def inject_failure(name: str, networkvm_ip_address: str, spec: Dict[str, A
     wrong_area = parameters.get('wrong_area', '')
     correct_area = parameters.get('correct_area', '0.0.0.0')
     duplicate_ip = parameters.get('duplicate_ip', '')
+    queue_length = parameters.get('queue_length', 20)
+    ospf_cost = parameters.get('ospf_cost', 65535)
+    wrong_rt = parameters.get('wrong_rt', '')
+    correct_rt = parameters.get('correct_rt', '')
+
+    # LINK_DOWN bridge mode: the derived bridge name is injected into spec by lifecycle.py
+    # as spec['_derived_bridge'] before calling this function.
+    derived_bridge = spec.get('_derived_bridge', '')
+
+    # Determine LINK_DOWN sub-mode for the playbook
+    if failure_type == 'LINK_DOWN':
+        link_down_mode = 'bridge' if peer_router else 'interface'
+    else:
+        link_down_mode = ''
 
     extravars = {
         'operation': 'inject',
@@ -62,6 +77,9 @@ async def inject_failure(name: str, networkvm_ip_address: str, spec: Dict[str, A
         'interface': interface,
         'peer_ip': peer_ip,
         'vrf': vrf,
+        'peer_router': peer_router,
+        'link_down_mode': link_down_mode,
+        'bridge': derived_bridge,
         'mtu': mtu,
         'error_rate': error_rate,
         'method': method,
@@ -69,6 +87,10 @@ async def inject_failure(name: str, networkvm_ip_address: str, spec: Dict[str, A
         'wrong_area': wrong_area,
         'correct_area': correct_area,
         'duplicate_ip': duplicate_ip,
+        'queue_length': queue_length,
+        'ospf_cost': ospf_cost,
+        'wrong_rt': wrong_rt,
+        'correct_rt': correct_rt,
     }
 
     logger.info(f"Injecting fault '{failure_type}' on router '{router}' for NetworkFailure '{name}'")
@@ -78,6 +100,22 @@ async def inject_failure(name: str, networkvm_ip_address: str, spec: Dict[str, A
 
     if result['success']:
         original_state = result.get('original_state', {})
+
+        # For LINK_DOWN bridge mode, ansible_runner may not capture the set_fact event,
+        # leaving original_state.bridge empty. Fall back to the derived_bridge computed
+        # before the playbook ran so restoration always has the bridge name available.
+        if failure_type == 'LINK_DOWN' and link_down_mode == 'bridge' and derived_bridge:
+            if not original_state.get('bridge'):
+                original_state = dict(original_state)
+                original_state['bridge'] = derived_bridge
+                original_state.setdefault('mode', 'bridge')
+                original_state.setdefault('router', router)
+                original_state.setdefault('peer_router', peer_router)
+                logger.info(
+                    f"LINK_DOWN bridge mode: populated original_state.bridge='{derived_bridge}' "
+                    f"from derived_bridge (Ansible set_fact not captured by runner)"
+                )
+
         logger.info(f"Fault injection successful for '{name}'. original_state={original_state}")
         return {
             'success': True,
@@ -120,15 +158,30 @@ async def restore_failure(name: str, networkvm_ip_address: str, spec: Dict[str, 
     wrong_area = original_state.get('wrong_area', parameters.get('wrong_area', ''))
     duplicate_ip = original_state.get('duplicate_ip', parameters.get('duplicate_ip', ''))
     had_existing_qdisc = original_state.get('had_existing_qdisc', False)
+    original_queue_length = original_state.get('original_queue_length', 1000)
+    original_ospf_cost = original_state.get('original_ospf_cost', 1)
+    correct_rt = original_state.get('correct_rt', parameters.get('correct_rt', ''))
+    wrong_rt = original_state.get('wrong_rt', parameters.get('wrong_rt', ''))
+
+    # LINK_DOWN restoration: read mode and bridge from original_state saved during injection.
+    # original_state.mode is 'interface' or 'bridge'; original_state.bridge is the derived name.
+    # Fall back to spec target values if original_state is missing (e.g. injection failed).
+    link_down_mode = original_state.get('mode', 'bridge' if target.get('peer_router') else 'interface')
+    restore_bridge = original_state.get('bridge', '')
+    # For interface mode, prefer original_state.interface, then spec target.interface.
+    # This ensures the interface name is never empty when passed to the playbook.
+    restore_interface = original_state.get('interface', '') or interface
 
     extravars = {
         'operation': 'restore',
         'failure_name': name,
         'failure_type': failure_type,
         'router': router,
-        'interface': interface,
+        'interface': restore_interface,
         'peer_ip': peer_ip,
         'vrf': vrf,
+        'link_down_mode': link_down_mode,
+        'bridge': restore_bridge,
         'method': method,
         # Restoration-specific values from original_state
         'original_mtu': original_mtu,
@@ -137,6 +190,10 @@ async def restore_failure(name: str, networkvm_ip_address: str, spec: Dict[str, 
         'wrong_area': wrong_area,
         'duplicate_ip': duplicate_ip,
         'had_existing_qdisc': had_existing_qdisc,
+        'original_queue_length': original_queue_length,
+        'original_ospf_cost': original_ospf_cost,
+        'correct_rt': correct_rt,
+        'wrong_rt': wrong_rt,
     }
 
     logger.info(f"Restoring fault '{failure_type}' on router '{router}' for NetworkFailure '{name}'")

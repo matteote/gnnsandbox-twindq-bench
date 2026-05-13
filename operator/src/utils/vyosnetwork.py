@@ -689,40 +689,34 @@ async def create_vyos_router(router_cr: Dict[str, Any], namespace: str):
 async def update_status(name: str, namespace: str, kind: str, phase: str, message: str, 
                        networks: Optional[List[str]] = None, routers: Optional[List[str]] = None,
                        devices: Optional[List[str]] = None):
-    """Update the status of a Custom Resource"""
+    """Update the status of a Custom Resource.
+
+    Uses a direct merge-patch on the status subresource rather than a
+    read-modify-write cycle.  This avoids an extra API round-trip per status
+    update and eliminates the race window where kopf's own status.kopf.progress
+    writes could be overwritten by a stale full-resource read.
+    """
     logger.info(f"Updating {kind} {name} status to {phase}: {message}")
 
     client = kubernetes.dynamic.DynamicClient(kubernetes.client.ApiClient())
     api = client.resources.get(api_version='google.dev/v1', kind=kind)
-    
+
+    status = {
+        'phase': phase,
+        'message': message
+    }
+    if networks:
+        status['networks'] = networks
+    if routers:
+        status['routers'] = routers
+    if devices:
+        status['devices'] = devices
+
     try:
-        resource = api.get(name=name, namespace=namespace)
-        if not resource:
-            logger.error(f"{kind} {name} not found in namespace {namespace} for status update")
-            return
-
-        resource_dict = resource.to_dict()
-
-        if 'status' not in resource_dict:
-            resource_dict['status'] = {}
-
-        status = {
-            'phase': phase,
-            'message': message
-        }
-        if networks:
-            status['networks'] = networks
-        if routers:
-            status['routers'] = routers
-        if devices:
-            status['devices'] = devices
-
-        resource_dict['status'].update(status)
-        
         api.patch(
             namespace=namespace,
             name=name,
-            body=resource_dict,
+            body={'status': status},
             content_type='application/merge-patch+json',
             subresource='status'
         )
@@ -772,11 +766,14 @@ async def check_and_update_parent_status(parent_name: str, parent_kind: str, nam
             else:
                 raise
         
-        # Check current status - only update if currently in Building/Creating state
+        # Check current status - skip only terminal/in-progress-deletion states.
+        # We must also re-evaluate from 'Ready' because routers may reach Running
+        # before all Devices are Ready, causing a premature Ready transition that
+        # needs to be corrected when the device events arrive.
         current_status = parent_res.get('status', {})
         current_phase = current_status.get('phase', '')
         
-        if current_phase not in ['Creating', 'Updating']:
+        if current_phase in ['Error', 'Deleting', 'Validating', 'Processing']:
             logger.info(f"Parent {parent_kind} {parent_name} is in {current_phase} state - skipping check")
             return
         

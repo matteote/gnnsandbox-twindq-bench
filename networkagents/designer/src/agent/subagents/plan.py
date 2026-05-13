@@ -16,7 +16,7 @@ from google.adk.agents import LlmAgent
 from pydantic import BaseModel, Field
 from typing import List, Literal, Optional
 import logging
-from agent.subagents.prompts import planner_prompt
+from agent.subagents.plan_prompt import planner_prompt
 from tools.design import getDesignDoc
 from tools.vyos import getDeployedCRs, getVyosDescriptors
 

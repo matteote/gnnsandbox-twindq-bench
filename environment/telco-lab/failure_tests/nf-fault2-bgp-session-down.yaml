@@ -26,7 +26,7 @@ metadata:
     severity: critical
 spec:
   failureType: BGP_SESSION_DOWN
-  infrastructureRef: l3vpn-hub-spoke-infra
+  infrastructureRef: l3vpn-infra
   target:
     router: pe2
     # The eBGP peer to CE1-HUB — removing this neighbor from the VRF causes

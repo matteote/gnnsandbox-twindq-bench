@@ -106,6 +106,18 @@ SQL_TEMPLATES = {
   'close_flow': "UPDATE TrafficFlow SET valid_end_ts = PENDING_COMMIT_TIMESTAMP() WHERE id = @id AND valid_end_ts IS NULL",
   'insert_flow': "INSERT TrafficFlow (id, name, src_device_id, dst_device_id, phase, config, valid_start_ts, valid_end_ts) VALUES (@id, @name, @src_device_id, @dst_device_id, @phase, @config, PENDING_COMMIT_TIMESTAMP(), NULL)",
   'delete_flow': "UPDATE TrafficFlow SET valid_end_ts = PENDING_COMMIT_TIMESTAMP() WHERE id = @id AND valid_end_ts IS NULL",
+
+  # FaultEvent — append-only event log for NetworkFailure injections
+  # Each injection creates a row; deletion closes it with valid_end_ts.
+  'get_active_fault_event': "SELECT phase, failure_type, injection_mode FROM FaultEvent WHERE id = @id AND valid_end_ts IS NULL",
+  'close_fault_event': "UPDATE FaultEvent SET valid_end_ts = PENDING_COMMIT_TIMESTAMP() WHERE id = @id AND valid_end_ts IS NULL",
+  'insert_fault_event': (
+      "INSERT FaultEvent "
+      "(id, name, failure_type, injection_mode, target_router, target_interface, target_vrf, "
+      "phase, injected_at, config, valid_start_ts, valid_end_ts) "
+      "VALUES (@id, @name, @failure_type, @injection_mode, @target_router, @target_interface, "
+      "@target_vrf, @phase, @injected_at, @config, PENDING_COMMIT_TIMESTAMP(), NULL)"
+  ),
 }
 
 # Spanner DB connection check interval
@@ -1495,14 +1507,15 @@ async def sync_device(body, spec, name, uid, logger):
             existing_status = row[6]
             existing_config = row[7]
 
-            # Compare content
+            # Compare content — normalize status to lowercase since it is stored
+            # lowercase in Spanner but device_status may be mixed-case (e.g. 'Ready').
             if (existing_interface_id == interface_id and
                 existing_network == network_name and
                 existing_ip == ip_address and
                 existing_mgmt_ip == mgmt_ip and
                 existing_gateway == gateway and
                 existing_vlan == vlan and
-                existing_status == device_status and
+                existing_status == device_status.lower() and
                 existing_config == sanitized_body):
                 need_insert = False
             else:
@@ -1526,7 +1539,11 @@ async def sync_device(body, spec, name, uid, logger):
                     'gateway': gateway,
                     'vlan': vlan,
                     'status': device_status.lower(),
-                    'config': config_json
+                    # Pass sanitized_body dict directly — Spanner JSON param accepts
+                    # native Python dicts and returns them as dicts on read, so the
+                    # SCD comparison (existing_config == sanitized_body) works correctly
+                    # without an extra json.loads() round-trip.
+                    'config': sanitized_body
                 },
                 param_types={
                     'id': spanner.param_types.STRING,
@@ -2021,6 +2038,121 @@ async def delete_traffic_flow(name=None, uid=None):
         logger.info(f"Closed TrafficFlow {flow_id} in Spanner")
     except Exception as e:
         logger.error(f"Failed to delete TrafficFlow {flow_id}: {e}")
+
+
+# ------------------------------------------
+# Sync FaultEvent (SCD Type 2)
+# Tracks NetworkFailure injection lifecycle in Spanner.
+# Each phase transition (Injecting → Active → Restored) creates a new SCD row.
+# The FaultEvent table is the Spanner source of truth for fault history,
+# enabling the GNN to correlate anomaly scores with known fault windows.
+# ------------------------------------------
+async def sync_fault_event(name: str, spec: dict, phase: str, injected_at=None):
+    """
+    Write or update a FaultEvent row in Spanner for a NetworkFailure resource.
+
+    Called by networkfailure/lifecycle.py on create (Injecting → Active) and
+    delete (Restored). Each phase transition closes the previous SCD row and
+    inserts a new one so the full lifecycle is preserved in history.
+
+    Args:
+        name:        NetworkFailure resource name (used as the stable event ID).
+        spec:        NetworkFailure spec dict (failureType, target, parameters, injectionMode).
+        phase:       Current lifecycle phase: 'Injecting', 'Active', or 'Restored'.
+        injected_at: ISO timestamp string when the fault became Active (None for Injecting).
+    """
+    event_id = f"fault:{name}"
+    failure_type = spec.get('failureType', 'UNKNOWN')
+    injection_mode = spec.get('injectionMode', 'direct')
+    target = spec.get('target', {})
+    target_router = target.get('router', '')
+    target_interface = target.get('interface', '')
+    target_vrf = target.get('vrf', '')
+
+    import copy
+    config_dict = {
+        'failureType': failure_type,
+        'injectionMode': injection_mode,
+        'target': dict(target),
+        'parameters': dict(spec.get('parameters', {})),
+    }
+    config_json = json.dumps(config_dict)
+
+    def sql_upsert_fault_event(transaction):
+        # 1. Read current active row
+        results = transaction.execute_sql(
+            SQL_TEMPLATES['get_active_fault_event'],
+            params={'id': event_id},
+            param_types={'id': spanner.param_types.STRING}
+        )
+        row = results.one_or_none()
+
+        need_insert = True
+        if row:
+            existing_phase = row[0]
+            if existing_phase == phase:
+                need_insert = False
+            else:
+                # Close the existing row (SCD Type 2 versioning)
+                transaction.execute_update(
+                    SQL_TEMPLATES['close_fault_event'],
+                    params={'id': event_id},
+                    param_types={'id': spanner.param_types.STRING}
+                )
+
+        if need_insert:
+            transaction.execute_update(
+                SQL_TEMPLATES['insert_fault_event'],
+                params={
+                    'id': event_id,
+                    'name': name,
+                    'failure_type': failure_type,
+                    'injection_mode': injection_mode,
+                    'target_router': target_router,
+                    'target_interface': target_interface,
+                    'target_vrf': target_vrf,
+                    'phase': phase,
+                    'injected_at': injected_at or '',
+                    'config': config_json,
+                },
+                param_types={
+                    'id': spanner.param_types.STRING,
+                    'name': spanner.param_types.STRING,
+                    'failure_type': spanner.param_types.STRING,
+                    'injection_mode': spanner.param_types.STRING,
+                    'target_router': spanner.param_types.STRING,
+                    'target_interface': spanner.param_types.STRING,
+                    'target_vrf': spanner.param_types.STRING,
+                    'phase': spanner.param_types.STRING,
+                    'injected_at': spanner.param_types.STRING,
+                    'config': spanner.param_types.JSON,
+                }
+            )
+
+    try:
+        db_container['db'].run_in_transaction(sql_upsert_fault_event)
+        logger.info(f"Synced FaultEvent {event_id} (phase={phase}, type={failure_type}, mode={injection_mode})")
+    except Exception as e:
+        logger.error(f"Failed to sync FaultEvent {event_id}: {e}")
+
+
+async def close_fault_event(name: str):
+    """Close the active FaultEvent row in Spanner (SCD Type 2) when a NetworkFailure is deleted."""
+    event_id = f"fault:{name}"
+    logger.debug(f"Closing FaultEvent {event_id}")
+
+    def sql_close(transaction):
+        transaction.execute_update(
+            SQL_TEMPLATES['close_fault_event'],
+            params={'id': event_id},
+            param_types={'id': spanner.param_types.STRING}
+        )
+
+    try:
+        db_container['db'].run_in_transaction(sql_close)
+        logger.info(f"Closed FaultEvent {event_id} in Spanner")
+    except Exception as e:
+        logger.error(f"Failed to close FaultEvent {event_id}: {e}")
 
 
 async def sync_network_metrics(entity_id, entity_type, metrics, logger):

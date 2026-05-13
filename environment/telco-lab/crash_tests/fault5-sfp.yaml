@@ -1,8 +1,8 @@
 apiVersion: google.dev/v1
 kind: VyOSUnderlay
 metadata:
-  name: l3vpn-hub-spoke-underlay
-  namespace: default
+  name: l3vpn-underlay
+  namespace: network
 spec:
   infrastructureRef: l3vpn-hub-spoke-infra
   routing:

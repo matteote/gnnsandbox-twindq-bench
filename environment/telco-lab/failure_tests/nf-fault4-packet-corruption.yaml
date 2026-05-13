@@ -34,7 +34,7 @@ metadata:
     severity: medium
 spec:
   failureType: PACKET_CORRUPTION
-  infrastructureRef: l3vpn-hub-spoke-infra
+  infrastructureRef: l3vpn-infra
   target:
     router: p1
     # eth2 is the P1-to-P3 provider core link (VLAN 302, 172.16.40.0/24)

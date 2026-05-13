@@ -51,8 +51,13 @@ async def _wait_for_routers_leave_running(
             except (kopf.TemporaryError, kopf.PermanentError):
                 raise
             except Exception as e:
-                # If we can't read the router, conservatively assume still Running.
-                next_still_running.append(f"{rname}(error:{e})")
+                # Treat 404 (router already deleted) as "already left Running".
+                e_str = str(e)
+                if "404" in e_str or "Not Found" in e_str:
+                    logger.info(f"Router {rname} not found (404) — treating as already left Running state")
+                else:
+                    # If we can't read the router, conservatively assume still Running.
+                    next_still_running.append(f"{rname}(error:{e})")
 
         still_running = next_still_running
         if still_running:
@@ -113,7 +118,12 @@ async def _wait_for_routers_running(
             except (kopf.TemporaryError, kopf.PermanentError):
                 raise
             except Exception as e:
-                not_running.append(f"{rname}(error:{e})")
+                # Treat 404 (router already deleted) as "done" — no need to wait.
+                e_str = str(e)
+                if "404" in e_str or "Not Found" in e_str:
+                    logger.info(f"Router {rname} not found (404) — treating as done (already deleted)")
+                else:
+                    not_running.append(f"{rname}(error:{e})")
 
         if not not_running:
             logger.info(f"All routers reached Running state: {router_names}")
@@ -425,12 +435,18 @@ async def delete_vyosl3vpn(body, spec, name, namespace, logger, **kwargs):
     Reverses exactly what create_vyosl3vpn applied:
       • PE routers: removes the VPN's VRFs from spec.vrfs, clears spec.protocols.bgp,
         and removes the 'vrf' field from any interface that was assigned by this VPN.
+        All of this is done in a SINGLE merge-patch per router (combining what was
+        previously two separate patches) to halve the number of Ansible runs.
       • CE routers: clears spec.protocols.
+
+    All router patches are issued concurrently (asyncio.gather) so their Ansible
+    runs start simultaneously.  The handler then waits for every router to reach
+    Running state before releasing the lock, matching the create handler's behaviour.
 
     Uses the same reconcile lock and router-ready helpers as create so that a
     concurrent VPN creation cannot race against the cleanup patches.
     """
-    import json
+    import json as _json
 
     logger.info(f"Deleting VyOSL3VPN: {name} — removing router VRF/BGP config")
     await update_status(name, namespace, "VyOSL3VPN", "Deleting", "Deleting VyOSL3VPN")
@@ -456,11 +472,11 @@ async def delete_vyosl3vpn(body, spec, name, namespace, logger, **kwargs):
             k8s_client = kubernetes.dynamic.DynamicClient(kubernetes.client.ApiClient())
             router_api = k8s_client.resources.get(api_version='google.dev/v1', kind='VyOSRouter')
 
-            # ── PE router cleanup ────────────────────────────────────────────
-            for router_spec in pe_routers:
+            # ── Helper: build and apply a single combined patch for one PE router ──
+            async def _cleanup_pe_router(router_spec):
                 router_name = router_spec.get('name')
                 if not router_name:
-                    continue
+                    return
 
                 vpn_vrf_names = {v['name'] for v in router_spec.get('vrfs', [])}
 
@@ -471,7 +487,6 @@ async def delete_vyosl3vpn(body, spec, name, namespace, logger, **kwargs):
                         vpn_assigned_interfaces.add(iface_name)
 
                 try:
-                    import json as _json
                     current_router_obj = router_api.get(name=router_name, namespace=namespace)
                     # Convert to plain Python dict (same as create handler) to avoid
                     # ResourceField serialization errors when putting the cleaned list
@@ -482,7 +497,7 @@ async def delete_vyosl3vpn(body, spec, name, namespace, logger, **kwargs):
                     current_spec = _json.loads(_json.dumps(_sanitized)).get('spec') or {}
                 except Exception as e:
                     logger.error(f"Cannot read VyOSRouter {router_name}: {e} — skipping")
-                    continue
+                    return
 
                 # ── Remove VPN-owned VRFs from the current list ──────────────
                 current_vrfs = current_spec.get('vrfs') or []
@@ -513,7 +528,26 @@ async def delete_vyosl3vpn(body, spec, name, namespace, logger, **kwargs):
                     f"({len(current_bgp_vrfs)} → {len(cleaned_bgp_vrfs)} BGP VRFs remain)"
                 )
 
-                # ── Merge-patch: cleaned VRFs + cleaned BGP VRFs ─────────────
+                # ── Strip 'vrf' from affected interfaces in-memory ────────────
+                # Previously this required a second K8s patch (JSON-patch) after
+                # the merge-patch, triggering a second Ansible run per PE router.
+                # By including the cleaned interface list in the same merge-patch
+                # we reduce two Ansible runs to one per PE router.
+                current_interfaces = current_spec.get('interfaces') or []
+                cleaned_interfaces = []
+                for iface in current_interfaces:
+                    iface_copy = dict(iface)
+                    if iface_copy.get('name') in vpn_assigned_interfaces:
+                        iface_copy.pop('vrf', None)
+                    cleaned_interfaces.append(iface_copy)
+
+                if vpn_assigned_interfaces:
+                    logger.info(
+                        f"VyOSRouter {router_name}: removing 'vrf' field from "
+                        f"interfaces {vpn_assigned_interfaces} (combined into single patch)"
+                    )
+
+                # ── Single combined merge-patch: VRFs + BGP VRFs + interfaces ─
                 # Global iBGP (AS number, neighbors, route-reflector) is
                 # preserved because we carry it forward unchanged in cleaned_bgp.
                 # Only the VRF-specific BGP entries added by this VPN are removed.
@@ -523,52 +557,23 @@ async def delete_vyosl3vpn(body, spec, name, namespace, logger, **kwargs):
                         'protocols': {
                             'bgp': cleaned_bgp,
                         },
+                        'interfaces': cleaned_interfaces,
                     }
                 }
                 try:
                     await patch_vyos_router(router_name, namespace, router_patch)
-                    logger.info(f"Patched VyOSRouter {router_name}: removed VPN VRFs {vpn_vrf_names}")
+                    logger.info(
+                        f"Patched VyOSRouter {router_name}: removed VPN VRFs {vpn_vrf_names} "
+                        f"and interface VRF assignments in a single patch"
+                    )
                 except Exception as e:
                     logger.error(f"Failed to patch VyOSRouter {router_name}: {e}")
-                    continue
 
-                # ── JSON-patch: remove 'vrf' from affected interfaces ─────────
-                if vpn_assigned_interfaces:
-                    try:
-                        # Re-read to get the post-merge-patch interface list.
-                        updated_router = router_api.get(name=router_name, namespace=namespace)
-                        current_interfaces = updated_router.get('spec', {}).get('interfaces', []) or []
-
-                        json_patch = []
-                        for idx, iface in enumerate(current_interfaces):
-                            if iface.get('name') in vpn_assigned_interfaces and 'vrf' in iface:
-                                json_patch.append({
-                                    'op': 'remove',
-                                    'path': f'/spec/interfaces/{idx}/vrf',
-                                })
-
-                        if json_patch:
-                            router_api.patch(
-                                name=router_name,
-                                namespace=namespace,
-                                body=json_patch,
-                                content_type='application/json-patch+json',
-                            )
-                            logger.info(
-                                f"VyOSRouter {router_name}: removed 'vrf' field from "
-                                f"interfaces {vpn_assigned_interfaces}"
-                            )
-                    except Exception as e:
-                        logger.error(
-                            f"Failed to remove interface VRF assignments on "
-                            f"{router_name}: {e}"
-                        )
-
-            # ── CE router cleanup ────────────────────────────────────────────
-            for ce_spec in ce_routers:
+            # ── Helper: clear CE router protocols ────────────────────────────
+            async def _cleanup_ce_router(ce_spec):
                 ce_name = ce_spec.get('name')
                 if not ce_name:
-                    continue
+                    return
                 ce_patch = {'spec': {'protocols': {}}}
                 try:
                     await patch_vyos_router(ce_name, namespace, ce_patch)
@@ -576,11 +581,27 @@ async def delete_vyosl3vpn(body, spec, name, namespace, logger, **kwargs):
                 except Exception as e:
                     logger.error(f"Failed to patch CE router {ce_name}: {e}")
 
-            # ── Wait for all routers to finish reconfiguration ───────────────
+            # ── Patch all PE and CE routers concurrently ─────────────────────
+            # Previously routers were patched sequentially, so their Ansible runs
+            # were staggered.  Gathering them concurrently means all Ansible runs
+            # start at the same time; we then wait for the slowest one to finish.
+            logger.info(
+                f"VyOSL3VPN {name}: patching {len(pe_routers)} PE router(s) and "
+                f"{len(ce_routers)} CE router(s) concurrently"
+            )
+            await asyncio.gather(
+                *[_cleanup_pe_router(r) for r in pe_routers],
+                *[_cleanup_ce_router(r) for r in ce_routers],
+                return_exceptions=True,
+            )
+
+            # ── Wait for all routers to finish their Ansible reconfiguration ──
+            # This mirrors the create handler's two-phase wait so that the lock
+            # is not released while Ansible is still in-flight on the routers.
             if all_patched_routers:
-                logger.info(
-                    f"VyOSL3VPN {name} delete: waiting for routers to finish "
-                    f"reconfiguration: {all_patched_routers}"
+                await update_status(
+                    name, namespace, "VyOSL3VPN", "Deleting",
+                    f"Waiting for routers to finish reconfiguration: {all_patched_routers}"
                 )
                 await _wait_for_routers_leave_running(all_patched_routers, namespace, logger)
                 await _wait_for_routers_running(all_patched_routers, namespace, logger)

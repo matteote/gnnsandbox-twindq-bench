@@ -216,6 +216,22 @@ spec:
        created_at TIMESTAMP NOT NULL OPTIONS (allow_commit_timestamp=true),
        updated_at TIMESTAMP NOT NULL OPTIONS (allow_commit_timestamp=true)
      ) PRIMARY KEY (id)"
+  - "CREATE TABLE FaultEvent (
+       id STRING(MAX) NOT NULL,
+       name STRING(MAX) NOT NULL,
+       failure_type STRING(MAX) NOT NULL,
+       injection_mode STRING(MAX) NOT NULL,
+       target_router STRING(MAX),
+       target_interface STRING(MAX),
+       target_vrf STRING(MAX),
+       phase STRING(MAX) NOT NULL,
+       injected_at STRING(MAX),
+       config JSON,
+       valid_start_ts TIMESTAMP NOT NULL OPTIONS (allow_commit_timestamp=true),
+       valid_end_ts TIMESTAMP OPTIONS (allow_commit_timestamp=true)
+     ) PRIMARY KEY (id, valid_start_ts DESC)"
+  - "CREATE INDEX FaultEventByRouter ON FaultEvent(target_router, valid_start_ts DESC) STORING (failure_type, injection_mode, phase, injected_at)"
+  - "CREATE INDEX FaultEventByType ON FaultEvent(failure_type, valid_start_ts DESC) STORING (target_router, target_interface, phase, injected_at)"
   - "CREATE VIEW HasInterface_Edge SQL SECURITY INVOKER AS 
        SELECT 
          r.id AS router_id, r.valid_start_ts AS router_ts,
@@ -342,7 +358,8 @@ spec:
          LogicalSubnet,
          NetworkMetrics,
          NodeEmbedding,
-         TrafficFlow
+         TrafficFlow,
+         FaultEvent
        )
        EDGE TABLES (
          HasInterface_Edge 

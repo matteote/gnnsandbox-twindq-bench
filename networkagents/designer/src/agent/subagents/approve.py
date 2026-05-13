@@ -15,9 +15,9 @@
 from google.adk.agents import LlmAgent
 from google.adk.agents.callback_context import CallbackContext
 from google.genai import types
-from agent.subagents.prompts import descriptor_approve_prompt
+from agent.subagents.approve_prompt import descriptor_approve_prompt
 from tools.vyos import getVyosDescriptors
-from tools.design import deployDescriptor, deleteDescriptor
+from tools.design import deployDescriptor
 import logging
 
 logger = logging.getLogger(__name__)

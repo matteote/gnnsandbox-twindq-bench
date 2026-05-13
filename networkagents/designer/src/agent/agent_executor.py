@@ -502,11 +502,7 @@ class DesignerAgentExecutor(AgentExecutor):
         content = types.Content(
             role='user',
             parts=[types.Part.from_text(
-                text=(
-                    "Execute the following approved network change plan.\n\n"
-                    "approved_plan:\n"
-                    f"```json\n{plan_json}\n```"
-                )
+                text="Generate the CRD descriptors for the approved change plan."
             )],
         )
 
@@ -550,6 +546,39 @@ class DesignerAgentExecutor(AgentExecutor):
                                     task_id=task.id,
                                 )
                             )
+
+        # After the execution runner completes, verify the designer produced
+        # descriptors.  An empty state['design'] means the DescriptorDesigner
+        # silently produced no output (e.g. all-thinking response from the LLM).
+        # Detect this early and surface a clear error rather than silently
+        # completing with nothing deployed.
+        exec_session = await agent.session_service.get_session(
+            app_name="DesignerSupervisorAgent",
+            user_id="agent",
+            session_id=session_key,
+        )
+        design_output = exec_session.state.get('design', '') if exec_session else ''
+        if not design_output or not design_output.strip():
+            logger.error(
+                "DescriptorDesignerSubAgent produced no output (state['design'] is empty) "
+                "— execution pipeline aborted"
+            )
+            await event_queue.enqueue_event(
+                TaskStatusUpdateEvent(
+                    status=TaskStatus(
+                        state=TaskState.failed,
+                        message=new_agent_text_message(
+                            "The descriptor designer produced no output. "
+                            "Please try approving the plan again.",
+                            task.context_id, task.id,
+                        ),
+                    ),
+                    final=True,
+                    context_id=task.context_id,
+                    task_id=task.id,
+                )
+            )
+            return
 
         # Always emit a guaranteed final completed event.  The supervisor's
         # streaming call requires at least one final=True event to terminate.

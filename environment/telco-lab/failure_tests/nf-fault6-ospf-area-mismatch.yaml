@@ -33,7 +33,7 @@ metadata:
     severity: high
 spec:
   failureType: OSPF_AREA_MISMATCH
-  infrastructureRef: l3vpn-hub-spoke-infra
+  infrastructureRef: l3vpn-infra
   target:
     router: p2
     # eth2 is the P2-to-P4 provider core link (VLAN 303, 172.16.60.0/24).

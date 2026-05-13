@@ -15,6 +15,9 @@
 #   - LINK_DOWN
 #   - OSPF_AREA_MISMATCH
 #   - DUPLICATE_IP
+#   - TXQUEUE_STARVATION
+#   - OSPF_COST_INFLATION
+#   - VRF_RT_MISCONFIGURATION
 #
 # Variables (passed via extravars):
 #   failure_name    - Name of the NetworkFailure resource
@@ -22,7 +25,7 @@
 #   router          - Docker container name of the target router
 #   interface       - Router interface name (e.g., eth1)
 #   peer_ip         - BGP peer IP address (BGP_SESSION_DOWN only)
-#   vrf             - VRF name (BGP_SESSION_DOWN only)
+#   vrf             - VRF name (BGP_SESSION_DOWN / VRF_RT_MISCONFIGURATION only)
 #   mtu             - Target MTU value (MTU_MISMATCH only)
 #   error_rate      - Packet error rate e.g. "5%" (PACKET_CORRUPTION only)
 #   method          - "process_kill" or "loopback_disable" (PROCESS_CRASH only)
@@ -30,6 +33,13 @@
 #   wrong_area      - OSPF area to wrongly assign (OSPF_AREA_MISMATCH only)
 #   correct_area    - Current correct OSPF area (OSPF_AREA_MISMATCH only)
 #   duplicate_ip    - IP/prefix to duplicate (DUPLICATE_IP only)
+#   queue_length    - Target txqueuelen value (TXQUEUE_STARVATION only)
+#   ospf_cost       - OSPF cost to set (OSPF_COST_INFLATION only)
+ #   peer_router     - Second router name (LINK_DOWN bridge mode only)
+ #   link_down_mode  - "interface" or "bridge" (LINK_DOWN only)
+ #   bridge          - Derived Linux bridge name (LINK_DOWN bridge mode only)
+ #   wrong_rt        - Wrong RT import community (VRF_RT_MISCONFIGURATION only)
+ #   correct_rt      - Correct RT import community (VRF_RT_MISCONFIGURATION only)
 
 - name: NetworkFailure - Fault Injection
   hosts: all
@@ -224,32 +234,75 @@
 
     # =========================================================================
     # LINK_DOWN
+    # Two sub-modes:
+    #   interface mode (link_down_mode == 'interface'):
+    #     Brings down the interface inside the router container via docker exec.
+    #     Only the local router sees an immediate L1/L2 down event.
+    #   bridge mode (link_down_mode == 'bridge'):
+    #     Brings down the Linux bridge on the host that connects two routers.
+    #     Both ends see an immediate carrier-loss event simultaneously.
     # =========================================================================
-    - name: "[LINK_DOWN] Save interface name as original state"
+
+    # --- Interface mode ---
+    - name: "[LINK_DOWN/interface] Save original state"
       set_fact:
         original_state:
+          mode: "interface"
           interface: "{{ interface }}"
           router: "{{ router }}"
-      when: failure_type == 'LINK_DOWN'
+      when: failure_type == 'LINK_DOWN' and link_down_mode == 'interface'
 
-    - name: "[LINK_DOWN] Bring interface down using ip link set"
+    - name: "[LINK_DOWN/interface] Bring interface down inside router container"
       shell: >
         docker exec {{ router }} ip link set {{ interface }} down
-      when: failure_type == 'LINK_DOWN'
-      register: link_down_result
-      failed_when: link_down_result.rc != 0
+      when: failure_type == 'LINK_DOWN' and link_down_mode == 'interface'
+      register: link_down_iface_result
+      failed_when: link_down_iface_result.rc != 0
 
-    - name: "[LINK_DOWN] Verify interface is down"
+    - name: "[LINK_DOWN/interface] Verify interface is down"
       shell: >
         docker exec {{ router }} ip link show {{ interface }} | grep -o "DOWN\|UP"
-      when: failure_type == 'LINK_DOWN'
-      register: link_verify
+      when: failure_type == 'LINK_DOWN' and link_down_mode == 'interface'
+      register: link_iface_verify
       failed_when: false
 
-    - name: "[LINK_DOWN] Log verification"
+    - name: "[LINK_DOWN/interface] Log verification"
       debug:
-        msg: "[{{ failure_name }}] Interface {{ router }}/{{ interface }} state: {{ link_verify.stdout | trim }}"
-      when: failure_type == 'LINK_DOWN'
+        msg: >
+          [{{ failure_name }}] Interface {{ router }}/{{ interface }} state:
+          {{ link_iface_verify.stdout | trim }}
+      when: failure_type == 'LINK_DOWN' and link_down_mode == 'interface'
+
+    # --- Bridge mode ---
+    - name: "[LINK_DOWN/bridge] Save original state"
+      set_fact:
+        original_state:
+          mode: "bridge"
+          bridge: "{{ bridge }}"
+          router: "{{ router }}"
+          peer_router: "{{ peer_router }}"
+      when: failure_type == 'LINK_DOWN' and link_down_mode == 'bridge'
+
+    - name: "[LINK_DOWN/bridge] Bring Linux bridge down on host"
+      shell: >
+        ip link set {{ bridge }} down
+      when: failure_type == 'LINK_DOWN' and link_down_mode == 'bridge'
+      register: link_down_bridge_result
+      failed_when: link_down_bridge_result.rc != 0
+
+    - name: "[LINK_DOWN/bridge] Verify bridge is down"
+      shell: >
+        ip link show {{ bridge }} | grep -o "DOWN\|UP"
+      when: failure_type == 'LINK_DOWN' and link_down_mode == 'bridge'
+      register: link_bridge_verify
+      failed_when: false
+
+    - name: "[LINK_DOWN/bridge] Log verification"
+      debug:
+        msg: >
+          [{{ failure_name }}] Bridge {{ bridge }} ({{ router }} ↔ {{ peer_router }}) state:
+          {{ link_bridge_verify.stdout | trim }}
+      when: failure_type == 'LINK_DOWN' and link_down_mode == 'bridge'
 
     # =========================================================================
     # OSPF_AREA_MISMATCH
@@ -332,6 +385,177 @@
           [{{ failure_name }}] Duplicate IP {{ duplicate_ip }} added to
           {{ router }}/{{ interface }}: {{ dup_ip_verify.stdout | trim }}
       when: failure_type == 'DUPLICATE_IP'
+
+    # =========================================================================
+    # TXQUEUE_STARVATION
+    # Fault 8: Shrink Linux txqueuelen on a router interface to cause constant
+    # queue overflow under load. This is a kernel parameter — invisible to VyOS
+    # config, GitOps, and all configuration management systems.
+    # Only supported in direct injection mode.
+    # =========================================================================
+    - name: "[TXQUEUE_STARVATION] Read current txqueuelen from router interface"
+      shell: >
+        docker exec {{ router }}
+        ip link show {{ interface }} | awk '/qlen/ {for(i=1;i<=NF;i++) if ($i=="qlen") print $(i+1)}'
+      register: current_qlen_result
+      when: failure_type == 'TXQUEUE_STARVATION'
+      failed_when: false
+
+    - name: "[TXQUEUE_STARVATION] Save original txqueuelen as Ansible fact"
+      set_fact:
+        original_state:
+          interface: "{{ interface }}"
+          original_queue_length: "{{ current_qlen_result.stdout | trim | default('1000') | int }}"
+      when: failure_type == 'TXQUEUE_STARVATION'
+
+    - name: "[TXQUEUE_STARVATION] Set txqueuelen to starvation value via ip link"
+      shell: >
+        docker exec {{ router }}
+        ip link set {{ interface }} txqueuelen {{ queue_length | default(20) }}
+      when: failure_type == 'TXQUEUE_STARVATION'
+      register: txqueue_inject_result
+      failed_when: txqueue_inject_result.rc != 0
+
+    - name: "[TXQUEUE_STARVATION] Verify txqueuelen was applied"
+      shell: >
+        docker exec {{ router }}
+        ip link show {{ interface }} | awk '/qlen/ {for(i=1;i<=NF;i++) if ($i=="qlen") print $(i+1)}'
+      register: verify_qlen
+      when: failure_type == 'TXQUEUE_STARVATION'
+      failed_when: false
+
+    - name: "[TXQUEUE_STARVATION] Log verification"
+      debug:
+        msg: >
+          [{{ failure_name }}] txqueuelen on {{ router }}/{{ interface }} is now
+          {{ verify_qlen.stdout | trim }} (target: {{ queue_length | default(20) }},
+          original: {{ original_state.original_queue_length }}).
+          NOTE: This kernel parameter is invisible to VyOS config and all config management systems.
+      when: failure_type == 'TXQUEUE_STARVATION'
+
+    # =========================================================================
+    # OSPF_COST_INFLATION
+    # Fault 9: Set OSPF interface cost to 65535 on a core link. The OSPF
+    # adjacency remains Full — cost changes never break adjacencies. All traffic
+    # reroutes via longer detour paths. Cost 65535 is a legal configured value
+    # that generates no alarms from any traditional monitoring system.
+    # Supports both direct and operator injection modes.
+    # =========================================================================
+    - name: "[OSPF_COST_INFLATION] Read current OSPF cost from router interface"
+      shell: >
+        docker exec {{ router }}
+        vtysh -c "show ip ospf interface {{ interface }}" 2>/dev/null |
+        awk '/Cost:/ {print $2}' | head -1
+      register: current_ospf_cost_result
+      when: failure_type == 'OSPF_COST_INFLATION'
+      failed_when: false
+
+    - name: "[OSPF_COST_INFLATION] Save original OSPF cost as Ansible fact"
+      set_fact:
+        original_state:
+          interface: "{{ interface }}"
+          original_ospf_cost: "{{ current_ospf_cost_result.stdout | trim | default('1') | int }}"
+      when: failure_type == 'OSPF_COST_INFLATION'
+
+    - name: "[OSPF_COST_INFLATION] Set OSPF interface cost to inflated value via vtysh"
+      shell: |
+        docker exec {{ router }} vtysh \
+          -c "configure terminal" \
+          -c "interface {{ interface }}" \
+          -c "ip ospf cost {{ ospf_cost | default(65535) }}" \
+          -c "exit" \
+          -c "exit"
+      when: failure_type == 'OSPF_COST_INFLATION'
+      register: ospf_cost_inject_result
+      failed_when: ospf_cost_inject_result.rc != 0
+
+    - name: "[OSPF_COST_INFLATION] Verify OSPF cost was applied"
+      shell: >
+        docker exec {{ router }}
+        vtysh -c "show ip ospf interface {{ interface }}" 2>/dev/null |
+        awk '/Cost:/ {print $2}' | head -1
+      register: verify_ospf_cost
+      when: failure_type == 'OSPF_COST_INFLATION'
+      failed_when: false
+
+    - name: "[OSPF_COST_INFLATION] Verify OSPF adjacency still Full (cost change must not break adjacency)"
+      shell: >
+        docker exec {{ router }}
+        vtysh -c "show ip ospf neighbor {{ interface }}" 2>/dev/null |
+        grep -E "Full|2-Way" | head -5 || echo "Checking adjacency state..."
+      register: ospf_adj_verify
+      when: failure_type == 'OSPF_COST_INFLATION'
+      failed_when: false
+
+    - name: "[OSPF_COST_INFLATION] Log verification"
+      debug:
+        msg: >
+          [{{ failure_name }}] OSPF cost on {{ router }}/{{ interface }} is now
+          {{ verify_ospf_cost.stdout | trim }} (target: {{ ospf_cost | default(65535) }},
+          original: {{ original_state.original_ospf_cost }}).
+          Adjacency state: {{ ospf_adj_verify.stdout | trim }}.
+          NOTE: Cost 65535 is a legal value — no alarms will fire from traditional monitoring.
+      when: failure_type == 'OSPF_COST_INFLATION'
+
+    # =========================================================================
+    # VRF_RT_MISCONFIGURATION
+    # Fault 4 variant: Change the import Route Target on a PE router VRF to a
+    # non-matching community. The PE no longer imports hub routes, silently
+    # isolating the attached spoke site. All BGP sessions remain Established.
+    # Zero alarms. Supports both direct and operator injection modes.
+    # =========================================================================
+    - name: "[VRF_RT_MISCONFIGURATION] Save correct RT as original state"
+      set_fact:
+        original_state:
+          vrf: "{{ vrf }}"
+          correct_rt: "{{ correct_rt }}"
+          wrong_rt: "{{ wrong_rt }}"
+      when: failure_type == 'VRF_RT_MISCONFIGURATION'
+
+    - name: "[VRF_RT_MISCONFIGURATION] Remove correct RT import from VRF"
+      shell: |
+        docker exec {{ router }} vtysh \
+          -c "configure terminal" \
+          -c "router bgp 65001 vrf {{ vrf }}" \
+          -c "no address-family ipv4 unicast" \
+          -c "exit" \
+          -c "exit"
+      when: failure_type == 'VRF_RT_MISCONFIGURATION'
+      register: rt_remove_result
+      failed_when: false
+
+    - name: "[VRF_RT_MISCONFIGURATION] Apply wrong RT import to VRF via VyOS"
+      shell: |
+        docker exec {{ router }} vtysh \
+          -c "configure terminal" \
+          -c "router bgp 65001 vrf {{ vrf }}" \
+          -c "address-family ipv4 unicast" \
+          -c "no route-target import {{ correct_rt }}" \
+          -c "route-target import {{ wrong_rt }}" \
+          -c "exit" \
+          -c "exit" \
+          -c "exit"
+      when: failure_type == 'VRF_RT_MISCONFIGURATION'
+      register: rt_inject_result
+      failed_when: rt_inject_result.rc != 0
+
+    - name: "[VRF_RT_MISCONFIGURATION] Verify VRF route table is now empty (hub routes gone)"
+      shell: >
+        docker exec {{ router }}
+        vtysh -c "show bgp vrf {{ vrf }} ipv4 unicast" 2>/dev/null |
+        grep -c "^*" || echo "0"
+      register: vrf_route_count
+      when: failure_type == 'VRF_RT_MISCONFIGURATION'
+      failed_when: false
+
+    - name: "[VRF_RT_MISCONFIGURATION] Log verification"
+      debug:
+        msg: >
+          [{{ failure_name }}] RT import on {{ router }} VRF {{ vrf }} changed from
+          {{ correct_rt }} to {{ wrong_rt }}.
+          VRF route count: {{ vrf_route_count.stdout | trim }} (expected: 0 hub routes).
+          NOTE: All BGP sessions remain Established — zero alarms will fire.
+      when: failure_type == 'VRF_RT_MISCONFIGURATION'
 
     # =========================================================================
     # Final summary

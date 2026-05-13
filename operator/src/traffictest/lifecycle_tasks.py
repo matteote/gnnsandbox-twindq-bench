@@ -193,11 +193,20 @@ async def create_traffic_test(
                 networkvm_ip_address, source_mgmt_ip, "POST", "/v1/flows", src_body
             )
             if not src_result["success"]:
-                logger.error(
-                    "Failed to start source flow %s on %s: %s",
-                    flow_id, source_device, src_result.get("error"),
-                )
-                failed_sources.append(source_device)
+                if src_result.get("http_code") == 409:
+                    # Flow is already running on the source (e.g. from a
+                    # previous attempt that was retried).  Treat as success so
+                    # the create is idempotent — the sender is already active.
+                    logger.info(
+                        "Source flow %s already running on %s — continuing (idempotent)",
+                        flow_id, source_device,
+                    )
+                else:
+                    logger.error(
+                        "Failed to start source flow %s on %s: %s",
+                        flow_id, source_device, src_result.get("error"),
+                    )
+                    failed_sources.append(source_device)
         else:
             logger.error("No mgmt_ip for source device %s — cannot start flow %s", source_device, flow_id)
             failed_sources.append(source_device)

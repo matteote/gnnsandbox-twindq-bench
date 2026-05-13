@@ -13,7 +13,7 @@
 # limitations under the License.
 
 from google.adk.agents import LlmAgent
-from agent.subagents.prompts import descriptor_design_prompt
+from agent.subagents.design_prompt import descriptor_design_prompt
 from tools.design import getDesignDoc
 from tools.vyos import getVyosDescriptors, getDeployedCRs
 import logging

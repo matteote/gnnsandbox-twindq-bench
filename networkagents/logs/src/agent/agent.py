@@ -23,7 +23,6 @@ from descriptions import description
 import os
 import datetime
 import logging
-from agent_library.agentmiddleware.adk import ADKAgent
 from agent_library.trace.trace_plugin import TracePlugin
 
 logger = logging.getLogger(__name__)
@@ -50,7 +49,7 @@ class LogsAgent:
         self.root_agent = LlmAgent(
             name="LogsAgent",
             description=description,
-            model="gemini-2.0-flash",
+            model="gemini-2.5-flash",
             instruction=root_prompt.format(current_time=datetime.datetime.now().isoformat()),
             tools=[
                 MCPToolset(
@@ -60,13 +59,6 @@ class LogsAgent:
                     tool_filter=["query_log_entries"]
                 )
             ],
-        )
-
-        self.app_name = "LogsAgent"
-        self.adk_agent = ADKAgent(
-            adk_agent=self.root_agent,
-            app_name=self.app_name,
-            use_in_memory_services=True
         )
 
         self.runner = Runner(

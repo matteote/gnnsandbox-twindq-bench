@@ -52,8 +52,13 @@ async def _wait_for_routers_leave_running(
             except (kopf.TemporaryError, kopf.PermanentError):
                 raise
             except Exception as e:
-                # If we can't read the router, conservatively assume still Running.
-                next_still_running.append(f"{rname}(error:{e})")
+                # Treat 404 (router already deleted) as "already left Running".
+                e_str = str(e)
+                if "404" in e_str or "Not Found" in e_str:
+                    logger.info(f"Router {rname} not found (404) — treating as already left Running state")
+                else:
+                    # If we can't read the router, conservatively assume still Running.
+                    next_still_running.append(f"{rname}(error:{e})")
 
         still_running = next_still_running
         if still_running:
@@ -112,7 +117,12 @@ async def _wait_for_routers_running(
             except (kopf.TemporaryError, kopf.PermanentError):
                 raise
             except Exception as e:
-                not_running.append(f"{rname}(error:{e})")
+                # Treat 404 (router already deleted) as "done" — no need to wait.
+                e_str = str(e)
+                if "404" in e_str or "Not Found" in e_str:
+                    logger.info(f"Router {rname} not found (404) — treating as done (already deleted)")
+                else:
+                    not_running.append(f"{rname}(error:{e})")
 
         if not not_running:
             logger.info(f"All routers reached Running state: {router_names}")
@@ -319,25 +329,5 @@ async def delete_vyosunderlay(body, spec, name, namespace, logger, **kwargs):
                 logger.info(f"Cleared underlay config from VyOSRouter {router_name}")
             except Exception as e:
                 logger.error(f"Failed to clear underlay config from VyOSRouter {router_name}: {e}")
-
-        if patched_routers:
-            try:
-                logger.info(
-                    f"VyOSUnderlay {name} delete: waiting for routers to finish "
-                    f"reconfiguration: {patched_routers}"
-                )
-                await _wait_for_routers_leave_running(patched_routers, namespace, logger)
-                await _wait_for_routers_running(patched_routers, namespace, logger)
-            except kopf.PermanentError:
-                logger.error(
-                    f"Permanent error while waiting for routers during VyOSUnderlay {name} "
-                    f"cleanup; router config may need manual inspection"
-                )
-            except Exception as e:
-                logger.error(
-                    f"Unexpected error while waiting for routers during VyOSUnderlay {name} "
-                    f"cleanup: {e}",
-                    exc_info=True,
-                )
 
         logger.info(f"VyOSUnderlay {name}: underlay config cleared from all routers — releasing provisioning lock")

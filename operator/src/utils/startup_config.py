@@ -67,8 +67,8 @@ class StartupConfig:
         #   Avoid setting this >> 15 for VPN mode to keep the semaphore wait queue small.
         #
         #   More handlers with varied workloads; 20 gives enough headroom.
-        self.max_workers_default = int(os.getenv("KOPF_MAX_WORKERS_DEFAULT", "25"))
-        self.max_workers_free5gc = int(os.getenv("KOPF_MAX_WORKERS_FREE5GC", "25"))
+        self.max_workers_default = int(os.getenv("KOPF_MAX_WORKERS_DEFAULT", "30"))
+        self.max_workers_free5gc = int(os.getenv("KOPF_MAX_WORKERS_FREE5GC", "30"))
         
         # Networking Settings
         self.request_timeout = int(os.getenv("KOPF_REQUEST_TIMEOUT", "60"))

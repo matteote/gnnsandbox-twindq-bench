@@ -52,6 +52,7 @@
     mode: '0644'
   loop:
    - designdoc.md
+   - failure-analysis.md
 
 - name: add to master branch in networkdesign repo
   command: sudo -u git git add .

@@ -33,7 +33,7 @@ metadata:
     severity: critical
 spec:
   failureType: PROCESS_CRASH
-  infrastructureRef: l3vpn-hub-spoke-infra
+  infrastructureRef: l3vpn-infra
   target:
     router: rr1
   parameters:
