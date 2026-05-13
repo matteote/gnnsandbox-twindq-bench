@@ -48,6 +48,7 @@ spec:
               required:
                 - network_name
                 - ip_address
+                - gateway
               properties:
                 network_name: 
                   type: string

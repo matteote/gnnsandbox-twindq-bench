@@ -286,7 +286,15 @@ class _LogicalTopologyWidgetState extends State<LogicalTopologyWidget>
         if (ifaceData == null) continue;
         final tx = (ifaceData['byte_sent_throughput'] as num?)?.toDouble() ?? 0.0;
         final rx = (ifaceData['byte_recv_throughput'] as num?)?.toDouble() ?? 0.0;
-        result[conn.id] = {'txBps': tx, 'rxBps': rx};
+        // Link capacity in bps from PhysicalLink.bandwidth (may be null for
+        // unlimited or unknown links).
+        final capacityBps =
+            conn.properties['linkBandwidthBps'] as double?;
+        result[conn.id] = {
+          'txBps': tx,
+          'rxBps': rx,
+          if (capacityBps != null) 'capacityBps': capacityBps,
+        };
       }
       // No sourceInterface → skip.  Summing all interfaces on the router and
       // assigning the total to every connection from that node is misleading
@@ -744,15 +752,43 @@ class TopologyPainter extends CustomPainter {
 
   // ── Colour encoding ────────────────────────────────────────────────────────
 
-  /// Line colour based on combined TX+RX throughput.
-  Color _linkColor(double totalBps) {
-    if (totalBps <= 0) return Colors.blueGrey.withValues(alpha: 0.4);
-    if (totalBps < 1e6) return Colors.green.withValues(alpha: 0.80);   // < 1 Mbps
-    if (totalBps < 10e6) return Colors.orange.withValues(alpha: 0.90); // < 10 Mbps
-    return Colors.red.shade600.withValues(alpha: 0.9);                 // ≥ 10 Mbps
+  /// Line colour based on utilisation % of link capacity.
+  ///
+  /// When [capacityBps] is known (> 0) the colour reflects the % of the link
+  /// bandwidth that is currently in use:
+  ///   < 60 %  → green   (healthy)
+  ///   60–80 % → amber   (moderate)
+  ///   80–90 % → orange  (high)
+  ///   ≥ 90 %  → red     (critical)
+  ///
+  /// When capacity is unknown (null / 0) the colour falls back to a simple
+  /// presence/absence check: any traffic → green, no traffic → grey.
+  Color _linkColor(double totalBitps, double? capacityBps) {
+    if (capacityBps != null && capacityBps > 0) {
+      final pct = totalBitps / capacityBps * 100;
+      if (pct < 60) return Colors.green.withValues(alpha: 0.85);
+      if (pct < 80) return Colors.amber.withValues(alpha: 0.90);
+      if (pct < 90) return Colors.orange.withValues(alpha: 0.90);
+      return Colors.red.shade600.withValues(alpha: 0.9);
+    }
+    // Fallback when capacity is unknown
+    if (totalBitps <= 0) return Colors.blueGrey.withValues(alpha: 0.4);
+    return Colors.green.withValues(alpha: 0.80);
   }
 
-  /// Compact human-readable bit rate string.
+  /// Midpoint label: shows throughput with utilisation % in brackets when
+  /// capacity is known (e.g. "42.3 M (37%)"), otherwise just the throughput
+  /// (e.g. "42.3 M").
+  String _linkLabel(double totalBitps, double? capacityBps) {
+    final throughput = _bpsLabel(totalBitps);
+    if (capacityBps != null && capacityBps > 0) {
+      final pct = totalBitps / capacityBps * 100;
+      return '$throughput (${pct.toStringAsFixed(0)}%)';
+    }
+    return throughput;
+  }
+
+  /// Compact human-readable bit rate string (fallback label).
   String _bpsLabel(double bps) {
     if (bps >= 1e9) return '${(bps / 1e9).toStringAsFixed(1)} G';
     if (bps >= 1e6) return '${(bps / 1e6).toStringAsFixed(1)} M';
@@ -779,10 +815,11 @@ class TopologyPainter extends CustomPainter {
       if (metrics != null && isRouterLink) {
         // txBps / rxBps are in bytes/sec (from node_network_*_bytes_total via
         // ALIGN_RATE).  Multiply by 8 to convert to bits/sec so that
-        // _linkColor thresholds and _bpsLabel suffixes (K/M/G) correctly
-        // represent Kbps / Mbps / Gbps.
+        // utilisation % and _bpsLabel suffixes (K/M/G) correctly represent
+        // Kbps / Mbps / Gbps.
         final totalBitps = ((metrics['txBps'] ?? 0) + (metrics['rxBps'] ?? 0)) * 8;
-        lineColor = _linkColor(totalBitps);
+        final capacityBps = metrics['capacityBps'];
+        lineColor = _linkColor(totalBitps, capacityBps);
         strokeWidth = totalBitps > 0 ? 3.0 : 1.5;
       } else {
         lineColor = Colors.blueGrey.withValues(alpha: 0.5);
@@ -798,11 +835,12 @@ class TopologyPainter extends CustomPainter {
           ..style = PaintingStyle.stroke,
       );
 
-      // Throughput label at the midpoint, router links only.
+      // Utilisation label at the midpoint, router links only.
       if (metrics != null && isRouterLink) {
         final totalBitps = ((metrics['txBps'] ?? 0) + (metrics['rxBps'] ?? 0)) * 8;
+        final capacityBps = metrics['capacityBps'];
         final mid = Offset((p1.dx + p2.dx) / 2, (p1.dy + p2.dy) / 2);
-        _drawLinkLabel(canvas, _bpsLabel(totalBitps), mid, lineColor);
+        _drawLinkLabel(canvas, _linkLabel(totalBitps, capacityBps), mid, lineColor);
       }
     }
   }

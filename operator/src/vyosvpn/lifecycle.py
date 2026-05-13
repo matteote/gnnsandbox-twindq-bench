@@ -604,7 +604,10 @@ async def delete_vyosl3vpn(body, spec, name, namespace, logger, **kwargs):
                     f"Waiting for routers to finish reconfiguration: {all_patched_routers}"
                 )
                 await _wait_for_routers_leave_running(all_patched_routers, namespace, logger)
-                await _wait_for_routers_running(all_patched_routers, namespace, logger)
+                # Use a shorter timeout for the delete path (120s vs 600s for create).
+                # Removing VRF/BGP config is faster than adding it, and we don't need
+                # to wait as long before releasing the lock.
+                await _wait_for_routers_running(all_patched_routers, namespace, logger, timeout=120)
 
             logger.info(
                 f"VyOSL3VPN {name}: VRF/BGP config removed from all routers — "

@@ -607,6 +607,12 @@ class Appstate extends ChangeNotifier {
               // prefix that does NOT appear in NetworkMetrics node_name.
               'sourceRouterName': connData['source_router_name'] ?? '',
               'targetRouterName': connData['target_router_name'] ?? '',
+              // Link capacity in bits-per-second from PhysicalLink.bandwidth.
+              // Used by the topology painter to compute utilisation % and
+              // colour-code the link accordingly.
+              'linkBandwidthBps': connData['link_bandwidth_bps'] != null
+                  ? (connData['link_bandwidth_bps'] as num).toDouble()
+                  : null,
             },
           ));
         }

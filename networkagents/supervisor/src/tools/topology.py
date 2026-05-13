@@ -27,6 +27,35 @@ GRAPH_NAME = 'networkGraph'
 
 logger = logging.getLogger(__name__)
 
+
+def _parse_bandwidth_bps(bw_str: str):
+    """Convert a CRD bandwidth string to bits-per-second (int), or None.
+
+    Handles the VyOSInfrastructure CRD pattern: ^([0-9]+[kmg]?bit|unlimited)$
+    Examples:
+        '1gbit'     → 1_000_000_000
+        '100mbit'   → 100_000_000
+        '10kbit'    → 10_000
+        '500bit'    → 500
+        'unlimited' → None
+    """
+    if not bw_str or bw_str.lower() == 'unlimited':
+        return None
+    s = bw_str.lower().strip()
+    try:
+        if s.endswith('gbit'):
+            return int(s[:-4]) * 1_000_000_000
+        if s.endswith('mbit'):
+            return int(s[:-4]) * 1_000_000
+        if s.endswith('kbit'):
+            return int(s[:-4]) * 1_000
+        if s.endswith('bit'):
+            return int(s[:-3])
+    except ValueError:
+        pass
+    logger.warning("Could not parse bandwidth string '%s'", bw_str)
+    return None
+
 #####################################################################################
 # Graph stuff
 #####################################################################################
@@ -202,8 +231,13 @@ def fetch_physical_topology(timestamp_str: str = None):
                             'target_router_id': remote_router_id,
                             'target_router_name': remote_router_name,
                             'target_interface': remote_interface_name,
+                            'link_bandwidth_bps': None,  # populated below via _add_link_bandwidths
                         })
         
+        # Fetch link bandwidths and attach to connections
+        logger.debug("Fetching link bandwidths from Spanner")
+        _add_link_bandwidths(database, topology['connections'], target_timestamp)
+
         # Now fetch embeddings for all routers and their interfaces
         logger.debug(f"Fetching embeddings for {len(routers)} routers")
         _add_embeddings_to_routers(database, routers, target_timestamp)
@@ -895,6 +929,64 @@ def build_graph(database, edge_label=None):
 #####################################################################################
 # Anomalies & Snapshots
 #####################################################################################
+
+def _add_link_bandwidths(database, connections, target_timestamp=None):
+    """Fetch PhysicalLink.bandwidth for each connection and attach as link_bandwidth_bps.
+
+    Queries Spanner for the bandwidth string stored on each PhysicalLink row and
+    converts it to bits-per-second using _parse_bandwidth_bps().  Results are
+    written back into the connection dicts in-place.
+
+    Args:
+        database: Spanner database connection
+        connections: list of connection dicts (each must have an 'id' key)
+        target_timestamp: Optional datetime for SCD2 time-travel queries
+    """
+    link_ids = [c['id'] for c in connections if c.get('id')]
+    if not link_ids:
+        return
+
+    try:
+        if target_timestamp:
+            query = """
+                SELECT id, bandwidth
+                FROM PhysicalLink
+                WHERE id IN UNNEST(@link_ids)
+                  AND valid_start_ts <= @ts
+                  AND (valid_end_ts > @ts OR valid_end_ts IS NULL)
+            """
+            params = {'link_ids': link_ids, 'ts': target_timestamp}
+            param_types = {
+                'link_ids': spanner.param_types.Array(spanner.param_types.STRING),
+                'ts': spanner.param_types.TIMESTAMP,
+            }
+        else:
+            query = """
+                SELECT id, bandwidth
+                FROM PhysicalLink
+                WHERE id IN UNNEST(@link_ids)
+                  AND valid_end_ts IS NULL
+            """
+            params = {'link_ids': link_ids}
+            param_types = {'link_ids': spanner.param_types.Array(spanner.param_types.STRING)}
+
+        bw_map = {}
+        with database.snapshot() as snapshot:
+            results = snapshot.execute_sql(query, params=params, param_types=param_types)
+            for row in results:
+                link_id, bw_str = row[0], row[1]
+                bw_map[link_id] = _parse_bandwidth_bps(bw_str)
+
+        for conn in connections:
+            conn_id = conn.get('id')
+            if conn_id and conn_id in bw_map:
+                conn['link_bandwidth_bps'] = bw_map[conn_id]
+
+        logger.debug("Attached bandwidth to %d/%d connections", len(bw_map), len(link_ids))
+
+    except Exception as e:
+        logger.error("Error fetching link bandwidths: %s", e, exc_info=True)
+
 
 def fetch_snapshots():
     """
