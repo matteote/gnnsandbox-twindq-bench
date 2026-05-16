@@ -26,7 +26,7 @@ apiVersion: google.dev/v1
 kind: NetworkFailure
 metadata:
   name: fault3-process-crash
-  namespace: default
+  namespace: network
   labels:
     scenario: l3vpn-hub-spoke
     fault-type: process-crash

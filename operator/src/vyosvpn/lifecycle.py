@@ -449,7 +449,6 @@ async def delete_vyosl3vpn(body, spec, name, namespace, logger, **kwargs):
     import json as _json
 
     logger.info(f"Deleting VyOSL3VPN: {name} — removing router VRF/BGP config")
-    await update_status(name, namespace, "VyOSL3VPN", "Deleting", "Deleting VyOSL3VPN")
 
     # Names of VRFs owned by this VPN, keyed by router name.
     # Used to identify which VRFs to remove and which interfaces to un-assign.
@@ -463,6 +462,55 @@ async def delete_vyosl3vpn(body, spec, name, namespace, logger, **kwargs):
     if not all_patched_routers:
         logger.info(f"VyOSL3VPN {name}: no routers listed in spec, nothing to clean up")
         return
+
+    # Enforce sequential deletion ordering using deletionTimestamp.
+    #
+    # When multiple VyOSL3VPNs are deleted simultaneously, kopf fires all their
+    # delete handlers concurrently.  Checking status.phase for "Deleting" has a
+    # TOCTOU race: two handlers can both read "no other VPN is Deleting" before
+    # either has written its own Deleting status, and both proceed in parallel.
+    #
+    # deletionTimestamp is set atomically by the K8s API server at nanosecond
+    # precision when the delete request is received — it never changes and no
+    # two objects can share the same value.  We use it as a stable, race-free
+    # queue: a VPN only proceeds if no other VPN has an *earlier*
+    # deletionTimestamp (i.e. was deleted before us and is still present in
+    # etcd).  Once the earlier VPN's finalizer is released its CR disappears
+    # from the list and we naturally advance.
+    my_deletion_ts = (body.get('metadata') or {}).get('deletionTimestamp', '')
+    try:
+        _check_client = kubernetes.dynamic.DynamicClient(kubernetes.client.ApiClient())
+        _l3vpn_api = _check_client.resources.get(api_version='google.dev/v1', kind='VyOSL3VPN')
+        _all_vpns = _l3vpn_api.get(namespace=namespace)
+        for _vpn in (_all_vpns.items or []):
+            _vpn_dict = _vpn.to_dict() if hasattr(_vpn, 'to_dict') else _vpn
+            _other_name = (_vpn_dict.get('metadata') or {}).get('name', '')
+            if _other_name == name:
+                continue  # skip self
+            _other_deletion_ts = (_vpn_dict.get('metadata') or {}).get('deletionTimestamp', '')
+            # Only block on VPNs that are also being deleted AND were deleted before us.
+            if _other_deletion_ts and my_deletion_ts and _other_deletion_ts < my_deletion_ts:
+                logger.info(
+                    f"VyOSL3VPN {name}: another VPN ({_other_name}) was deleted earlier "
+                    f"(deletionTimestamp {_other_deletion_ts} < {my_deletion_ts}) — "
+                    f"waiting for it to be fully removed first"
+                )
+                await update_status(
+                    name, namespace, "VyOSL3VPN", "Queued",
+                    f"Waiting for VyOSL3VPN {_other_name} to finish deleting"
+                )
+                raise kopf.TemporaryError(
+                    f"Waiting for VyOSL3VPN {_other_name} (deleted earlier) to finish first",
+                    delay=10,
+                )
+    except (kopf.TemporaryError, kopf.PermanentError):
+        raise
+    except Exception as _check_exc:
+        # Non-fatal — if we can't list VPNs, proceed rather than block deletion.
+        logger.warning(f"VyOSL3VPN {name}: could not check for concurrent deletes: {_check_exc}")
+
+    # Mark as actively deleting only once we are first in the deletion queue.
+    await update_status(name, namespace, "VyOSL3VPN", "Deleting", "Deleting VyOSL3VPN")
 
     logger.info(f"VyOSL3VPN {name}: waiting for provisioning lock (delete)")
     async with router_provisioning_lock:

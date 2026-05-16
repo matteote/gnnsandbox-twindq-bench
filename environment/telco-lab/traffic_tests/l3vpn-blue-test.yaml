@@ -57,24 +57,42 @@
 #
 #   d1-hub-bidir-tcp    TCP  d1-blue ↔ dh-blue   Sheffield spoke ↔ hub
 #   d2-hub-bidir-udp    UDP  d2-blue ↔ dh-blue   Liverpool spoke ↔ hub (quality + push)
-#   d3-hub-bidir-tcp    TCP  d3-blue ↔ dh-blue   Huddersfield spoke ↔ hub  [NEW]
-#   all-spokes-hub-udp  UDP  d1+d2+d3 → dh-blue  Aggregate hub load probe  [NEW]
+#   d3-hub-bidir-tcp    TCP  d3-blue ↔ dh-blue   Huddersfield spoke ↔ hub
+#   all-spokes-hub-udp  UDP  d1+d2+d3 → dh-blue  Aggregate hub load probe
 #
 # ── Saturation design ───────────────────────────────────────────────────────
 #
-#   Hub PE-CE link (pe2-ce1-hub, 100 Mbit) receives aggregate from all spokes:
+#   Target: ~80 Mbps aggregate per PE-CE interface at the 20:00 simulated peak.
+#   CE-PE link bandwidth: 100 Mbit (all interfaces).
+#   80% utilisation target = 80 Mbps.
 #
-#     Uploads into hub at 20:00 sim peak:
-#       d1→hub ~35 Mbps + d2→hub ~22 Mbps + d3→hub ~28 Mbps
-#       + all-spokes aggregate ~21 Mbps (3 sources × 7 Mbps)  ≈ 106 Mbps
+#   Flow peak contributions at 20:00 sim (PM peak, bimodal + PM-bias):
 #
-#     Downloads from hub (outbound on hub PE-CE):
-#       hub→d1 ~88 Mbps + hub→d2 ~10 Mbps (constant) + hub→d3 ~80 Mbps
-#       ≈ 178 Mbps shared across 3 downstream PE-CE 100 Mbit links
+#     d1→hub: 12 + 8 + 3 + 2 = 25 Mbps (upload)
+#     hub→d1: 30 + 20 + 8 + 5 = 63 Mbps (download)
+#     d2→hub:  8 + 6 + 2 + 2 = 18 Mbps (upload)
+#     hub→d2: 28 + 18 + 7 + 4 = 57 Mbps (download)
+#     d3→hub: 10 + 7 + 3 + 2 = 22 Mbps (upload)
+#     hub→d3: 28 + 18 + 7 + 4 = 57 Mbps (download)
+#     all-spokes→hub (per source): 4 + 3 + 1 + 1 = 9 Mbps × 3 = 27 Mbps aggregate
 #
-#   Hub inbound reaches ~100 Mbit on the hub PE-CE at evening peak, generating
-#   the congestion and queuing events the GNN needs.  Each spoke PE-CE link
-#   saturates independently on the hub-to-spoke download direction.
+#   Aggregate per PE-CE at peak:
+#     pe2-ce1-hub inbound:  d1→hub + d2→hub + d3→hub + all-spokes
+#                           = 25 + 18 + 22 + 27 = 92 Mbps  (hub absorbs all spoke uploads)
+#     pe2-ce1-hub outbound: hub→d1 + hub→d2 + hub→d3
+#                           = 63 + 57 + 57 = 177 Mbps (shared across 3 downstream links)
+#     pe1-ce1-spoke outbound: hub→d1 = 63 Mbps  ✓
+#     pe1-ce1-spoke inbound:  d1→hub = 25 Mbps  ✓
+#     pe3-ce2-spoke outbound: hub→d2 = 57 Mbps  ✓
+#     pe3-ce2-spoke inbound:  d2→hub = 18 Mbps  ✓
+#     pe4-ce3-spoke outbound: hub→d3 = 57 Mbps  ✓
+#     pe4-ce3-spoke inbound:  d3→hub = 22 Mbps  ✓
+#
+#   Note: The hub PE-CE inbound slightly exceeds 80 Mbps (92 Mbps) because the
+#   hub must aggregate all spoke uploads simultaneously — this is the intended
+#   congestion point for GNN anomaly detection. Each spoke PE-CE download link
+#   is independently loaded at 57-63 Mbps (~60% utilisation), with the hub
+#   inbound being the primary saturation point.
 #
 # ── Metrics ─────────────────────────────────────────────────────────────────
 #
@@ -92,16 +110,14 @@
 #   Sheffield (pe1/Oxford) → Nottingham hub (pe2/Cambridge) via p1.
 #
 #   Forward  (d1→hub): user-plane uploads — session data, telemetry, signalling.
-#                      Base 12 Mbps; peaks ~35 Mbps at 08:00 and 20:00 simulated.
+#                      Base 12 Mbps; peaks ~25 Mbps at 08:00 and 20:00 simulated.
 #   Reverse  (hub→d1): content delivery — video, app updates, streaming cache.
-#                      Base 30 Mbps; peaks ~88 Mbps at 20:00 simulated.
+#                      Base 30 Mbps; peaks ~63 Mbps at 20:00 simulated.
 #                      PM peak is heavier (streaming dominates evening demand).
 #
 #   Composite forward waveform:
-#     bw(t) = 12 + 8×sin(2π(t+75)/180)   # bimodal (AM + PM)
-#               + 3×sin(2π(t+210)/360)    # PM asymmetry
-#               + 2×sin(2π(t+1470)/2520)  # weekend lift
-#               + noise ±5%
+#     bw(t) = 12 + 8×sin(2π(t−75)/180) + 3×sin(2π(t−210)/360) + 2×sin(2π(t−1470)/2520)
+#     AM peak ~25 Mbps; PM peak ~25 Mbps (+ PM-bias makes PM slightly heavier)
 #
 #   Prometheus flow IDs:
 #     d1-hub-bidir-tcp_d1-blue      role=source
@@ -112,7 +128,7 @@ apiVersion: google.dev/v1
 kind: TrafficTest
 metadata:
   name: d1-hub-bidir-tcp
-  namespace: default
+  namespace: network
   labels:
     scenario: l3vpn-spoke-hub
     vpn: blue-spoke
@@ -131,9 +147,9 @@ spec:
 
   # ── d1-blue → dh-blue : user-plane uploads / signalling ─────────────────
   # bw(t) = 12 + 8×sin(2π(t−75)/180) + 3×sin(2π(t−210)/360) + 2×sin(2π(t−1470)/2520)
-  # AM peak ~35 Mbps at 08:00 sim; PM peak ~35 Mbps at 20:00 sim;
-  # overnight floor ~2 Mbps; weekend evenings ~5 Mbps heavier
-  bandwidth: 40Mbps
+  # AM peak ~25 Mbps at 08:00 sim; PM peak ~25 Mbps at 20:00 sim;
+  # overnight floor ~2 Mbps; weekend evenings ~4 Mbps heavier
+  bandwidth: 30Mbps
   pattern_type: multi_sine
   pattern_config:
     time_reference: elapsed
@@ -151,14 +167,14 @@ spec:
         phase_offset: -1470  # peak Saturday evening simulated (2100 s elapsed)
     noise_stddev_pct: 5.0
     min_rate: 2Mbps
-    max_rate: 70Mbps
+    max_rate: 45Mbps
 
   # ── dh-blue → d1-blue : content delivery / video streaming ──────────────
   # bw(t) = 30 + 20×sin(2π(t−75)/180) + 8×sin(2π(t−210)/360) + 5×sin(2π(t−1470)/2520)
-  # PM peak ~88 Mbps (streaming demand) > AM peak ~68 Mbps;
+  # PM peak ~63 Mbps (streaming demand) > AM peak ~50 Mbps;
   # overnight floor ~5 Mbps (background updates, config push)
   bidirectional: true
-  reverse_bandwidth: 90Mbps
+  reverse_bandwidth: 70Mbps
   reverse_pattern_type: multi_sine
   reverse_pattern_config:
     time_reference: elapsed
@@ -166,7 +182,7 @@ spec:
     components:
       - period: 180
         amplitude: 20Mbps
-        phase_offset: -75    # bimodal: AM ~68 Mbps, PM ~88 Mbps (with PM-bias)
+        phase_offset: -75    # bimodal: AM ~50 Mbps, PM ~63 Mbps (with PM-bias)
       - period: 360
         amplitude: 8Mbps
         phase_offset: -210   # PM bias: evening streaming heavier
@@ -175,7 +191,7 @@ spec:
         phase_offset: -1470  # weekend streaming boost
     noise_stddev_pct: 4.0
     min_rate: 5Mbps
-    max_rate: 95Mbps
+    max_rate: 80Mbps
 
   concurrent_users: 20
 
@@ -185,10 +201,10 @@ spec:
 #   Liverpool (pe3/Brighton) → Nottingham hub (pe2/Cambridge) via p3-p1/p4-p2.
 #
 #   Forward  (d2→hub): UDP uplink — video call quality probe, streaming signal.
-#                      Base 8 Mbps; bimodal peaks ~22 Mbps.
-#   Reverse  (hub→d2): constant 10 Mbps hub push — config delivery, monitoring
-#                      telemetry, firmware update chunks.
-#                      Deliberate constant rate so deviations are easy to detect.
+#                      Base 8 Mbps; bimodal peaks ~18 Mbps.
+#   Reverse  (hub→d2): content delivery — video streaming, config push.
+#                      Base 28 Mbps; peaks ~57 Mbps at 20:00 sim.
+#                      Changed from constant to multi_sine to load pe3-ce2-spoke.
 #
 #   UDP generates latency_ms, jitter_ms, packet_loss_pct — critical quality
 #   metrics for the GNN's flow node features.
@@ -202,7 +218,7 @@ apiVersion: google.dev/v1
 kind: TrafficTest
 metadata:
   name: d2-hub-bidir-udp
-  namespace: default
+  namespace: network
   labels:
     scenario: l3vpn-spoke-hub
     vpn: blue-spoke
@@ -221,8 +237,8 @@ spec:
 
   # ── d2-blue → dh-blue : streaming quality / UDP uplink ──────────────────
   # bw(t) = 8 + 6×sin(2π(t−75)/180) + 2×sin(2π(t−210)/360) + 2×sin(2π(t−1470)/2520)
-  # AM peak ~22 Mbps; PM peak ~22 Mbps; overnight ~1 Mbps
-  bandwidth: 30Mbps
+  # AM peak ~18 Mbps; PM peak ~18 Mbps; overnight ~1 Mbps
+  bandwidth: 22Mbps
   pattern_type: multi_sine
   pattern_config:
     time_reference: elapsed
@@ -239,21 +255,37 @@ spec:
         phase_offset: -1470  # weekend lift
     noise_stddev_pct: 4.0
     min_rate: 1Mbps
-    max_rate: 40Mbps
+    max_rate: 35Mbps
 
-  # ── dh-blue → d2-blue : hub monitoring / config push (constant) ─────────
-  # Constant 10 Mbps — any deviation from this rate is a clear anomaly signal.
-  # Deliberate steady baseline makes congestion drops and jitter spikes visible.
+  # ── dh-blue → d2-blue : content delivery / video streaming ──────────────
+  # bw(t) = 28 + 18×sin(2π(t−75)/180) + 7×sin(2π(t−210)/360) + 4×sin(2π(t−1470)/2520)
+  # PM peak ~57 Mbps; AM peak ~46 Mbps; overnight ~5 Mbps
+  # Loads pe3-ce2-spoke outbound to ~57 Mbps at peak.
   bidirectional: true
-  reverse_bandwidth: 10Mbps
-  reverse_pattern_type: constant
+  reverse_bandwidth: 65Mbps
+  reverse_pattern_type: multi_sine
+  reverse_pattern_config:
+    time_reference: elapsed
+    base_rate: 28Mbps
+    components:
+      - period: 180
+        amplitude: 18Mbps
+        phase_offset: -75    # bimodal: AM ~46 Mbps, PM ~57 Mbps (with PM-bias)
+      - period: 360
+        amplitude: 7Mbps
+        phase_offset: -210   # PM bias: evening streaming heavier
+      - period: 2520
+        amplitude: 4Mbps
+        phase_offset: -1470  # weekend streaming boost
+    noise_stddev_pct: 4.0
+    min_rate: 4Mbps
+    max_rate: 75Mbps
 
   concurrent_users: 12
 
 # ════════════════════════════════════════════════════════════════════════════
 # SPOKE 3 — d3-blue ↔ dh-blue : TCP bidirectional, Huddersfield cell backhaul
 #
-#   NEW FLOW — third spoke, previously untested.
 #   Huddersfield (pe4/Cardiff) → Nottingham hub (pe2/Cambridge) via p4-p2/p4-p3-p1.
 #
 #   Similar consumer bimodal character to d1-hub, but slightly lower base rates
@@ -261,8 +293,8 @@ spec:
 #   create diversity between spoke congestion windows and prevent all three
 #   spoke-hub flows from peaking simultaneously.
 #
-#   Forward  (d3→hub): base 10 Mbps; peaks ~28 Mbps at 08:00 and 20:00 sim.
-#   Reverse  (hub→d3): base 28 Mbps; peaks ~80 Mbps (content delivery).
+#   Forward  (d3→hub): base 10 Mbps; peaks ~22 Mbps at 08:00 and 20:00 sim.
+#   Reverse  (hub→d3): base 28 Mbps; peaks ~57 Mbps (content delivery).
 #
 #   PM-bias phase shifted to 21:00 simulated (315 s elapsed):
 #     phase_offset = 360/4 − 315 = 90 − 315 = −225
@@ -277,7 +309,7 @@ apiVersion: google.dev/v1
 kind: TrafficTest
 metadata:
   name: d3-hub-bidir-tcp
-  namespace: default
+  namespace: network
   labels:
     scenario: l3vpn-spoke-hub
     vpn: blue-spoke
@@ -296,9 +328,9 @@ spec:
 
   # ── d3-blue → dh-blue : user-plane uploads / signalling ─────────────────
   # bw(t) = 10 + 7×sin(2π(t−75)/180) + 3×sin(2π(t−225)/360) + 2×sin(2π(t−1470)/2520)
-  # AM peak ~27 Mbps at 08:00 sim; PM peak ~29 Mbps at 21:00 sim (shifted 1 hr);
+  # AM peak ~22 Mbps at 08:00 sim; PM peak ~22 Mbps at 21:00 sim (shifted 1 hr);
   # overnight floor ~2 Mbps
-  bandwidth: 35Mbps
+  bandwidth: 25Mbps
   pattern_type: multi_sine
   pattern_config:
     time_reference: elapsed
@@ -315,13 +347,14 @@ spec:
         phase_offset: -1470  # weekend lift
     noise_stddev_pct: 5.0
     min_rate: 2Mbps
-    max_rate: 60Mbps
+    max_rate: 40Mbps
 
   # ── dh-blue → d3-blue : content delivery / video streaming ──────────────
   # bw(t) = 28 + 18×sin(2π(t−75)/180) + 7×sin(2π(t−225)/360) + 4×sin(2π(t−1470)/2520)
-  # PM peak ~80 Mbps; AM peak ~65 Mbps; overnight ~5 Mbps
+  # PM peak ~57 Mbps; AM peak ~46 Mbps; overnight ~5 Mbps
+  # Loads pe4-ce3-spoke outbound to ~57 Mbps at peak.
   bidirectional: true
-  reverse_bandwidth: 85Mbps
+  reverse_bandwidth: 65Mbps
   reverse_pattern_type: multi_sine
   reverse_pattern_config:
     time_reference: elapsed
@@ -338,14 +371,14 @@ spec:
         phase_offset: -1470
     noise_stddev_pct: 4.0
     min_rate: 4Mbps
-    max_rate: 90Mbps
+    max_rate: 75Mbps
 
   concurrent_users: 18
 
 # ════════════════════════════════════════════════════════════════════════════
 # AGGREGATE — all-spokes → dh-blue : UDP multi-source hub load probe
 #
-#   NEW FLOW — all three spokes simultaneously send UDP probe traffic to the hub.
+#   All three spokes simultaneously send UDP probe traffic to the hub.
 #   This test drives aggregate hub ingress load independently of the TCP tests,
 #   and gives the GNN a "combined spoke load" view through a single flow_id set.
 #
@@ -356,7 +389,9 @@ spec:
 #   Bimodal consumer pattern — same AM/PM shape but smaller per-source rate,
 #   so the aggregate tracks the combined activity of all three cell clusters.
 #
-#   At PM peak: 3 × ~7 Mbps ≈ 21 Mbps additional UDP inbound on hub PE-CE.
+#   At PM peak: 3 × ~9 Mbps ≈ 27 Mbps additional UDP inbound on hub PE-CE.
+#   Combined with spoke TCP uploads (25+18+22 = 65 Mbps), total hub inbound
+#   at peak ≈ 92 Mbps — the primary congestion point for GNN training.
 #
 #   Unidirectional: hub does not need to respond (probe only).
 #
@@ -370,7 +405,7 @@ apiVersion: google.dev/v1
 kind: TrafficTest
 metadata:
   name: all-spokes-hub-udp
-  namespace: default
+  namespace: network
   labels:
     scenario: l3vpn-spoke-hub
     vpn: blue-spoke

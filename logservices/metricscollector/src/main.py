@@ -87,7 +87,12 @@ SELECTED_METRICS = [
 # Note: bytes_sent_total and bytes_received_total are separate counters — there
 # is no combined traffic_agent_bytes_total metric.
 TRAFFIC_AGENT_METRICS = [
+  # Bidirectional throughput (sent + received) — kept for backward compatibility.
+  # Prefer throughput_sent_bps / throughput_recv_bps for unidirectional accounting.
   'prometheus.googleapis.com/traffic_agent_throughput_bps/gauge',
+  # Directional throughput gauges (added to fix 2× double-counting on bidir flows).
+  'prometheus.googleapis.com/traffic_agent_throughput_sent_bps/gauge',
+  'prometheus.googleapis.com/traffic_agent_throughput_recv_bps/gauge',
   'prometheus.googleapis.com/traffic_agent_bytes_sent_total/counter',
   'prometheus.googleapis.com/traffic_agent_bytes_received_total/counter',
   'prometheus.googleapis.com/traffic_agent_latency_ms/gauge',
@@ -149,23 +154,14 @@ def _refresh_descriptor_cache(client) -> None:
     )
 
 
-def _get_descriptor(client, metric_type: str):
-    """Return the cached descriptor for *metric_type*, refreshing if stale."""
-    global _descriptor_cache_updated_at
+def _get_descriptor(metric_type: str):
+    """Return the cached descriptor for *metric_type*, or None if not cached.
 
-    age = time.monotonic() - _descriptor_cache_updated_at
-    if age >= DESCRIPTOR_CACHE_TTL_SECONDS or metric_type not in _descriptor_cache:
-        # Only one thread should refresh; others fall through to whatever is
-        # already in the cache so they are not blocked.
-        if _descriptor_cache_lock.acquire(blocking=False):
-            try:
-                # Re-check inside the lock (another thread may have refreshed).
-                age = time.monotonic() - _descriptor_cache_updated_at
-                if age >= DESCRIPTOR_CACHE_TTL_SECONDS or metric_type not in _descriptor_cache:
-                    _refresh_descriptor_cache(client)
-            finally:
-                _descriptor_cache_lock.release()
-
+    This is a pure cache lookup — it never triggers a refresh.  Refreshes are
+    managed by _fetch_metrics (once per call if any metrics are missing) and by
+    the TTL logic in _fetch_metrics, keeping refresh calls out of the hot
+    per-metric loop.
+    """
     return _descriptor_cache.get(metric_type)
 
 
@@ -195,13 +191,18 @@ def _fetch_metrics(client, project_name, metric_list, label_gate_key=None):
     Generic helper: fetch a list of Cloud Monitoring metric types and return a
     chained iterator of time-series results.
 
-    Descriptors are resolved from the module-level cache (_descriptor_cache)
-    instead of calling get_metric_descriptor() on every poll cycle.
+    Descriptors are resolved from the module-level cache (_descriptor_cache).
+    This function never triggers a descriptor refresh — refreshes happen in a
+    dedicated background thread (_descriptor_refresh_worker) so the main poll
+    loop is never blocked by Cloud Monitoring API calls.  Missing metrics are
+    silently skipped; all other metrics in the list are still fetched and
+    written to Spanner normally.
 
     Args:
         metric_list: list of fully-qualified metric type strings.
         label_gate_key: if set, skip descriptors that lack this label key.
     """
+    # ── Per-metric loop — pure cache lookups only, no refresh inside ──────────
     offset = 2  # safety offset so data has arrived before we query
     now_ts = int(datetime.datetime.now(datetime.timezone.utc).timestamp()) - offset
     start_ts = now_ts - POLL_INTERVAL
@@ -214,9 +215,9 @@ def _fetch_metrics(client, project_name, metric_list, label_gate_key=None):
     generators = []
 
     for metric_type in metric_list:
-        descriptor = _get_descriptor(client, metric_type)
+        descriptor = _get_descriptor(metric_type)
         if descriptor is None:
-            logger.warning("No cached descriptor for %s — skipping", metric_type)
+            logger.debug("No cached descriptor for %s — skipping", metric_type)
             continue
 
         # Optional: skip descriptors that don't carry the expected label
@@ -316,6 +317,53 @@ def spanner_connect():
     return db
 
 
+# ── Minimum seconds between background descriptor refreshes for missing metrics.
+# The background thread checks every POLL_INTERVAL seconds but only calls
+# _refresh_descriptor_cache when this interval has elapsed since the last refresh.
+_MISSING_METRIC_REFRESH_INTERVAL = int(os.environ.get("MISSING_METRIC_REFRESH_INTERVAL", 60))
+
+
+def _descriptor_refresh_worker(client) -> None:
+    """Background thread: periodically refreshes the descriptor cache.
+
+    Runs two kinds of refresh:
+    1. TTL-based full refresh (every DESCRIPTOR_CACHE_TTL_SECONDS, default 1 h)
+       — keeps known-good descriptors up to date.
+    2. Missing-metric refresh (every _MISSING_METRIC_REFRESH_INTERVAL, default 60 s)
+       — discovers newly-deployed metrics (e.g. a new traffic-agent gauge) without
+       waiting a full hour.
+
+    By running in a background thread, neither refresh ever blocks the main poll
+    loop or delays Spanner writes.
+    """
+    all_metrics = SELECTED_METRICS + TRAFFIC_AGENT_METRICS
+    while True:
+        time.sleep(POLL_INTERVAL)  # check every poll cycle
+        age = time.monotonic() - _descriptor_cache_updated_at
+        missing = [m for m in all_metrics if m not in _descriptor_cache]
+
+        should_refresh = (
+            age >= DESCRIPTOR_CACHE_TTL_SECONDS          # full TTL expired
+            or (missing and age >= _MISSING_METRIC_REFRESH_INTERVAL)  # new metrics waiting
+        )
+
+        if should_refresh:
+            if _descriptor_cache_lock.acquire(blocking=False):
+                try:
+                    # Re-check inside the lock (another thread may have just refreshed).
+                    age = time.monotonic() - _descriptor_cache_updated_at
+                    missing = [m for m in all_metrics if m not in _descriptor_cache]
+                    if age >= DESCRIPTOR_CACHE_TTL_SECONDS or (missing and age >= _MISSING_METRIC_REFRESH_INTERVAL):
+                        if missing:
+                            logger.info(
+                                "Descriptor refresh worker: %d missing metric(s) — refreshing: %s",
+                                len(missing), missing,
+                            )
+                        _refresh_descriptor_cache(client)
+                finally:
+                    _descriptor_cache_lock.release()
+
+
 def run_worker():
     mon_client = monitoring_v3.MetricServiceClient()
     db = spanner_connect()
@@ -327,6 +375,16 @@ def run_worker():
     # Warm the descriptor cache before starting the poll loop so the very first
     # iteration does not incur individual get_metric_descriptor() calls.
     _refresh_descriptor_cache(mon_client)
+
+    # Start background descriptor refresh thread.
+    # This handles both TTL-based full refreshes and missing-metric discovery
+    # without ever blocking the main poll loop.
+    descriptor_thread = threading.Thread(
+        target=_descriptor_refresh_worker,
+        args=(mon_client,),
+        daemon=True,
+    )
+    descriptor_thread.start()
 
     # Start retention thread
     retention_thread = threading.Thread(

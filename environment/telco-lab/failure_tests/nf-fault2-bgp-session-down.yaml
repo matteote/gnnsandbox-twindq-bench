@@ -19,7 +19,7 @@ apiVersion: google.dev/v1
 kind: NetworkFailure
 metadata:
   name: fault2-bgp-session-down
-  namespace: default
+  namespace: network
   labels:
     scenario: l3vpn-hub-spoke
     fault-type: bgp-session-down

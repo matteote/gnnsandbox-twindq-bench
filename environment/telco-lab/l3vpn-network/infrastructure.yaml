@@ -2,7 +2,7 @@ apiVersion: google.dev/v1
 kind: VyOSInfrastructure
 metadata:
   name: l3vpn-infra
-  namespace: default
+  namespace: network
   labels:
     type: telco-lab
     environment: lab

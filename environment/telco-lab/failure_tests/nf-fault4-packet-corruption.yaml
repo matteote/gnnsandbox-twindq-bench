@@ -27,7 +27,7 @@ apiVersion: google.dev/v1
 kind: NetworkFailure
 metadata:
   name: fault4-packet-corruption
-  namespace: default
+  namespace: network
   labels:
     scenario: l3vpn-hub-spoke
     fault-type: packet-corruption

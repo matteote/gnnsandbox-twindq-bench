@@ -166,16 +166,28 @@ Traffic-agent metrics are written to Cloud Spanner by the `metricscollector` wit
 |---|---|---|---|
 | `traffic_agent_bytes_sent_total` | Counter | `role=source` only | Total bytes sent by this flow (0 on destination side) |
 | `traffic_agent_bytes_received_total` | Counter | `role=destination` only | Total bytes received by this flow (0 on source side) |
-| `traffic_agent_throughput_bps` | Gauge | Both | Instantaneous throughput in bits/sec — delta-based (see note below) |
-| `traffic_agent_latency_ms` | Gauge | `role=source`, UDP only | Mean one-way latency in milliseconds |
-| `traffic_agent_jitter_ms` | Gauge | `role=source`, UDP only | Mean inter-packet jitter in milliseconds |
-| `traffic_agent_packet_loss_pct` | Gauge | `role=source`, UDP only | Packet loss percentage |
+| `traffic_agent_throughput_bps` | Gauge | Both | **Bidirectional** throughput in bits/sec (sent + received). Kept for backward compatibility — prefer `throughput_sent_bps` / `throughput_recv_bps` (see note below) |
+| `traffic_agent_throughput_sent_bps` | Gauge | Both | **Outbound-only** throughput in bits/sec (bytes sent since last scrape × 8 ÷ elapsed). Use this for source-role flows to get the true one-directional send rate |
+| `traffic_agent_throughput_recv_bps` | Gauge | Both | **Inbound-only** throughput in bits/sec (bytes received since last scrape × 8 ÷ elapsed). Use this for destination-role flows to get the true one-directional receive rate |
+| `traffic_agent_latency_ms` | Gauge | `role=destination`, UDP only | Mean one-way latency in milliseconds (OWD stamped at receiver) |
+| `traffic_agent_jitter_ms` | Gauge | `role=destination`, UDP only | Mean inter-packet jitter in milliseconds |
+| `traffic_agent_packet_loss_pct` | Gauge | `role=destination`, UDP only | Packet loss percentage (sequence-number gap detection at receiver) |
 | `traffic_agent_active_sessions` | Gauge | `role=source` only | Number of concurrent sessions within this flow |
 | `traffic_agent_flow_running` | Gauge | Both | `1` if flow phase is `running`, `0` for all other phases |
 
-**`throughput_bps` calculation:** On each scrape the agent computes `(bytes sent + received since last scrape) × 8 ÷ elapsed_seconds`. This is a delta-based gauge, not a counter derivative — do **not** apply `rate()` to it; query it directly.
+**`throughput_bps` vs `throughput_sent_bps` / `throughput_recv_bps`:**
 
-**Latency, jitter, packet loss** are computed from UDP sequence-number timestamps embedded in each packet. They are not available for TCP flows.
+The original `throughput_bps` gauge computes `(bytes_sent + bytes_received since last scrape) × 8 ÷ elapsed_seconds`. For a **bidirectional** flow this means the source agent reports both its outbound traffic **and** the reverse traffic it receives, resulting in a value approximately **2× the actual link rate** (e.g. 180 Mbps for a 90 Mbps bidirectional test).
+
+The new directional gauges fix this:
+- **`throughput_sent_bps`** = `bytes_sent_delta × 8 ÷ elapsed` — true outbound rate (use for source-role flows)
+- **`throughput_recv_bps`** = `bytes_received_delta × 8 ÷ elapsed` — true inbound rate (use for destination-role flows)
+
+The UI Performance panel uses `throughput_sent_bps` from source-role flows for the aggregate throughput display.
+
+All three gauges are delta-based — do **not** apply `rate()` to them; query them directly.
+
+**Latency, jitter, packet loss** are computed from UDP sequence-number timestamps embedded in each packet. They are not available for TCP flows. These metrics are only meaningful on **destination-role** flows (the receiver measures one-way delay and sequence gaps); source-role values will always be 0.
 
 ### 2.4 Aggregation
 

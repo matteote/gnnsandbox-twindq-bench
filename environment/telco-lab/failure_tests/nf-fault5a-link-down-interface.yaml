@@ -27,7 +27,7 @@ apiVersion: google.dev/v1
 kind: NetworkFailure
 metadata:
   name: fault5-link-down-interface
-  namespace: default
+  namespace: network
   labels:
     scenario: l3vpn-hub-spoke
     fault-type: link-down

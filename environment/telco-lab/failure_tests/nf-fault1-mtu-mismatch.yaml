@@ -19,7 +19,7 @@ apiVersion: google.dev/v1
 kind: NetworkFailure
 metadata:
   name: fault1-mtu-mismatch
-  namespace: default
+  namespace: network
   labels:
     scenario: l3vpn-hub-spoke
     fault-type: mtu-mismatch

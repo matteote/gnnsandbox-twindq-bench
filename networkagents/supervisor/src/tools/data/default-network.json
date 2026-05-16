@@ -2251,7 +2251,7 @@
         "destination_device": "dh-blue",
         "protocol": "TCP",
         "duration": 172800,
-        "bandwidth": "40Mbps",
+        "bandwidth": "30Mbps",
         "pattern_type": "multi_sine",
         "pattern_config": {
           "time_reference": "elapsed",
@@ -2275,10 +2275,10 @@
           ],
           "noise_stddev_pct": 5.0,
           "min_rate": "2Mbps",
-          "max_rate": "70Mbps"
+          "max_rate": "45Mbps"
         },
         "bidirectional": true,
-        "reverse_bandwidth": "90Mbps",
+        "reverse_bandwidth": "70Mbps",
         "reverse_pattern_type": "multi_sine",
         "reverse_pattern_config": {
           "time_reference": "elapsed",
@@ -2302,7 +2302,7 @@
           ],
           "noise_stddev_pct": 4.0,
           "min_rate": "5Mbps",
-          "max_rate": "95Mbps"
+          "max_rate": "80Mbps"
         },
         "concurrent_users": 20
       }
@@ -2331,7 +2331,7 @@
         "destination_device": "dh-blue",
         "protocol": "UDP",
         "duration": 172800,
-        "bandwidth": "30Mbps",
+        "bandwidth": "22Mbps",
         "pattern_type": "multi_sine",
         "pattern_config": {
           "time_reference": "elapsed",
@@ -2355,11 +2355,35 @@
           ],
           "noise_stddev_pct": 4.0,
           "min_rate": "1Mbps",
-          "max_rate": "40Mbps"
+          "max_rate": "35Mbps"
         },
         "bidirectional": true,
-        "reverse_bandwidth": "10Mbps",
-        "reverse_pattern_type": "constant",
+        "reverse_bandwidth": "65Mbps",
+        "reverse_pattern_type": "multi_sine",
+        "reverse_pattern_config": {
+          "time_reference": "elapsed",
+          "base_rate": "28Mbps",
+          "components": [
+            {
+              "period": 180,
+              "amplitude": "18Mbps",
+              "phase_offset": -75
+            },
+            {
+              "period": 360,
+              "amplitude": "7Mbps",
+              "phase_offset": -210
+            },
+            {
+              "period": 2520,
+              "amplitude": "4Mbps",
+              "phase_offset": -1470
+            }
+          ],
+          "noise_stddev_pct": 4.0,
+          "min_rate": "4Mbps",
+          "max_rate": "75Mbps"
+        },
         "concurrent_users": 12
       }
     },
@@ -2387,7 +2411,7 @@
         "destination_device": "dh-blue",
         "protocol": "TCP",
         "duration": 172800,
-        "bandwidth": "35Mbps",
+        "bandwidth": "25Mbps",
         "pattern_type": "multi_sine",
         "pattern_config": {
           "time_reference": "elapsed",
@@ -2411,10 +2435,10 @@
           ],
           "noise_stddev_pct": 5.0,
           "min_rate": "2Mbps",
-          "max_rate": "60Mbps"
+          "max_rate": "40Mbps"
         },
         "bidirectional": true,
-        "reverse_bandwidth": "85Mbps",
+        "reverse_bandwidth": "65Mbps",
         "reverse_pattern_type": "multi_sine",
         "reverse_pattern_config": {
           "time_reference": "elapsed",
@@ -2438,7 +2462,7 @@
           ],
           "noise_stddev_pct": 4.0,
           "min_rate": "4Mbps",
-          "max_rate": "90Mbps"
+          "max_rate": "75Mbps"
         },
         "concurrent_users": 18
       }
@@ -2522,15 +2546,37 @@
         "destination_device": "d2-red",
         "protocol": "TCP",
         "duration": 172800,
-        "bandwidth": "50Mbps",
+        "bandwidth": "35Mbps",
         "pattern_type": "multi_sine",
         "pattern_config": {
+          "time_reference": "elapsed",
+          "base_rate": "14Mbps",
+          "components": [
+            {
+              "period": 360,
+              "amplitude": "14Mbps",
+              "phase_offset": -120
+            },
+            {
+              "period": 2520,
+              "amplitude": "3Mbps",
+              "phase_offset": -450
+            }
+          ],
+          "noise_stddev_pct": 4.0,
+          "min_rate": "2Mbps",
+          "max_rate": "50Mbps"
+        },
+        "bidirectional": true,
+        "reverse_bandwidth": "45Mbps",
+        "reverse_pattern_type": "multi_sine",
+        "reverse_pattern_config": {
           "time_reference": "elapsed",
           "base_rate": "18Mbps",
           "components": [
             {
               "period": 360,
-              "amplitude": "12Mbps",
+              "amplitude": "18Mbps",
               "phase_offset": -120
             },
             {
@@ -2541,29 +2587,7 @@
           ],
           "noise_stddev_pct": 4.0,
           "min_rate": "2Mbps",
-          "max_rate": "80Mbps"
-        },
-        "bidirectional": true,
-        "reverse_bandwidth": "70Mbps",
-        "reverse_pattern_type": "multi_sine",
-        "reverse_pattern_config": {
-          "time_reference": "elapsed",
-          "base_rate": "25Mbps",
-          "components": [
-            {
-              "period": 360,
-              "amplitude": "18Mbps",
-              "phase_offset": -120
-            },
-            {
-              "period": 2520,
-              "amplitude": "5Mbps",
-              "phase_offset": -450
-            }
-          ],
-          "noise_stddev_pct": 4.0,
-          "min_rate": "4Mbps",
-          "max_rate": "90Mbps"
+          "max_rate": "60Mbps"
         },
         "concurrent_users": 15
       }
@@ -2592,11 +2616,11 @@
         "destination_device": "d3-red",
         "protocol": "TCP",
         "duration": 172800,
-        "bandwidth": "40Mbps",
+        "bandwidth": "30Mbps",
         "pattern_type": "multi_sine",
         "pattern_config": {
           "time_reference": "elapsed",
-          "base_rate": "15Mbps",
+          "base_rate": "12Mbps",
           "components": [
             {
               "period": 360,
@@ -2605,35 +2629,35 @@
             },
             {
               "period": 2520,
-              "amplitude": "4Mbps",
+              "amplitude": "3Mbps",
               "phase_offset": -450
             }
           ],
           "noise_stddev_pct": 4.0,
           "min_rate": "2Mbps",
-          "max_rate": "75Mbps"
+          "max_rate": "45Mbps"
         },
         "bidirectional": true,
-        "reverse_bandwidth": "60Mbps",
+        "reverse_bandwidth": "25Mbps",
         "reverse_pattern_type": "multi_sine",
         "reverse_pattern_config": {
           "time_reference": "elapsed",
-          "base_rate": "22Mbps",
+          "base_rate": "10Mbps",
           "components": [
             {
               "period": 360,
-              "amplitude": "16Mbps",
+              "amplitude": "10Mbps",
               "phase_offset": -120
             },
             {
               "period": 2520,
-              "amplitude": "5Mbps",
+              "amplitude": "2Mbps",
               "phase_offset": -450
             }
           ],
           "noise_stddev_pct": 3.0,
-          "min_rate": "3Mbps",
-          "max_rate": "85Mbps"
+          "min_rate": "2Mbps",
+          "max_rate": "40Mbps"
         },
         "concurrent_users": 15
       }
@@ -2662,48 +2686,48 @@
         "destination_device": "d4-red",
         "protocol": "UDP",
         "duration": 172800,
-        "bandwidth": "15Mbps",
+        "bandwidth": "20Mbps",
         "pattern_type": "multi_sine",
         "pattern_config": {
           "time_reference": "elapsed",
-          "base_rate": "5Mbps",
+          "base_rate": "7Mbps",
           "components": [
             {
               "period": 360,
-              "amplitude": "4Mbps",
+              "amplitude": "7Mbps",
               "phase_offset": -120
             },
             {
               "period": 2520,
-              "amplitude": "1Mbps",
+              "amplitude": "2Mbps",
               "phase_offset": -450
             }
           ],
           "noise_stddev_pct": 2.0,
           "min_rate": "1Mbps",
-          "max_rate": "20Mbps"
+          "max_rate": "25Mbps"
         },
         "bidirectional": true,
-        "reverse_bandwidth": "15Mbps",
+        "reverse_bandwidth": "20Mbps",
         "reverse_pattern_type": "multi_sine",
         "reverse_pattern_config": {
           "time_reference": "elapsed",
-          "base_rate": "5Mbps",
+          "base_rate": "7Mbps",
           "components": [
             {
               "period": 360,
-              "amplitude": "4Mbps",
+              "amplitude": "7Mbps",
               "phase_offset": -120
             },
             {
               "period": 2520,
-              "amplitude": "1Mbps",
+              "amplitude": "2Mbps",
               "phase_offset": -450
             }
           ],
           "noise_stddev_pct": 2.0,
           "min_rate": "1Mbps",
-          "max_rate": "20Mbps"
+          "max_rate": "25Mbps"
         },
         "concurrent_users": 10
       }
@@ -2732,33 +2756,33 @@
         "destination_device": "d3-red",
         "protocol": "TCP",
         "duration": 172800,
-        "bandwidth": "45Mbps",
+        "bandwidth": "25Mbps",
         "pattern_type": "multi_sine",
         "pattern_config": {
           "time_reference": "elapsed",
-          "base_rate": "15Mbps",
+          "base_rate": "10Mbps",
           "components": [
             {
               "period": 360,
-              "amplitude": "11Mbps",
+              "amplitude": "10Mbps",
               "phase_offset": -120
             },
             {
               "period": 2520,
-              "amplitude": "4Mbps",
+              "amplitude": "2Mbps",
               "phase_offset": -450
             }
           ],
           "noise_stddev_pct": 4.0,
           "min_rate": "2Mbps",
-          "max_rate": "70Mbps"
+          "max_rate": "40Mbps"
         },
         "bidirectional": true,
-        "reverse_bandwidth": "55Mbps",
+        "reverse_bandwidth": "35Mbps",
         "reverse_pattern_type": "multi_sine",
         "reverse_pattern_config": {
           "time_reference": "elapsed",
-          "base_rate": "20Mbps",
+          "base_rate": "14Mbps",
           "components": [
             {
               "period": 360,
@@ -2767,13 +2791,13 @@
             },
             {
               "period": 2520,
-              "amplitude": "4Mbps",
+              "amplitude": "3Mbps",
               "phase_offset": -450
             }
           ],
           "noise_stddev_pct": 3.0,
-          "min_rate": "3Mbps",
-          "max_rate": "80Mbps"
+          "min_rate": "2Mbps",
+          "max_rate": "50Mbps"
         },
         "concurrent_users": 15
       }
@@ -2802,7 +2826,7 @@
         "destination_device": "d4-red",
         "protocol": "UDP",
         "duration": 172800,
-        "bandwidth": "25Mbps",
+        "bandwidth": "22Mbps",
         "pattern_type": "multi_sine",
         "pattern_config": {
           "time_reference": "elapsed",
@@ -2810,7 +2834,7 @@
           "components": [
             {
               "period": 360,
-              "amplitude": "5Mbps",
+              "amplitude": "8Mbps",
               "phase_offset": -120
             },
             {
@@ -2824,8 +2848,27 @@
           "max_rate": "30Mbps"
         },
         "bidirectional": true,
-        "reverse_bandwidth": "4Mbps",
-        "reverse_pattern_type": "constant",
+        "reverse_bandwidth": "22Mbps",
+        "reverse_pattern_type": "multi_sine",
+        "reverse_pattern_config": {
+          "time_reference": "elapsed",
+          "base_rate": "8Mbps",
+          "components": [
+            {
+              "period": 360,
+              "amplitude": "8Mbps",
+              "phase_offset": -120
+            },
+            {
+              "period": 2520,
+              "amplitude": "2Mbps",
+              "phase_offset": -450
+            }
+          ],
+          "noise_stddev_pct": 3.0,
+          "min_rate": "1Mbps",
+          "max_rate": "30Mbps"
+        },
         "concurrent_users": 10
       }
     },
@@ -2853,30 +2896,49 @@
         "destination_device": "d4-red",
         "protocol": "UDP",
         "duration": 172800,
-        "bandwidth": "20Mbps",
+        "bandwidth": "30Mbps",
         "pattern_type": "multi_sine",
         "pattern_config": {
           "time_reference": "elapsed",
-          "base_rate": "7Mbps",
+          "base_rate": "12Mbps",
           "components": [
             {
               "period": 360,
-              "amplitude": "5Mbps",
+              "amplitude": "12Mbps",
               "phase_offset": -113
             },
             {
               "period": 2520,
-              "amplitude": "2Mbps",
+              "amplitude": "3Mbps",
               "phase_offset": -450
             }
           ],
           "noise_stddev_pct": 3.0,
-          "min_rate": "1Mbps",
-          "max_rate": "25Mbps"
+          "min_rate": "2Mbps",
+          "max_rate": "45Mbps"
         },
         "bidirectional": true,
-        "reverse_bandwidth": "3Mbps",
-        "reverse_pattern_type": "constant",
+        "reverse_bandwidth": "30Mbps",
+        "reverse_pattern_type": "multi_sine",
+        "reverse_pattern_config": {
+          "time_reference": "elapsed",
+          "base_rate": "12Mbps",
+          "components": [
+            {
+              "period": 360,
+              "amplitude": "12Mbps",
+              "phase_offset": -113
+            },
+            {
+              "period": 2520,
+              "amplitude": "3Mbps",
+              "phase_offset": -450
+            }
+          ],
+          "noise_stddev_pct": 3.0,
+          "min_rate": "2Mbps",
+          "max_rate": "45Mbps"
+        },
         "concurrent_users": 10
       }
     }

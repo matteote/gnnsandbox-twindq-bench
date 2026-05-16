@@ -18,11 +18,17 @@
 # Expected extra vars:
 #   routers  - list of {name, ip_address} dicts, one per router in the
 #              management network (may be empty on topology teardown)
+#   devices  - list of {name, mgmt_ip} dicts, one per device running
+#              traffic-agent (may be empty if no devices are defined)
 ---
 - name: Update Ops Agent scrape config
   hosts: all
   become: true
   gather_facts: no
+
+  vars:
+    routers: "{{ routers | default([]) }}"
+    devices: "{{ devices | default([]) }}"
 
   handlers:
     - name: Restart Ops Agent

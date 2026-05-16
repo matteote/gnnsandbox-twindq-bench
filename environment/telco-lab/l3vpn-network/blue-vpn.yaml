@@ -2,7 +2,7 @@ apiVersion: google.dev/v1
 kind: VyOSL3VPN
 metadata:
   name: l3vpn-blue-service
-  namespace: default
+  namespace: network
 spec:
   underlayRef: l3vpn-underlay
   services:

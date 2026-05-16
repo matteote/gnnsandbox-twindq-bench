@@ -80,14 +80,12 @@ func (m *Manager) Run(ctx context.Context, duration time.Duration) error {
 	startTime := time.Now()
 	m.pattern.SetStartTime(startTime)
 
-	// Create a shared rate limiter — all sessions divide the total budget.
+	// Create a shared rate limiter — all sessions share the total budget.
 	// The PatternController updates it every 100 ms based on BandwidthAt.
+	// Sessions naturally divide the token bucket among themselves via
+	// concurrent WaitBytes() calls — no manual per-session division needed.
 	initialBps := m.pattern.BandwidthAt(startTime)
-	perSessionBps := initialBps
-	if m.sessions > 1 {
-		perSessionBps = initialBps / int64(m.sessions)
-	}
-	lim := ratelimit.New(perSessionBps)
+	lim := ratelimit.New(initialBps)
 
 	// Start the pattern controller that updates lim on each tick.
 	pc := ratelimit.NewPatternController(lim, 100*time.Millisecond, m.logger)
@@ -95,12 +93,11 @@ func (m *Manager) Run(ctx context.Context, duration time.Duration) error {
 	defer cancel()
 
 	go pc.Run(ctxWithTimeout, func(t time.Time) int64 {
-		total := m.pattern.BandwidthAt(t)
-		active := m.activeSessions.Load()
-		if active < 1 {
-			active = 1
-		}
-		return total / int64(active)
+		// Return the total target bandwidth; all concurrent sessions share
+		// this single token bucket and naturally divide the rate among
+		// themselves.  Dividing by activeSessions here would cause the
+		// aggregate throughput to be total/N instead of total.
+		return m.pattern.BandwidthAt(t)
 	})
 
 	// Periodic stats logger: log throughput every 10 s so progress is visible

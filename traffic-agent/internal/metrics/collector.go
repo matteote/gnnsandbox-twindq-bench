@@ -22,7 +22,15 @@ type Snapshot struct {
 	Timestamp      time.Time `json:"timestamp"`
 	BytesSent      int64     `json:"bytes_sent"`
 	BytesReceived  int64     `json:"bytes_received"`
-	ThroughputBps  float64   `json:"throughput_bps"` // calculated from delta since last snapshot
+
+	// ThroughputBps is the total bidirectional throughput (sent + received bits
+	// per second) since the previous Snapshot call.  For unidirectional
+	// accounting use ThroughputSentBps (source role) or ThroughputRecvBps
+	// (destination role) instead.
+	ThroughputBps     float64 `json:"throughput_bps"`
+	ThroughputSentBps float64 `json:"throughput_sent_bps"` // outbound bits/s only
+	ThroughputRecvBps float64 `json:"throughput_recv_bps"` // inbound bits/s only
+
 	LatencyMs      float64   `json:"latency_ms"`
 	PacketLossPct  float64   `json:"packet_loss_pct"`
 	PacketsSent    int64     `json:"packets_sent"`
@@ -126,14 +134,18 @@ func (c *Collector) Snapshot() Snapshot {
 	sent := c.bytesSent.Load()
 	recv := c.bytesReceived.Load()
 
-	// Compute instantaneous throughput
+	// Compute instantaneous throughput — three gauges:
+	//   ThroughputSentBps: outbound only (use for source-role flows)
+	//   ThroughputRecvBps: inbound only  (use for destination-role flows)
+	//   ThroughputBps:     bidirectional sum (kept for backward compatibility)
 	elapsed := now.Sub(c.lastSnapshot.Timestamp).Seconds()
-	var throughput float64
+	var throughput, throughputSent, throughputRecv float64
 	if elapsed > 0 {
 		deltaSent := sent - c.lastSnapshot.BytesSent
 		deltaRecv := recv - c.lastSnapshot.BytesReceived
-		totalBytes := deltaSent + deltaRecv
-		throughput = float64(totalBytes) * 8 / elapsed // bits per second
+		throughputSent = float64(deltaSent) * 8 / elapsed
+		throughputRecv = float64(deltaRecv) * 8 / elapsed
+		throughput = throughputSent + throughputRecv
 	}
 
 	// Compute mean latency
@@ -162,17 +174,19 @@ func (c *Collector) Snapshot() Snapshot {
 	}
 
 	s := Snapshot{
-		Timestamp:       now,
-		BytesSent:       sent,
-		BytesReceived:   recv,
-		ThroughputBps:   throughput,
-		LatencyMs:       latencyMs,
-		PacketLossPct:   lossPct,
-		PacketsSent:     pkts,
-		PacketsReceived: pktsRecv,
-		PacketsDropped:  dropped,
-		JitterMs:        jitterMs,
-		ActiveSessions:  c.activeSessions.Load(),
+		Timestamp:         now,
+		BytesSent:         sent,
+		BytesReceived:     recv,
+		ThroughputBps:     throughput,
+		ThroughputSentBps: throughputSent,
+		ThroughputRecvBps: throughputRecv,
+		LatencyMs:         latencyMs,
+		PacketLossPct:     lossPct,
+		PacketsSent:       pkts,
+		PacketsReceived:   pktsRecv,
+		PacketsDropped:    dropped,
+		JitterMs:          jitterMs,
+		ActiveSessions:    c.activeSessions.Load(),
 	}
 
 	// Reset per-window accumulators so the next Snapshot() (next Prometheus

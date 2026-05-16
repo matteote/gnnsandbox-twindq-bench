@@ -2,7 +2,7 @@ apiVersion: google.dev/v1
 kind: VyOSUnderlay
 metadata:
   name: l3vpn-underlay
-  namespace: default
+  namespace: network
 spec:
   infrastructureRef: l3vpn-infra
   routing:

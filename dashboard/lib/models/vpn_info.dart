@@ -284,8 +284,18 @@ class TrafficFlowMetrics {
   final String role;
   final String protocol;
 
-  /// Throughput in bits-per-second (gauge).
+  /// Bidirectional throughput in bits-per-second (sent + received, gauge).
+  /// Kept for backward compatibility — prefer [throughputSentBps] or
+  /// [throughputRecvBps] for unidirectional accounting.
   final double? throughputBps;
+
+  /// Outbound throughput in bits-per-second (bytes sent only, gauge).
+  /// Use this for source-role flows to avoid double-counting bidirectional traffic.
+  final double? throughputSentBps;
+
+  /// Inbound throughput in bits-per-second (bytes received only, gauge).
+  /// Use this for destination-role flows.
+  final double? throughputRecvBps;
 
   /// One-way latency in milliseconds (gauge).
   final double? latencyMs;
@@ -317,6 +327,8 @@ class TrafficFlowMetrics {
     required this.role,
     required this.protocol,
     this.throughputBps,
+    this.throughputSentBps,
+    this.throughputRecvBps,
     this.latencyMs,
     this.jitterMs,
     this.packetLossPct,
@@ -331,19 +343,21 @@ class TrafficFlowMetrics {
     double? _d(dynamic v) =>
         v == null ? null : (v as num).toDouble();
     return TrafficFlowMetrics(
-      flowId:            json['flow_id']    as String? ?? '',
-      device:            json['device']     as String? ?? '',
-      role:              json['role']       as String? ?? '',
-      protocol:          json['protocol']   as String? ?? '',
-      throughputBps:     _d(json['throughput_bps']),
-      latencyMs:         _d(json['latency_ms']),
-      jitterMs:          _d(json['jitter_ms']),
-      packetLossPct:     _d(json['packet_loss_pct']),
-      activeSessions:    _d(json['active_sessions']),
-      bytesSentTotal:    _d(json['bytes_sent_total']),
+      flowId:             json['flow_id']    as String? ?? '',
+      device:             json['device']     as String? ?? '',
+      role:               json['role']       as String? ?? '',
+      protocol:           json['protocol']   as String? ?? '',
+      throughputBps:      _d(json['throughput_bps']),
+      throughputSentBps:  _d(json['throughput_sent_bps']),
+      throughputRecvBps:  _d(json['throughput_recv_bps']),
+      latencyMs:          _d(json['latency_ms']),
+      jitterMs:           _d(json['jitter_ms']),
+      packetLossPct:      _d(json['packet_loss_pct']),
+      activeSessions:     _d(json['active_sessions']),
+      bytesSentTotal:     _d(json['bytes_sent_total']),
       bytesReceivedTotal: _d(json['bytes_received_total']),
-      flowRunning:       _d(json['flow_running']),
-      timestamp:         json['timestamp']  as String?,
+      flowRunning:        _d(json['flow_running']),
+      timestamp:          json['timestamp']  as String?,
     );
   }
 

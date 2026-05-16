@@ -298,7 +298,13 @@ def fetch_traffic_test_metrics(test_name: str) -> list:
             # A key of (flow_id, role) keeps them as separate flow entries so the
             # dashboard can correctly filter source-role flows for throughput.
             _METRIC_MAP = {
+                # Bidirectional throughput (sent + received) — kept for backward
+                # compatibility.  Prefer throughput_sent_bps / throughput_recv_bps.
                 "traffic_agent_throughput_bps":       "throughput_bps",
+                # Directional gauges — fix 2× double-counting on bidirectional flows.
+                # Use throughput_sent_bps for source-role flows in the UI.
+                "traffic_agent_throughput_sent_bps":  "throughput_sent_bps",
+                "traffic_agent_throughput_recv_bps":  "throughput_recv_bps",
                 "traffic_agent_latency_ms":           "latency_ms",
                 "traffic_agent_jitter_ms":            "jitter_ms",
                 "traffic_agent_packet_loss_pct":      "packet_loss_pct",
@@ -332,6 +338,8 @@ def fetch_traffic_test_metrics(test_name: str) -> list:
                         "timestamp": timestamp.isoformat() if timestamp else None,
                         # metric fields initialised to None
                         "throughput_bps":       None,
+                        "throughput_sent_bps":  None,
+                        "throughput_recv_bps":  None,
                         "latency_ms":           None,
                         "jitter_ms":            None,
                         "packet_loss_pct":      None,

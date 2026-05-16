@@ -1473,11 +1473,23 @@ async def sync_device(body, spec, name, uid, logger):
                 interface_id = row[0]
                 logger.debug(f"Found interface {interface_id} for device {name} via gateway {gateway}")
             else:
-                raise kopf.TemporaryError(
-                    f"No PhysicalInterface with ip_address={gateway} found for device {name} — "
-                    f"CE router may not be synced to Spanner yet; will retry",
-                    delay=30
-                )
+                if device_status == 'Ready':
+                    # Device is already Ready in k8s — don't block the Spanner status
+                    # update just because the CE router interface hasn't been synced yet.
+                    # Write the Ready status with interface_id=None so the dashboard
+                    # reflects the correct phase; the interface link will be resolved on
+                    # the next sync once the router is present in Spanner.
+                    logger.warning(
+                        f"No PhysicalInterface with ip_address={gateway} found for device {name} "
+                        f"(device is Ready) — writing Ready status to Spanner without interface_id"
+                    )
+                    interface_id = None
+                else:
+                    raise kopf.TemporaryError(
+                        f"No PhysicalInterface with ip_address={gateway} found for device {name} — "
+                        f"CE router may not be synced to Spanner yet; will retry",
+                        delay=30
+                    )
     except (kopf.TemporaryError, kopf.PermanentError):
         raise
     except Exception as e:

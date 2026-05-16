@@ -1143,23 +1143,37 @@ class _VpnTrafficPanelState extends State<VpnTrafficPanel> {
     );
   }
 
-  /// Aggregate 4-stat bar across all source flows for a VPN.
+  /// Aggregate stat bar across all flows for a VPN.
+  ///
+  /// Throughput is split into ↑ Sent (forward source flows) and ↓ Recv
+  /// (reverse source flows, i.e. _rev suffix) so that a bidirectional 90 Mbps
+  /// test shows "↑ 90 Mbps  ↓ 90 Mbps" rather than a misleading "180 Mbps".
   Widget _buildPerfAggregateBar(List<TrafficFlowMetrics> flows) {
-    // Throughput: sum source-role flows only (avoids double-counting bidir).
-    // Latency / jitter / loss: destination-role flows only.
-    //   Source devices count every packet they send as "sent" but receive none
-    //   back, so their packet_loss_pct is always ~100 %.  The real loss is
-    //   observed exclusively at the destination (receiver counts gaps in
-    //   sequence numbers).  Same logic applies to latency/jitter — OWD is
-    //   stamped at the receiver, not the sender.
-    final srcFlows = flows.where((f) => f.role == 'source').toList();
+    // Forward source flows: role=source, flowId does NOT end with '_rev'.
+    // These represent the configured forward direction (d1 → d2).
+    final fwdSrcFlows = flows
+        .where((f) => f.role == 'source' && !f.flowId.endsWith('_rev'))
+        .toList();
+    // Reverse source flows: role=source, flowId ends with '_rev'.
+    // These represent the reverse direction (d2 → d1) of a bidirectional test.
+    final revSrcFlows = flows
+        .where((f) => f.role == 'source' && f.flowId.endsWith('_rev'))
+        .toList();
+    // Destination-role flows for latency / jitter / loss.
     final dstFlows = flows.where((f) => f.role == 'destination').toList();
 
-    double? sumThroughput;
-    for (final f in srcFlows) {
-      if (f.throughputBps != null) {
-        sumThroughput = (sumThroughput ?? 0) + f.throughputBps!;
-      }
+    // ↑ Sent: sum of forward source throughput
+    double? sumSent;
+    for (final f in fwdSrcFlows) {
+      final tp = f.throughputSentBps ?? f.throughputBps;
+      if (tp != null) sumSent = (sumSent ?? 0) + tp;
+    }
+
+    // ↓ Recv: sum of reverse source throughput (what the far end is sending back)
+    double? sumRecv;
+    for (final f in revSrcFlows) {
+      final tp = f.throughputSentBps ?? f.throughputBps;
+      if (tp != null) sumRecv = (sumRecv ?? 0) + tp;
     }
 
     double? avgLatency;
@@ -1183,7 +1197,7 @@ class _VpnTrafficPanelState extends State<VpnTrafficPanel> {
       avgJitter = jitterVals.reduce((a, b) => a + b) / jitterVals.length;
     }
 
-    // Throughput label helper (same as model but applied to nullable sum)
+    // Throughput label helper
     String throughputLabel(double? bps) {
       if (bps == null) return '—';
       if (bps >= 1e9) return '${(bps / 1e9).toStringAsFixed(1)} Gbps';
@@ -1241,9 +1255,14 @@ class _VpnTrafficPanelState extends State<VpnTrafficPanel> {
       child: Row(
         children: [
           statCell(
-            'Throughput',
-            throughputLabel(sumThroughput),
+            '↑ Sent',
+            throughputLabel(sumSent),
             const Color(0xFF0D47A1),
+          ),
+          statCell(
+            '↓ Recv',
+            throughputLabel(sumRecv),
+            const Color(0xFF1565C0),
           ),
           statCell(
             'Latency',
@@ -1282,12 +1301,23 @@ class _VpnTrafficPanelState extends State<VpnTrafficPanel> {
     // would corrupt the average.
     final dstFlows = flows.where((f) => f.role == 'destination').toList();
 
-    // Sum throughput from source flows
-    double? sumThroughput;
-    for (final f in srcFlows) {
-      if (f.throughputBps != null) {
-        sumThroughput = (sumThroughput ?? 0) + f.throughputBps!;
-      }
+    // Forward source flows (non-_rev): represent the configured forward direction.
+    // Reverse source flows (_rev): represent the reverse direction of a bidir test.
+    final fwdSrcFlows = srcFlows.where((f) => !f.flowId.endsWith('_rev')).toList();
+    final revSrcFlows = srcFlows.where((f) => f.flowId.endsWith('_rev')).toList();
+
+    // ↑ Sent: forward direction throughput
+    double? sumSent;
+    for (final f in fwdSrcFlows) {
+      final tp = f.throughputSentBps ?? f.throughputBps;
+      if (tp != null) sumSent = (sumSent ?? 0) + tp;
+    }
+
+    // ↓ Recv: reverse direction throughput (what the far end sends back)
+    double? sumRecv;
+    for (final f in revSrcFlows) {
+      final tp = f.throughputSentBps ?? f.throughputBps;
+      if (tp != null) sumRecv = (sumRecv ?? 0) + tp;
     }
 
     // Average latency from destination flows only
@@ -1317,13 +1347,23 @@ class _VpnTrafficPanelState extends State<VpnTrafficPanel> {
       return Colors.red.shade700;
     }
 
-    // Throughput label
+    // Compact throughput label (e.g. "90.0 Mbps")
     String tpLabel(double? bps) {
       if (bps == null) return '—';
       if (bps >= 1e9) return '${(bps / 1e9).toStringAsFixed(1)} Gbps';
       if (bps >= 1e6) return '${(bps / 1e6).toStringAsFixed(1)} Mbps';
       if (bps >= 1e3) return '${(bps / 1e3).toStringAsFixed(0)} Kbps';
       return '${bps.toStringAsFixed(0)} bps';
+    }
+
+    // Build the throughput display string.
+    // For unidirectional tests: just "90.0 Mbps"
+    // For bidirectional tests:  "↑90.0 Mbps ↓90.0 Mbps"
+    final String tpDisplay;
+    if (sumRecv != null) {
+      tpDisplay = '↑${tpLabel(sumSent)} ↓${tpLabel(sumRecv)}';
+    } else {
+      tpDisplay = tpLabel(sumSent);
     }
 
     return Padding(
@@ -1341,7 +1381,7 @@ class _VpnTrafficPanelState extends State<VpnTrafficPanel> {
           ),
           const SizedBox(width: 4),
           Text(
-            tpLabel(sumThroughput),
+            tpDisplay,
             style: const TextStyle(
               fontSize: 10,
               fontWeight: FontWeight.w600,

@@ -35,6 +35,16 @@ class _LogicalTopologyWidgetState extends State<LogicalTopologyWidget>
 
   /// Whether the per-link throughput overlay is shown on the canvas.
   bool _showMetricOverlay = true;
+
+  /// The connection ID of the link currently being hovered, or null.
+  String? _hoveredLinkId;
+
+  /// Screen-space position of the cursor (used to place the tooltip).
+  Offset _cursorPosition = Offset.zero;
+
+  /// Latest link metrics — kept in state so the hover tooltip can read them
+  /// without needing a BuildContext rebuild.
+  Map<String, Map<String, double>> _lastLinkMetrics = {};
   
   // Physics parameters
   final double kRepulsion = 10000.0;
@@ -324,7 +334,51 @@ class _LogicalTopologyWidgetState extends State<LogicalTopologyWidget>
        clipBehavior: Clip.hardEdge, // Ensure content stays within bounds
        child: Stack(
          children: [
-            InteractiveViewer(
+            // MouseRegion wraps the entire canvas to track cursor position and
+            // detect hover over link midpoints for the detail tooltip.
+            MouseRegion(
+              onHover: (event) {
+                if (!_showMetricOverlay || _lastLinkMetrics.isEmpty) return;
+                final localPos = event.localPosition;
+
+                // Transform screen position → canvas coordinates by inverting
+                // the InteractiveViewer's current transform matrix.
+                final matrix = _transformationController.value;
+                final inverted = Matrix4.inverted(matrix);
+                final canvasPos = MatrixUtils.transformPoint(inverted, localPos);
+
+                // Hit-test: find the router link whose midpoint is within 20px
+                // of the cursor (in canvas space).
+                String? hitId;
+                for (final conn in widget.topology.connections) {
+                  if ((conn.properties['type'] as String? ?? '').isNotEmpty) continue;
+                  if (!_lastLinkMetrics.containsKey(conn.id)) continue;
+                  final p1 = _positions[conn.sourceId];
+                  final p2 = _positions[conn.targetId];
+                  if (p1 == null || p2 == null) continue;
+                  final mid = Offset((p1.dx + p2.dx) / 2, (p1.dy + p2.dy) / 2);
+                  if ((mid - canvasPos).distance < 20) {
+                    hitId = conn.id;
+                    break;
+                  }
+                }
+
+                if (hitId != _hoveredLinkId) {
+                  setState(() {
+                    _hoveredLinkId = hitId;
+                    _cursorPosition = localPos;
+                  });
+                } else if (hitId != null) {
+                  // Update cursor position while staying on the same link.
+                  setState(() => _cursorPosition = localPos);
+                }
+              },
+              onExit: (_) {
+                if (_hoveredLinkId != null) {
+                  setState(() => _hoveredLinkId = null);
+                }
+              },
+              child: InteractiveViewer(
               transformationController: _transformationController,
               constrained: false, // Important to allow panning effectively
               boundaryMargin: const EdgeInsets.all(4000), // Huge margins to let users drag far out
@@ -343,14 +397,19 @@ class _LogicalTopologyWidgetState extends State<LogicalTopologyWidget>
                         // overlay repaints whenever metrics arrive (every ~20 s).
                         Positioned.fill(
                           child: Consumer<Appstate>(
-                            builder: (context, appState, _) => CustomPaint(
-                              painter: TopologyPainter(
-                                topology: widget.topology,
-                                positions: _positions,
-                                linkMetrics: _buildLinkMetrics(appState),
-                                overlayEnabled: _showMetricOverlay,
-                              ),
-                            ),
+                            builder: (context, appState, _) {
+                              final metrics = _buildLinkMetrics(appState);
+                              // Keep a copy so the hover tooltip can read it.
+                              _lastLinkMetrics = metrics;
+                              return CustomPaint(
+                                painter: TopologyPainter(
+                                  topology: widget.topology,
+                                  positions: _positions,
+                                  linkMetrics: metrics,
+                                  overlayEnabled: _showMetricOverlay,
+                                ),
+                              );
+                            },
                           ),
                         ),
                         // Then draw the nodes on top
@@ -493,6 +552,10 @@ class _LogicalTopologyWidgetState extends State<LogicalTopologyWidget>
                    ),
                 ),
               ),
+            ), // end MouseRegion
+            // ── Hover tooltip ──────────────────────────────────────────────
+            if (_hoveredLinkId != null && _showMetricOverlay)
+              _buildLinkTooltip(_hoveredLinkId!, _cursorPosition),
             // Metric overlay toggle button — top-right corner of the canvas.
             Positioned(
               top: 12,
@@ -618,6 +681,89 @@ class _LogicalTopologyWidgetState extends State<LogicalTopologyWidget>
           ),
         );
     }
+  }
+
+  // ── Link hover tooltip ────────────────────────────────────────────────────
+
+  /// Builds a floating detail card near the cursor showing capacity, ↑ sent,
+  /// and ↓ recv for the hovered link.
+  Widget _buildLinkTooltip(String linkId, Offset cursorPos) {
+    final metrics = _lastLinkMetrics[linkId];
+    if (metrics == null) return const SizedBox.shrink();
+
+    final txBitps = (metrics['txBps'] ?? 0) * 8;
+    final rxBitps = (metrics['rxBps'] ?? 0) * 8;
+    final capacityBps = metrics['capacityBps'];
+
+    String bpsLabel(double bps) {
+      if (bps >= 1e9) return '${(bps / 1e9).toStringAsFixed(1)} Gbps';
+      if (bps >= 1e6) return '${(bps / 1e6).toStringAsFixed(1)} Mbps';
+      if (bps >= 1e3) return '${(bps / 1e3).toStringAsFixed(0)} Kbps';
+      return '${bps.toStringAsFixed(0)} bps';
+    }
+
+    const labelStyle = TextStyle(fontSize: 11, color: Colors.black54);
+    const valueStyle = TextStyle(
+      fontSize: 11,
+      fontWeight: FontWeight.w600,
+      color: Colors.black87,
+    );
+
+    final rows = <Widget>[
+      if (capacityBps != null && capacityBps > 0)
+        _tooltipRow('Capacity', bpsLabel(capacityBps), labelStyle, valueStyle),
+      _tooltipRow('↑ Sent', bpsLabel(txBitps), labelStyle, valueStyle),
+      _tooltipRow('↓ Recv', bpsLabel(rxBitps), labelStyle, valueStyle),
+    ];
+
+    // Position the card 12px below and to the right of the cursor, clamped
+    // so it doesn't overflow the right/bottom edge of the widget.
+    const cardWidth = 160.0;
+    const cardHeight = 80.0;
+    const offset = 14.0;
+
+    return Positioned(
+      left: cursorPos.dx + offset,
+      top: cursorPos.dy + offset,
+      child: IgnorePointer(
+        child: Material(
+          elevation: 4,
+          borderRadius: BorderRadius.circular(8),
+          color: Colors.white,
+          child: Container(
+            width: cardWidth,
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: Colors.blue.shade100),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: rows,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _tooltipRow(
+    String label,
+    String value,
+    TextStyle labelStyle,
+    TextStyle valueStyle,
+  ) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(label, style: labelStyle),
+          Text(value, style: valueStyle),
+        ],
+      ),
+    );
   }
 
   Widget _buildLegendItem(Color color, String label) {
@@ -754,8 +900,10 @@ class TopologyPainter extends CustomPainter {
 
   /// Line colour based on utilisation % of link capacity.
   ///
-  /// When [capacityBps] is known (> 0) the colour reflects the % of the link
-  /// bandwidth that is currently in use:
+  /// Uses the peak direction (max of txBitps, rxBitps) so that a bidirectional
+  /// 90 Mbps test on a 100 Mbps link correctly shows 90 % utilisation (orange)
+  /// rather than 180 % (which would be nonsensical for a full-duplex link).
+  ///
   ///   < 60 %  → green   (healthy)
   ///   60–80 % → amber   (moderate)
   ///   80–90 % → orange  (high)
@@ -763,29 +911,34 @@ class TopologyPainter extends CustomPainter {
   ///
   /// When capacity is unknown (null / 0) the colour falls back to a simple
   /// presence/absence check: any traffic → green, no traffic → grey.
-  Color _linkColor(double totalBitps, double? capacityBps) {
+  Color _linkColor(double txBitps, double rxBitps, double? capacityBps) {
+    final peakBitps = max(txBitps, rxBitps);
     if (capacityBps != null && capacityBps > 0) {
-      final pct = totalBitps / capacityBps * 100;
+      final pct = peakBitps / capacityBps * 100;
       if (pct < 60) return Colors.green.withValues(alpha: 0.85);
       if (pct < 80) return Colors.amber.withValues(alpha: 0.90);
       if (pct < 90) return Colors.orange.withValues(alpha: 0.90);
       return Colors.red.shade600.withValues(alpha: 0.9);
     }
     // Fallback when capacity is unknown
-    if (totalBitps <= 0) return Colors.blueGrey.withValues(alpha: 0.4);
+    if (peakBitps <= 0) return Colors.blueGrey.withValues(alpha: 0.4);
     return Colors.green.withValues(alpha: 0.80);
   }
 
-  /// Midpoint label: shows throughput with utilisation % in brackets when
-  /// capacity is known (e.g. "42.3 M (37%)"), otherwise just the throughput
-  /// (e.g. "42.3 M").
-  String _linkLabel(double totalBitps, double? capacityBps) {
-    final throughput = _bpsLabel(totalBitps);
+  /// Compact midpoint label — shows only utilisation % when capacity is known,
+  /// or the peak direction rate when capacity is unknown.
+  ///
+  /// Full detail (↑tx, ↓rx, capacity) is shown in the hover tooltip instead.
+  String _linkLabel(double txBitps, double rxBitps, double? capacityBps) {
     if (capacityBps != null && capacityBps > 0) {
-      final pct = totalBitps / capacityBps * 100;
-      return '$throughput (${pct.toStringAsFixed(0)}%)';
+      final peakBitps = max(txBitps, rxBitps);
+      final pct = peakBitps / capacityBps * 100;
+      return '${pct.toStringAsFixed(0)}%';
     }
-    return throughput;
+    // No capacity configured — show the peak direction rate.
+    final peakBitps = max(txBitps, rxBitps);
+    if (peakBitps <= 0) return '';
+    return _bpsLabel(peakBitps);
   }
 
   /// Compact human-readable bit rate string (fallback label).
@@ -817,10 +970,11 @@ class TopologyPainter extends CustomPainter {
         // ALIGN_RATE).  Multiply by 8 to convert to bits/sec so that
         // utilisation % and _bpsLabel suffixes (K/M/G) correctly represent
         // Kbps / Mbps / Gbps.
-        final totalBitps = ((metrics['txBps'] ?? 0) + (metrics['rxBps'] ?? 0)) * 8;
+        final txBitps = (metrics['txBps'] ?? 0) * 8;
+        final rxBitps = (metrics['rxBps'] ?? 0) * 8;
         final capacityBps = metrics['capacityBps'];
-        lineColor = _linkColor(totalBitps, capacityBps);
-        strokeWidth = totalBitps > 0 ? 3.0 : 1.5;
+        lineColor = _linkColor(txBitps, rxBitps, capacityBps);
+        strokeWidth = max(txBitps, rxBitps) > 0 ? 3.0 : 1.5;
       } else {
         lineColor = Colors.blueGrey.withValues(alpha: 0.5);
         strokeWidth = 2.0;
@@ -837,10 +991,11 @@ class TopologyPainter extends CustomPainter {
 
       // Utilisation label at the midpoint, router links only.
       if (metrics != null && isRouterLink) {
-        final totalBitps = ((metrics['txBps'] ?? 0) + (metrics['rxBps'] ?? 0)) * 8;
+        final txBitps = (metrics['txBps'] ?? 0) * 8;
+        final rxBitps = (metrics['rxBps'] ?? 0) * 8;
         final capacityBps = metrics['capacityBps'];
         final mid = Offset((p1.dx + p2.dx) / 2, (p1.dy + p2.dy) / 2);
-        _drawLinkLabel(canvas, _linkLabel(totalBitps, capacityBps), mid, lineColor);
+        _drawLinkLabel(canvas, _linkLabel(txBitps, rxBitps, capacityBps), mid, lineColor);
       }
     }
   }

@@ -766,7 +766,8 @@ async def check_and_update_parent_status(parent_name: str, parent_kind: str, nam
             else:
                 raise
         
-        # Check current status - skip only terminal/in-progress-deletion states.
+        # Check current status - skip terminal/in-progress-deletion states and
+        # states that are actively managed by the infrastructure controller itself.
         # We must also re-evaluate from 'Ready' because routers may reach Running
         # before all Devices are Ready, causing a premature Ready transition that
         # needs to be corrected when the device events arrive.
@@ -852,6 +853,26 @@ async def check_and_update_parent_status(parent_name: str, parent_kind: str, nam
             success_message = f"All {' and '.join(parts)} are ready"
             await update_status(parent_name, namespace, parent_kind, "Ready", success_message)
         else:
+            # If the parent is already Ready, do NOT downgrade its status based on
+            # transient router states caused by external controllers (VyOSUnderlay or
+            # VyOSL3VPN patching routers for protocol/VRF updates).  Those controllers
+            # own the router spec changes and are responsible for waiting on the routers
+            # themselves.  Downgrading the infrastructure to "Creating" here causes a
+            # cascade: VyOSUnderlay sees the infrastructure as not-Ready and enters
+            # "Waiting", even though the infrastructure itself is healthy.
+            #
+            # Only downgrade to "Creating" when the parent is in a state that indicates
+            # it is actively being reconciled by the infrastructure controller (i.e.,
+            # "Creating" or empty/unknown — meaning initial bring-up is still in progress).
+            if current_phase == 'Ready':
+                logger.info(
+                    f"Parent {parent_kind} {parent_name} is Ready but some children are "
+                    f"not yet Running ({not_ready_routers + not_ready_devices}) — "
+                    f"skipping status downgrade; children are likely being updated by "
+                    f"VyOSUnderlay or VyOSL3VPN"
+                )
+                return
+
             waiting_parts = []
             if not_ready_routers:
                 waiting_parts.append(
