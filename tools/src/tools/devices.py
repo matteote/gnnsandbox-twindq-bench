@@ -92,7 +92,7 @@ def getDevices()-> str:
             api_version="google.dev/v1", 
             kind="Device",
         )
-        devices = network_api.get()
+        devices = network_api.get(namespace="network")
         for device in devices.items:
             logger.debug(device)
             device_dict = device.to_dict()
@@ -139,7 +139,7 @@ def getDeviceByName(name: Annotated[str, "The name of the device to retrieve"])-
 
         # Get the specific device by name
         try:
-            device = network_api.get(name=name, namespace="default")
+            device = network_api.get(name=name, namespace="network")
             device_dict = device.to_dict()
             text_representation = json.dumps(device_dict, indent=2)
             logger.debug(f"Found device: {text_representation}")
@@ -184,7 +184,7 @@ def searchDevices(
             api_version="google.dev/v1", 
             kind="Device",
         )
-        devices = network_api.get()
+        devices = network_api.get(namespace="network")
         
         matching_devices = []
         for device in devices.items:

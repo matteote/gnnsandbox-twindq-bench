@@ -1364,33 +1364,33 @@ Networkagent()
         --allow-unauthenticated 
     fi
 
-    # # deploy the tester agent
-    # if [[ "$AGENT_NAMES" == "all" ]] || [[ "$AGENT_NAMES" == *"test"* ]]; then 
-    #     agent_processed=true
-    #     IMAGE_URI="$GOOGLE_REGION-docker.pkg.dev/$GOOGLE_PROJECT/$GOOGLE_REPO/testagent:latest"
-    #     if [[ $YES_FLAG != "y" ]] && [[ $NO_FLAG != "y" ]] && $(gcloud artifacts docker images describe $IMAGE_URI >/dev/null 2>&1); then
-    #         read -p "Tester agent image already exists. Rebuild? (y/n) " -n 1 -r
-    #         echo
-    #         if [[ $REPLY =~ ^[Yy]$ ]]; then
-    #             gcloud builds submit --region=$GOOGLE_REGION --config=networkagents/tester/cloudbuild.yaml .
-    #         fi
-    #     elif [[ $NO_FLAG == "y" ]] && $(gcloud artifacts docker images describe $IMAGE_URI >/dev/null 2>&1); then
-    #         echo "Tester agent image already exists - not building the image (NO_FLAG set)"
-    #     elif [[ $NO_FLAG != "y" ]]; then
-    #         gcloud builds submit --region=$GOOGLE_REGION --config=networkagents/tester/cloudbuild.yaml .
-    #     fi
-    #     gcloud run deploy testagent \
-    #     --image $IMAGE_URI \
-    #     --region $GOOGLE_REGION \
-    #     --service-account $GOOGLE_SERVICE_ACCOUNT \
-    #     --min 1 \
-    #     --update-env-vars GOOGLE_CLOUD_PROJECT=$GOOGLE_PROJECT \
-    #     --update-env-vars GOOGLE_CLOUD_LOCATION=$GOOGLE_REGION \
-    #     --update-env-vars GOOGLE_GENAI_USE_VERTEXAI=1 \
-    #     --update-env-vars AGENT_MCP_TOOLS_ADDRESS=$TOOLS_URL/sse \
-    #     --update-env-vars GOOGLE_APPLICATION_CREDENTIALS="/agent/networkagent.json" \
-    #     --allow-unauthenticated 
-    # fi
+    # deploy the tester agent
+    if [[ "$AGENT_NAMES" == "all" ]] || [[ "$AGENT_NAMES" == *"test"* ]]; then 
+        agent_processed=true
+        IMAGE_URI="$GOOGLE_REGION-docker.pkg.dev/$GOOGLE_PROJECT/$GOOGLE_REPO/testagent:latest"
+        if [[ $YES_FLAG != "y" ]] && [[ $NO_FLAG != "y" ]] && $(gcloud artifacts docker images describe $IMAGE_URI >/dev/null 2>&1); then
+            read -p "Tester agent image already exists. Rebuild? (y/n) " -n 1 -r
+            echo
+            if [[ $REPLY =~ ^[Yy]$ ]]; then
+                gcloud builds submit --region=$GOOGLE_REGION --config=networkagents/tester/cloudbuild.yaml .
+            fi
+        elif [[ $NO_FLAG == "y" ]] && $(gcloud artifacts docker images describe $IMAGE_URI >/dev/null 2>&1); then
+            echo "Tester agent image already exists - not building the image (NO_FLAG set)"
+        elif [[ $NO_FLAG != "y" ]]; then
+            gcloud builds submit --region=$GOOGLE_REGION --config=networkagents/tester/cloudbuild.yaml .
+        fi
+        gcloud run deploy testagent \
+        --image $IMAGE_URI \
+        --region $GOOGLE_REGION \
+        --service-account $GOOGLE_SERVICE_ACCOUNT \
+        --min 1 \
+        --update-env-vars GOOGLE_CLOUD_PROJECT=$GOOGLE_PROJECT \
+        --update-env-vars GOOGLE_CLOUD_LOCATION=$GOOGLE_REGION \
+        --update-env-vars GOOGLE_GENAI_USE_VERTEXAI=1 \
+        --update-env-vars AGENT_MCP_TOOLS_ADDRESS=$TOOLS_URL/sse \
+        --update-env-vars GOOGLE_APPLICATION_CREDENTIALS="/agent/networkagent.json" \
+        --allow-unauthenticated 
+    fi
 
     # deploy the logs agent
     if [[ "$AGENT_NAMES" == "all" ]] || [[ "$AGENT_NAMES" == *"logs"* ]]; then

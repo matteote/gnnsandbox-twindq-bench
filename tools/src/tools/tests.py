@@ -95,7 +95,7 @@ def getRunningTests()-> str:
             api_version="google.dev/v1", 
             kind="TrafficTest",
         )
-        tests=network_api.get(namespace="default")
+        tests=network_api.get(namespace="network")
         for t in tests.items:
             logger.debug(t)
             test_dict = t.to_dict()
@@ -146,7 +146,7 @@ def runTest(
         "kind": "TrafficTest",
         "metadata": {
             "name": name,
-            "namespace": "default",
+            "namespace": "network",
         },
         "spec": spec
     }
@@ -208,7 +208,7 @@ def deleteTest(
                 api_version="google.dev/v1", 
                 kind="TrafficTest",
             )
-            network_api.delete(name=name, namespace="default")
+            network_api.delete(name=name, namespace="network")
             return f"Traffic test {name} deleted successfully"
 
         except kubernetes.client.rest.ApiException as e:
