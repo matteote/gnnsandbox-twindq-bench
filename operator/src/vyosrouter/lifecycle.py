@@ -69,6 +69,40 @@ async def create_vyosrouter(body, spec, name, namespace, uid, logger, **kwargs):
         'traffic_policy': spec.get('traffic_policy', {})
     }
 
+    # Enrich interfaces with network-level bandwidth from the parent
+    # VyOSInfrastructure CR.  Bandwidth is NOT stored in the VyOSRouter spec
+    # (it is not a CRD field) — we look it up at runtime so the Ansible
+    # playbook can apply a TC HTB qdisc on the host-side veth, mimicking a
+    # physical link speed without any VyOS traffic-policy configuration.
+    source_network = spec.get('source_network')
+    if source_network:
+        try:
+            k8s_client = kubernetes.dynamic.DynamicClient(kubernetes.client.ApiClient())
+            infra_api = k8s_client.resources.get(api_version='google.dev/v1', kind='VyOSInfrastructure')
+            infra_cr = infra_api.get(name=source_network, namespace=namespace)
+            infra_spec = infra_cr.get('spec', {}) if hasattr(infra_cr, 'get') else infra_cr.to_dict().get('spec', {})
+            # Build a network-name → bandwidth map (only valid TC values)
+            import re as _re
+            net_bandwidth = {}
+            for net in infra_spec.get('networks', []):
+                bw = net.get('bandwidth')
+                if bw and _re.match(r'^[0-9]+[kmg]?bit$', bw):
+                    net_bandwidth[net['name']] = bw
+            # Inject bandwidth into each interface that has a matching linux_network
+            if net_bandwidth:
+                enriched_interfaces = []
+                for iface in router_config['interfaces']:
+                    iface = dict(iface)  # shallow copy — don't mutate the spec object
+                    linux_net = iface.get('linux_network')
+                    if linux_net and linux_net in net_bandwidth:
+                        iface['bandwidth'] = net_bandwidth[linux_net]
+                    enriched_interfaces.append(iface)
+                router_config['interfaces'] = enriched_interfaces
+                logger.info(f"VyOSRouter {name}: enriched interfaces with network bandwidths: {net_bandwidth}")
+        except Exception as bw_err:
+            # Non-fatal — if we can't look up the infra, proceed without TC shaping
+            logger.warning(f"VyOSRouter {name}: could not look up VyOSInfrastructure '{source_network}' for bandwidth enrichment: {bw_err}")
+
     logger.info(f"VyOSRouter config: {router_config}")
 
     # Check if all required LinuxNetwork CRs are ready

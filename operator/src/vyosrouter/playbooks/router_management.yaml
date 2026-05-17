@@ -121,17 +121,26 @@
                 # Bring up host-side veth
                 ip link set $veth_host up
                 
-                # Apply bandwidth limit to host-side veth if specified
+                # Apply bandwidth limit to host-side veth if the network definition
+                # specifies a capacity.  This enforces the link speed at the host
+                # level (mimicking a physical interface rate) without requiring any
+                # VyOS traffic-policy configuration inside the router.
+                # The bandwidth value comes from the network definition in the
+                # VyOSInfrastructure spec (e.g. "100mbit" for PE-P links, "1gbit"
+                # for P-P links).  Management and loopback interfaces never carry
+                # this field so they are naturally excluded.
                 {% if item.bandwidth is defined and item.bandwidth != '' %}
                 BANDWIDTH="{{ item.bandwidth }}"
                 
-                # Remove existing qdisc
+                # Remove any existing qdisc before re-applying
                 tc qdisc del dev $veth_host root 2>/dev/null || true
                 
-                # Add HTB qdisc with rate limiting
+                # HTB root qdisc — all traffic falls into the default class (1:10)
                 tc qdisc add dev $veth_host root handle 1: htb default 10
-                tc class add dev $veth_host parent 1: classid 1:1 htb rate $BANDWIDTH
-                tc class add dev $veth_host parent 1:10 classid 1:10 htb rate $BANDWIDTH
+                # Root class: sets the hard ceiling for the interface
+                tc class add dev $veth_host parent 1: classid 1:1 htb rate $BANDWIDTH ceil $BANDWIDTH
+                # Default class: inherits the ceiling; SFQ leaf for fair queuing
+                tc class add dev $veth_host parent 1:1 classid 1:10 htb rate $BANDWIDTH ceil $BANDWIDTH
                 tc qdisc add dev $veth_host parent 1:10 handle 10: sfq perturb 10
                 
                 echo "Applied ${BANDWIDTH} bandwidth limit to $veth_host"

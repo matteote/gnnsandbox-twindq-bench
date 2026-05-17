@@ -436,6 +436,14 @@ def build_network_lookup(networks: List[Dict[str, Any]]) -> Dict[str, Dict[str, 
         if 'gateway' in network:
             network_lookup[network_name]['gateway'] = network['gateway']
 
+        # Include bandwidth so it can be applied as a host-side veth TC limit.
+        # Only store values that match the tc-compatible pattern (e.g. "100mbit",
+        # "1gbit").  "unlimited" and None are intentionally excluded so that
+        # management and loopback networks never get a TC qdisc applied.
+        bandwidth = network.get('bandwidth')
+        if bandwidth and re.match(r'^[0-9]+[kmg]?bit$', bandwidth):
+            network_lookup[network_name]['bandwidth'] = bandwidth
+
     return network_lookup
 
 def generate_router_interfaces(router: Dict[str, Any], network_lookup: Dict[str, Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -481,10 +489,6 @@ def generate_router_interfaces(router: Dict[str, Any], network_lookup: Dict[str,
             'mtu': network_info['mtu'],
             'enabled': interface_def.get('enabled', True)
         }
-
-        # Add bandwidth if specified
-        if 'bandwidth' in interface_def:
-            interface_config['bandwidth'] = interface_def['bandwidth']
 
         # Add gateway if specified
         if 'gateway' in network_info:

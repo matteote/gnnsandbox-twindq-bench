@@ -13,9 +13,10 @@
 # limitations under the License.
 
 import asyncio
+import json
 import os
+import subprocess
 import logging
-import ansible_runner
 import utils.constants as constants
 from utils.compute import get_ip
 import kopf
@@ -108,14 +109,16 @@ async def update_opsagent_config(namespace: str, routers: list, devices: list = 
         "devices": devices,
     }
 
-    hosts = {
-        "hosts": {
-            "monitor": {
-                "ansible_host": ip_address,
-                "ansible_user": os.getenv("GOOGLE_VM_USER"),
-                "ansible_connection": "ssh",
-                "ansible_ssh_private_key_file": constants.basedir + "/google-compute",
-                "ansible_ssh_common_args": "-o StrictHostKeyChecking=no",
+    inventory = {
+        "all": {
+            "hosts": {
+                "monitor": {
+                    "ansible_host": ip_address,
+                    "ansible_user": os.getenv("GOOGLE_VM_USER"),
+                    "ansible_connection": "ssh",
+                    "ansible_ssh_private_key_file": constants.basedir + "/google-compute",
+                    "ansible_ssh_common_args": "-o StrictHostKeyChecking=no",
+                }
             }
         }
     }
@@ -125,24 +128,43 @@ async def update_opsagent_config(namespace: str, routers: list, devices: list = 
 
     ANSIBLE_TIMEOUT_SECONDS = 60
 
-    def run_ansible():
+    def run_ansible(temp_dir):
+        """Write temp files and call ansible-playbook via subprocess (fork+exec)."""
+        inv_file = os.path.join(temp_dir, 'inventory.json')
+        extravars_file = os.path.join(temp_dir, 'extravars.json')
+        playbook_path = os.path.join(
+            constants.basedir, 'vyosinfrastructure/playbooks', 'update-opsagent.yaml'
+        )
+
+        with open(inv_file, 'w') as fh:
+            json.dump(inventory, fh)
+        with open(extravars_file, 'w') as fh:
+            json.dump(extravars, fh)
+
+        env = os.environ.copy()
+        env['ANSIBLE_STDOUT_CALLBACK'] = 'json'
+        env['ANSIBLE_FORCE_COLOR'] = '0'
+
         try:
-            thread, runner = ansible_runner.run_async(
-                private_data_dir=constants.basedir + "/vyosinfrastructure/playbooks",
-                inventory={"all": hosts},
-                playbook="update-opsagent.yaml",
-                extravars=extravars,
-                quiet=False,
-                verbosity=1,
+            result = subprocess.run(
+                [
+                    'ansible-playbook',
+                    '-i', inv_file,
+                    playbook_path,
+                    '--extra-vars', f'@{extravars_file}',
+                ],
+                capture_output=True,
+                text=True,
+                timeout=ANSIBLE_TIMEOUT_SECONDS,
+                env=env,
             )
-            thread.join(timeout=ANSIBLE_TIMEOUT_SECONDS)
-            if thread.is_alive():
-                logger.error(
-                    "Ansible playbook 'update-opsagent.yaml' did not finish within "
-                    f"{ANSIBLE_TIMEOUT_SECONDS}s — treating as failure"
-                )
-                return None
-            return runner
+            return result
+        except subprocess.TimeoutExpired:
+            logger.error(
+                "Ansible playbook 'update-opsagent.yaml' did not finish within "
+                f"{ANSIBLE_TIMEOUT_SECONDS}s — treating as failure"
+            )
+            return None
         except Exception as e:
             logger.error("Ansible execution failed: %s", e)
             return None
@@ -152,18 +174,28 @@ async def update_opsagent_config(namespace: str, routers: list, devices: list = 
     semaphore = get_ansible_semaphore()
 
     async with semaphore:
-        loop = asyncio.get_event_loop()
-        runner = await loop.run_in_executor(None, run_ansible)
+        import tempfile
+        import shutil
+        temp_dir = tempfile.mkdtemp(prefix="ansible_vyosinfra_")
+        try:
+            loop = asyncio.get_event_loop()
+            result = await loop.run_in_executor(None, run_ansible, temp_dir)
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
 
-    if runner is None:
+    if result is None:
         logger.error("Failed to execute Ops Agent update playbook")
         return
 
-    if runner.status == "successful":
+    # Log all task results (changed→INFO, ok/skipped→DEBUG, failures→ERROR)
+    from utils.ansible import log_ansible_output
+    log_ansible_output('update-opsagent.yaml', result.stdout, logger)
+
+    if result.returncode == 0:
         logger.info(
             "Ops Agent config updated successfully with %d router(s)", len(routers)
         )
     else:
         logger.error(
-            "Ansible failed while updating Ops Agent config (status=%s)", runner.status
+            "Ansible failed while updating Ops Agent config (rc=%d)", result.returncode
         )
