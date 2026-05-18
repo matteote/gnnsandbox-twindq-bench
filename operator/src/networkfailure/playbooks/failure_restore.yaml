@@ -416,6 +416,19 @@
       register: rt_restore_result
       failed_when: rt_restore_result.rc != 0
 
+    - name: "[VRF_RT_MISCONFIGURATION] Trigger BGP inbound reset to re-import hub routes"
+      # After restoring the correct RT, BGP will not re-import already-rejected routes
+      # without a policy refresh. A hard inbound reset forces FRR to re-evaluate all
+      # received VPNv4 routes against the restored (correct) import policy, immediately
+      # re-populating the VRF table with hub routes. The \* escapes the glob wildcard
+      # so the shell passes a literal * to vtysh (meaning "all peers").
+      shell: >
+        docker exec {{ router }} vtysh
+        -c "clear bgp vrf {{ vrf }} \* in"
+      when: failure_type == 'VRF_RT_MISCONFIGURATION'
+      register: bgp_reset_restore_result
+      failed_when: false
+
     - name: "[VRF_RT_MISCONFIGURATION] Wait for VRF to re-import hub routes"
       pause:
         seconds: 10

@@ -137,7 +137,8 @@ async def restore_failure_operator(name: str, namespace: str, spec: Dict[str, An
             return await _restore_ospf_cost_inflation(name, namespace, router, interface, original_state)
 
         elif failure_type == 'VRF_RT_MISCONFIGURATION':
-            return await _restore_vrf_rt_misconfiguration(name, namespace, router, vrf, original_state)
+            parameters = spec.get('parameters', {})
+            return await _restore_vrf_rt_misconfiguration(name, namespace, router, vrf, original_state, parameters)
 
         else:
             return {
@@ -654,12 +655,78 @@ async def _inject_vrf_rt_misconfiguration(name, namespace, router, vrf, paramete
     return {'success': False, 'error': 'Failed to patch VyOSL3VPN CRD'}
 
 
-async def _restore_vrf_rt_misconfiguration(name, namespace, router, vrf, original_state):
+async def _restore_vrf_rt_misconfiguration(name, namespace, router, vrf, original_state,
+                                            parameters: Optional[Dict[str, Any]] = None):
+    """
+    Restore VRF RT misconfiguration by patching rt_import back to the correct value.
+
+    Resilient to missing original_state (status patch race on fast delete):
+    - If l3vpn_name is missing, auto-discovers it by listing all VyOSL3VPN CRDs
+      and finding the one containing the target router/VRF.
+    - If original_rt_import is missing, reconstructs it from correct_rt in
+      original_state or spec parameters.
+    """
+    if parameters is None:
+        parameters = {}
+
     original_rt_import = original_state.get('original_rt_import', [])
     l3vpn_name = original_state.get('l3vpn_name')
 
+    # Fallback: auto-discover l3vpn_name when original_state is empty due to a
+    # status patch race (resource deleted very quickly after creation).
     if not l3vpn_name:
-        return {'success': False, 'error': 'original_state missing l3vpn_name'}
+        logger.warning(
+            f"[operator-mode] VRF_RT_MISCONFIGURATION restore: original_state missing l3vpn_name "
+            f"for '{name}' — auto-discovering VyOSL3VPN CRD containing {router}/{vrf}"
+        )
+        all_l3vpns = await _get_crd(namespace, 'vyosl3vpns', 'google.dev', 'v1')
+        for l3vpn_candidate in all_l3vpns:
+            for r in l3vpn_candidate.get('spec', {}).get('routers', []):
+                if r.get('name') == router:
+                    for v in r.get('vrfs', []):
+                        if v.get('name') == vrf:
+                            l3vpn_name = l3vpn_candidate['metadata']['name']
+                            logger.info(
+                                f"[operator-mode] VRF_RT_MISCONFIGURATION restore: "
+                                f"auto-discovered l3vpn_name='{l3vpn_name}'"
+                            )
+                            break
+                if l3vpn_name:
+                    break
+            if l3vpn_name:
+                break
+
+    if not l3vpn_name:
+        return {
+            'success': False,
+            'error': (
+                f"original_state missing l3vpn_name and no VyOSL3VPN CRD found "
+                f"containing router '{router}' VRF '{vrf}' in namespace '{namespace}'"
+            )
+        }
+
+    # Fallback: reconstruct original_rt_import from correct_rt when missing.
+    # correct_rt is saved in original_state by the inject path, and is also
+    # available directly from spec.parameters as a last resort.
+    if not original_rt_import:
+        correct_rt = (
+            original_state.get('correct_rt')
+            or parameters.get('correct_rt', '')
+        )
+        if correct_rt:
+            original_rt_import = [correct_rt]
+            logger.warning(
+                f"[operator-mode] VRF_RT_MISCONFIGURATION restore: original_rt_import missing "
+                f"for '{name}' — reconstructed from correct_rt='{correct_rt}'"
+            )
+        else:
+            return {
+                'success': False,
+                'error': (
+                    "original_state missing original_rt_import and correct_rt — "
+                    "cannot determine what RT to restore. Manual remediation required."
+                )
+            }
 
     l3vpn = await _get_crd_by_name(namespace, 'vyosl3vpns', 'google.dev', 'v1', l3vpn_name)
     if not l3vpn:
@@ -676,6 +743,11 @@ async def _restore_vrf_rt_misconfiguration(name, namespace, router, vrf, origina
 
     patch = {'spec': {'routers': routers}}
     success = await _patch_crd(namespace, 'vyosl3vpns', 'google.dev', 'v1', l3vpn_name, patch)
+    if success:
+        logger.info(
+            f"[operator-mode] VRF_RT_MISCONFIGURATION: restored rt_import={original_rt_import} "
+            f"on {router}/{vrf} in {l3vpn_name}"
+        )
     return {'success': success, 'error': None if success else 'Failed to restore VyOSL3VPN CRD'}
 
 

@@ -1,0 +1,58 @@
+# NetworkFailure: Logical Misconfiguration / VRF Route Target Misconfiguration
+#
+# Fault Type   : VRF_RT_MISCONFIGURATION
+# Target       : PE3, VRF BLUE_SPOKE
+# Impact       : PE3's BLUE_SPOKE VRF stops importing hub routes because its import
+#                Route Target is changed from the correct hub export RT (65035:1030)
+#                to a non-existent community (65035:9999). CE2-spoke (attached to PE3
+#                via 10.60.60.0/24) loses all connectivity to the hub site and all
+#                other spoke sites. The eBGP session between PE3 and CE2-spoke remains
+#                Established, PE3's VPNv4 table still receives updates from the RRs,
+#                and all OSPF/LDP adjacencies remain healthy. Zero alarms fire from
+#                any traditional monitoring system. This models an operator copy-paste
+#                error during a VPN service provisioning change — the wrong RT value
+#                from a different VPN service was pasted into the import policy.
+#
+# GNN Detection Signatures:
+#   HetGNN : VRF sub-embedding of PE3/BLUE_SPOKE deviates — rt_import hash diverges
+#             from the cluster centroid shared by PE1/BLUE_SPOKE and PE4/BLUE_SPOKE
+#             (all spoke VRFs should import the same hub RT 65035:1030)
+#   D-GAT  : Directed VPNv4 advertisement edges from PE2 (hub) to PE3 (spoke) are
+#             present in the RR update graph but absent from PE3's local RIB-in,
+#             revealing a selective import failure invisible at the session layer
+#   STGNN  : bgp_pfx_rcvd on PE3/BLUE_SPOKE drops to 0 while bgp_pfx_rcvd on
+#             PE1/BLUE_SPOKE and PE4/BLUE_SPOKE remain healthy — temporal divergence
+#             within the same VPN service pinpoints PE3 as the anomalous node
+#
+# Usage:
+#   kubectl apply  -f nf-fault8-vrf-rt-misconfiguration.yaml    # Introduce RT mismatch
+#   kubectl delete -f nf-fault8-vrf-rt-misconfiguration.yaml    # Restore correct RT
+---
+apiVersion: google.dev/v1
+kind: NetworkFailure
+metadata:
+  name: fault8-vrf-rt-misconfiguration
+  namespace: network
+  labels:
+    scenario: l3vpn-hub-spoke
+    fault-type: vrf-rt-misconfiguration
+    severity: high
+spec:
+  failureType: VRF_RT_MISCONFIGURATION
+  infrastructureRef: l3vpn-infra
+  target:
+    router: pe3
+    # BLUE_SPOKE VRF on PE3 serves CE2-spoke (10.60.60.0/24).
+    # Corrupting the import RT here silently isolates CE2-spoke from the hub
+    # while leaving the eBGP session to CE2-spoke fully Established.
+    vrf: BLUE_SPOKE
+  parameters:
+    # The correct import RT is the hub's export RT (65035:1030). All BLUE_SPOKE
+    # VRFs must import this community to receive hub routes and enable spoke-to-hub
+    # and spoke-to-spoke (via hub) traffic.
+    correct_rt: "65035:1030"
+    # We replace it with a non-existent community (65035:9999). PE3 will no longer
+    # match any VPNv4 routes in its RIB-in, so the BLUE_SPOKE VRF routing table
+    # empties of hub-originated prefixes. CE2-spoke becomes unreachable from all
+    # other sites in the BLUE VPN.
+    wrong_rt: "65035:9999"

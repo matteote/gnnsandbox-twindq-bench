@@ -539,6 +539,22 @@
       register: rt_inject_result
       failed_when: rt_inject_result.rc != 0
 
+    - name: "[VRF_RT_MISCONFIGURATION] Trigger BGP inbound reset to flush stale RIB entries"
+      # BGP does not withdraw already-accepted routes when an import policy changes —
+      # only new incoming UPDATEs are filtered against the new RT. A hard inbound reset
+      # ("clear bgp vrf <vrf> \* in") forces FRR to re-evaluate all received VPNv4
+      # routes against the new (wrong) import policy, immediately flushing hub routes
+      # from the VRF table. The \* escapes the glob wildcard so the shell passes a
+      # literal * to vtysh (meaning "all peers"). Note: this is a hard inbound reset —
+      # it drops and re-establishes the BGP session with CE2-spoke, which is acceptable
+      # for a fault injection scenario.
+      shell: >
+        docker exec {{ router }} vtysh
+        -c "clear bgp vrf {{ vrf }} \* in"
+      when: failure_type == 'VRF_RT_MISCONFIGURATION'
+      register: bgp_reset_result
+      failed_when: false
+
     - name: "[VRF_RT_MISCONFIGURATION] Verify VRF route table is now empty (hub routes gone)"
       shell: >
         docker exec {{ router }}

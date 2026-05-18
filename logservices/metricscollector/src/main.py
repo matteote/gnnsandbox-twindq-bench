@@ -9,7 +9,7 @@ from google.cloud import monitoring_v3
 from google.cloud import spanner
 
 import logging
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Configuration

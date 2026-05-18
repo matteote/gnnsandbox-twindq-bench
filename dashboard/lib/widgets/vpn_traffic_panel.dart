@@ -1306,7 +1306,7 @@ class _VpnTrafficPanelState extends State<VpnTrafficPanel> {
     final fwdSrcFlows = srcFlows.where((f) => !f.flowId.endsWith('_rev')).toList();
     final revSrcFlows = srcFlows.where((f) => f.flowId.endsWith('_rev')).toList();
 
-    // ↑ Sent: forward direction throughput
+    // ↑ Sent: forward direction throughput (kernel send buffer — not delivery confirmed)
     double? sumSent;
     for (final f in fwdSrcFlows) {
       final tp = f.throughputSentBps ?? f.throughputBps;
@@ -1320,16 +1320,94 @@ class _VpnTrafficPanelState extends State<VpnTrafficPanel> {
       if (tp != null) sumRecv = (sumRecv ?? 0) + tp;
     }
 
+    // ── Delivery checks (UDP only) ────────────────────────────────────────────
+    //
+    // Delivery-based loss is only reliable for UDP flows.  For TCP, the
+    // transport layer guarantees in-order delivery — the destination always
+    // receives exactly what the source sent (modulo retransmits that are
+    // invisible at the application layer).  More importantly, comparing
+    // throughput_sent_bps (source) against throughput_recv_bps (destination)
+    // across two different devices scraped at different times is unreliable for
+    // TCP: flow control, buffering, and the multi-sine pattern's changing rate
+    // mean the two values will differ by several percent even on a healthy link,
+    // producing false packet-loss readings.
+    //
+    // For UDP we CAN do this comparison because:
+    //   • UDP has no retransmit / flow-control buffering
+    //   • The source sends at a fixed rate; the destination either receives it
+    //     or it's dropped — there is no "in-flight" buffer to account for
+    //   • A sustained gap (< 10 % of sent) is a genuine black-hole signal
+    //
+    // The API returns four entries for a bidirectional UDP test:
+    //   (flow_id,      role=source)      → spoke sending to hub   (forward src)
+    //   (flow_id,      role=destination) → hub receiving           (forward dst)
+    //   (flow_id_rev,  role=source)      → hub sending to spoke   (reverse src)
+    //   (flow_id_rev,  role=destination) → spoke receiving         (reverse dst)
+
+    final bool isUdp = test.protocol?.toLowerCase() == 'udp';
+
+    // Forward delivery: hub received from spoke
+    final fwdDstFlows = dstFlows.where((f) => !f.flowId.endsWith('_rev')).toList();
+    double? sumDelivered;
+    for (final f in fwdDstFlows) {
+      final tp = f.throughputRecvBps;
+      if (tp != null) sumDelivered = (sumDelivered ?? 0) + tp;
+    }
+    // Black-hole: source sending > 1 Mbps but destination receives < 50 % of that.
+    // Only flagged for UDP — TCP delivery is guaranteed at the transport layer.
+    //
+    // Threshold is 50 % (not 10 %) to avoid false positives from scrape-timing
+    // skew: the source and destination are on different devices scraped at
+    // different times, and the multi-sine pattern's changing rate means the two
+    // throughput values can differ by 10–20 % even on a healthy link.
+    // A genuine black-hole (VRF RT misconfiguration, null route, ACL drop) will
+    // show near-zero delivery (< 5 %), so 50 % is a safe threshold.
+    final bool fwdBlackHole = isUdp &&
+        (sumSent != null && sumSent > 1e6) &&
+        fwdDstFlows.isNotEmpty &&
+        (sumDelivered == null || sumDelivered < sumSent * 0.5);
+
+    // Reverse delivery: spoke received from hub (only meaningful for bidir UDP)
+    final revDstFlows = dstFlows.where((f) => f.flowId.endsWith('_rev')).toList();
+    double? revSumDelivered;
+    for (final f in revDstFlows) {
+      final tp = f.throughputRecvBps;
+      if (tp != null) revSumDelivered = (revSumDelivered ?? 0) + tp;
+    }
+    // A fault on the hub→spoke path (e.g. pe2 BLUE_HUB import misconfiguration)
+    // shows up here as sumRecv > 0 but revSumDelivered ≈ 0.
+    final bool revBlackHole = isUdp &&
+        (sumRecv != null && sumRecv > 1e6) &&
+        revDstFlows.isNotEmpty &&
+        (revSumDelivered == null || revSumDelivered < sumRecv * 0.1);
+
+    // Combined: either direction being black-holed triggers the warning.
+    final bool blackHole = fwdBlackHole || revBlackHole;
+
     // Average latency from destination flows only
     final latVals = dstFlows.map((f) => f.latencyMs).whereType<double>().toList();
     final avgLatency = latVals.isNotEmpty
         ? latVals.reduce((a, b) => a + b) / latVals.length
         : null;
 
-    // Average loss from destination flows only
+    // Packet loss: always use the destination-reported sequence-number-based
+    // packet_loss_pct from the traffic-agent receiver.
+    //
+    // For UDP, the receiver tracks sequence-number gaps and reports the fraction
+    // of expected datagrams that never arrived.  This is accurate and consistent
+    // with the aggregate bar.
+    //
+    // For TCP, the transport layer guarantees delivery so this will always be 0,
+    // which is correct — TCP loss is invisible at the application layer.
+    //
+    // We do NOT use the cross-device throughput ratio (sent/delivered) for the
+    // displayed loss value because scrape-timing skew between source and
+    // destination devices causes 10–20 % false loss on a healthy multi-sine
+    // pattern.  The delivery ratio is only used for black-hole DETECTION (the ⚠
+    // icon), where the threshold is high enough (50 %) to avoid false positives.
     final lossVals =
         dstFlows.map((f) => f.packetLossPct).whereType<double>().toList();
-    final avgLoss = lossVals.isNotEmpty
+    final double? avgLoss = lossVals.isNotEmpty
         ? lossVals.reduce((a, b) => a + b) / lossVals.length
         : null;
 
@@ -1359,18 +1437,35 @@ class _VpnTrafficPanelState extends State<VpnTrafficPanel> {
     // Build the throughput display string.
     // For unidirectional tests: just "90.0 Mbps"
     // For bidirectional tests:  "↑90.0 Mbps ↓90.0 Mbps"
+    // When black-holed: throughput text turns red to signal delivery failure.
     final String tpDisplay;
     if (sumRecv != null) {
       tpDisplay = '↑${tpLabel(sumSent)} ↓${tpLabel(sumRecv)}';
     } else {
       tpDisplay = tpLabel(sumSent);
     }
+    final Color tpColor = blackHole
+        ? Colors.red.shade700
+        : const Color(0xFF0D47A1);
 
     return Padding(
       padding: const EdgeInsets.only(top: 4),
       child: Row(
         children: [
-          const Icon(Icons.bar_chart, size: 11, color: Colors.black38),
+          // Warning icon replaces the bar-chart icon when traffic is black-holed.
+          if (blackHole)
+            Tooltip(
+              message: [
+                if (fwdBlackHole)
+                  '↑ spoke→hub: sent ${tpLabel(sumSent)}, delivered ${tpLabel(sumDelivered)}',
+                if (revBlackHole)
+                  '↓ hub→spoke: sent ${tpLabel(sumRecv)}, delivered ${tpLabel(revSumDelivered)}',
+              ].join('\n'),
+              child: Icon(Icons.warning_amber_rounded,
+                  size: 11, color: Colors.red.shade700),
+            )
+          else
+            const Icon(Icons.bar_chart, size: 11, color: Colors.black38),
           const SizedBox(width: 4),
           Expanded(
             child: Text(
@@ -1382,10 +1477,10 @@ class _VpnTrafficPanelState extends State<VpnTrafficPanel> {
           const SizedBox(width: 4),
           Text(
             tpDisplay,
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 10,
               fontWeight: FontWeight.w600,
-              color: Color(0xFF0D47A1),
+              color: tpColor,
             ),
           ),
           const SizedBox(width: 6),

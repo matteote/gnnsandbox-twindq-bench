@@ -964,7 +964,7 @@ DeployGit()
 }
 
 ############################################################
-# Build and deploy the log capture                         #
+# Build and deploy the metrics capture                         #
 ############################################################
 DeployMetricsCollector()
 {

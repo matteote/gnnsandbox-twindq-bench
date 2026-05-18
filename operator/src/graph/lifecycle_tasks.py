@@ -145,7 +145,7 @@ def check_spanner_connection(db_container, lock):
                     db_container['db'] = spanner_connect()
                     logger.warning("Reconnected to Spanner.")
         else:
-            logger.info("Spanner DB connection alive!")
+            logger.debug("Spanner DB connection alive!")
     except Exception as e:
         with lock:
             logger.error(f"Error checking Spanner connection: {e}. Attempting to reconnect...")
