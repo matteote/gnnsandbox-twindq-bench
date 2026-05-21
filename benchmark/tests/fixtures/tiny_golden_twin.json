@@ -1,0 +1,235 @@
+{
+  "schema_version": "1.0",
+  "captured_at": "2026-01-01T00:00:00Z",
+  "source": {
+    "mode": "from_yaml",
+    "network_name": "tiny-test",
+    "yaml_paths": []
+  },
+  "content_hash": null,
+  "entities": {
+    "PhysicalRouter": [
+      {
+        "id": "router:pe1",
+        "name": "pe1",
+        "vendor": "VyOS",
+        "model": "Virtual",
+        "location_city": "Oxford",
+        "location_lat": 51.752,
+        "location_lon": -1.2577,
+        "role": "PE",
+        "status": "Running",
+        "config": null
+      },
+      {
+        "id": "router:pe2",
+        "name": "pe2",
+        "vendor": "VyOS",
+        "model": "Virtual",
+        "location_city": "Cambridge",
+        "location_lat": 52.2053,
+        "location_lon": 0.1218,
+        "role": "PE",
+        "status": "Running",
+        "config": null
+      },
+      {
+        "id": "router:p1",
+        "name": "p1",
+        "vendor": "VyOS",
+        "model": "Virtual",
+        "location_city": "London",
+        "location_lat": 51.5074,
+        "location_lon": -0.1278,
+        "role": "P",
+        "status": "Running",
+        "config": null
+      },
+      {
+        "id": "router:ce1",
+        "name": "ce1",
+        "vendor": "VyOS",
+        "model": "Virtual",
+        "location_city": "Sheffield",
+        "location_lat": 53.3811,
+        "location_lon": -1.4701,
+        "role": "CE",
+        "status": "Running",
+        "config": null
+      }
+    ],
+    "PhysicalInterface": [
+      {
+        "id": "router:pe1:interface:eth1",
+        "router_id": "router:pe1",
+        "name": "eth1",
+        "speed": "1G",
+        "media_type": "ethernet",
+        "ip_address": "10.0.1.1",
+        "mac_address": "02:aa:00:00:00:01",
+        "status": "UP"
+      },
+      {
+        "id": "router:pe1:interface:eth2",
+        "router_id": "router:pe1",
+        "name": "eth2",
+        "speed": "1G",
+        "media_type": "ethernet",
+        "ip_address": "10.0.2.1",
+        "mac_address": "02:aa:00:00:00:02",
+        "status": "UP"
+      },
+      {
+        "id": "router:pe2:interface:eth1",
+        "router_id": "router:pe2",
+        "name": "eth1",
+        "speed": "1G",
+        "media_type": "ethernet",
+        "ip_address": "10.0.1.2",
+        "mac_address": "02:aa:00:00:00:03",
+        "status": "UP"
+      },
+      {
+        "id": "router:p1:interface:eth1",
+        "router_id": "router:p1",
+        "name": "eth1",
+        "speed": "1G",
+        "media_type": "ethernet",
+        "ip_address": "10.0.3.1",
+        "mac_address": "02:aa:00:00:00:04",
+        "status": "UP"
+      },
+      {
+        "id": "router:ce1:interface:eth1",
+        "router_id": "router:ce1",
+        "name": "eth1",
+        "speed": "1G",
+        "media_type": "ethernet",
+        "ip_address": "10.0.2.2",
+        "mac_address": "02:aa:00:00:00:05",
+        "status": "UP"
+      }
+    ],
+    "PhysicalLink": [
+      {
+        "id": "link:pe1-pe2",
+        "name": "pe1-pe2",
+        "bandwidth": "1gbit",
+        "status": "UP",
+        "properties": null
+      },
+      {
+        "id": "link:pe1-ce1",
+        "name": "pe1-ce1",
+        "bandwidth": "100mbit",
+        "status": "UP",
+        "properties": null
+      }
+    ],
+    "Interface_Link": [
+      {
+        "interface_id": "router:pe1:interface:eth1",
+        "link_id": "link:pe1-pe2"
+      },
+      {
+        "interface_id": "router:pe2:interface:eth1",
+        "link_id": "link:pe1-pe2"
+      },
+      {
+        "interface_id": "router:pe1:interface:eth2",
+        "link_id": "link:pe1-ce1"
+      },
+      {
+        "interface_id": "router:ce1:interface:eth1",
+        "link_id": "link:pe1-ce1"
+      }
+    ],
+    "Device": [
+      {
+        "id": "device:dev1",
+        "name": "dev1",
+        "interface_id": "router:ce1:interface:eth1",
+        "network_name": "lan1",
+        "ip_address": "10.0.2.10",
+        "mgmt_ip": "192.168.1.10",
+        "gateway": "10.0.2.2",
+        "vlan": null,
+        "status": "Ready",
+        "config": null
+      }
+    ],
+    "LogicalSubnet": [
+      {
+        "id": "subnet:pe1-pe2",
+        "cidr": "10.0.1.0/24",
+        "network_type": "p2p",
+        "description": null,
+        "mtu": null,
+        "properties": null
+      },
+      {
+        "id": "subnet:pe1-ce1",
+        "cidr": "10.0.2.0/24",
+        "network_type": "p2p",
+        "description": null,
+        "mtu": null,
+        "properties": null
+      }
+    ],
+    "Subnet_Association": [
+      {
+        "entity_id": "router:pe1:interface:eth1",
+        "subnet_id": "subnet:pe1-pe2",
+        "entity_type": "Interface"
+      },
+      {
+        "entity_id": "router:pe2:interface:eth1",
+        "subnet_id": "subnet:pe1-pe2",
+        "entity_type": "Interface"
+      },
+      {
+        "entity_id": "router:pe1:interface:eth2",
+        "subnet_id": "subnet:pe1-ce1",
+        "entity_type": "Interface"
+      },
+      {
+        "entity_id": "router:ce1:interface:eth1",
+        "subnet_id": "subnet:pe1-ce1",
+        "entity_type": "Interface"
+      }
+    ],
+    "L3VPNService": [
+      {
+        "id": "vpn:BLUE",
+        "name": "BLUE",
+        "customer_id": "cust:default",
+        "service_type": "l3vpn",
+        "topology": "any-to-any",
+        "status": "Ready",
+        "config": null
+      }
+    ],
+    "VRF": [
+      {
+        "id": "vrf:pe1:BLUE",
+        "router_id": "router:pe1",
+        "vpn_id": "vpn:BLUE",
+        "name": "VRF-BLUE",
+        "rd": "10.0.1.1:100",
+        "status": "Active",
+        "config": null
+      }
+    ],
+    "BGPSession": [
+      {
+        "id": "bgp:pe1:BLUE:10.0.2.2",
+        "vrf_id": "vrf:pe1:BLUE",
+        "local_as": 65001,
+        "remote_as": 65035,
+        "peer_ip": "10.0.2.2",
+        "status": "Established",
+        "config": null
+      }
+    ]
+  }
+}

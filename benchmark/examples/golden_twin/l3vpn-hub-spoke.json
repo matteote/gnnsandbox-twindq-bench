@@ -1,0 +1,2848 @@
+{
+  "captured_at": "2026-05-20T16:14:01Z",
+  "content_hash": "sha256:d7a335f48c20e85be1a81b453a9c3e0851482007e88d9ff69bc7e416f0824bd9",
+  "entities": {
+    "BGPSession": [
+      {
+        "config": null,
+        "id": "bgp:pe1:BLUE_SPOKE:10.50.50.2",
+        "local_as": 65001,
+        "peer_ip": "10.50.50.2",
+        "remote_as": 65035,
+        "status": "Established",
+        "vrf_id": "vrf:pe1:BLUE_SPOKE"
+      },
+      {
+        "config": null,
+        "id": "bgp:pe1:RED_MESH:10.55.55.2",
+        "local_as": 65001,
+        "peer_ip": "10.55.55.2",
+        "remote_as": 65035,
+        "status": "Established",
+        "vrf_id": "vrf:pe1:RED_MESH"
+      },
+      {
+        "config": null,
+        "id": "bgp:pe2:BLUE_HUB:10.80.80.2",
+        "local_as": 65001,
+        "peer_ip": "10.80.80.2",
+        "remote_as": 65035,
+        "status": "Established",
+        "vrf_id": "vrf:pe2:BLUE_HUB"
+      },
+      {
+        "config": null,
+        "id": "bgp:pe2:RED_MESH:10.65.65.2",
+        "local_as": 65001,
+        "peer_ip": "10.65.65.2",
+        "remote_as": 65035,
+        "status": "Established",
+        "vrf_id": "vrf:pe2:RED_MESH"
+      },
+      {
+        "config": null,
+        "id": "bgp:pe3:BLUE_SPOKE:10.60.60.2",
+        "local_as": 65001,
+        "peer_ip": "10.60.60.2",
+        "remote_as": 65035,
+        "status": "Established",
+        "vrf_id": "vrf:pe3:BLUE_SPOKE"
+      },
+      {
+        "config": null,
+        "id": "bgp:pe3:RED_MESH:10.75.75.2",
+        "local_as": 65001,
+        "peer_ip": "10.75.75.2",
+        "remote_as": 65035,
+        "status": "Established",
+        "vrf_id": "vrf:pe3:RED_MESH"
+      },
+      {
+        "config": null,
+        "id": "bgp:pe4:BLUE_SPOKE:10.70.70.2",
+        "local_as": 65001,
+        "peer_ip": "10.70.70.2",
+        "remote_as": 65035,
+        "status": "Established",
+        "vrf_id": "vrf:pe4:BLUE_SPOKE"
+      },
+      {
+        "config": null,
+        "id": "bgp:pe4:RED_MESH:10.85.85.2",
+        "local_as": 65001,
+        "peer_ip": "10.85.85.2",
+        "remote_as": 65035,
+        "status": "Established",
+        "vrf_id": "vrf:pe4:RED_MESH"
+      }
+    ],
+    "Device": [
+      {
+        "config": null,
+        "gateway": "10.100.1.1",
+        "id": "device:d1-blue",
+        "interface_id": "router:ce1-spoke:interface:eth2",
+        "ip_address": "10.100.1.10",
+        "mgmt_ip": "192.168.122.51",
+        "name": "d1-blue",
+        "network_name": "lan-spoke1",
+        "status": "Ready",
+        "vlan": null
+      },
+      {
+        "config": null,
+        "gateway": "10.101.1.1",
+        "id": "device:d1-red",
+        "interface_id": "router:ce1-red:interface:eth2",
+        "ip_address": "10.101.1.10",
+        "mgmt_ip": "192.168.122.54",
+        "name": "d1-red",
+        "network_name": "lan-red1",
+        "status": "Ready",
+        "vlan": null
+      },
+      {
+        "config": null,
+        "gateway": "10.100.3.1",
+        "id": "device:d2-blue",
+        "interface_id": "router:ce2-spoke:interface:eth2",
+        "ip_address": "10.100.3.10",
+        "mgmt_ip": "192.168.122.52",
+        "name": "d2-blue",
+        "network_name": "lan-spoke2",
+        "status": "Ready",
+        "vlan": null
+      },
+      {
+        "config": null,
+        "gateway": "10.101.2.1",
+        "id": "device:d2-red",
+        "interface_id": "router:ce2-red:interface:eth2",
+        "ip_address": "10.101.2.10",
+        "mgmt_ip": "192.168.122.55",
+        "name": "d2-red",
+        "network_name": "lan-red2",
+        "status": "Ready",
+        "vlan": null
+      },
+      {
+        "config": null,
+        "gateway": "10.100.4.1",
+        "id": "device:d3-blue",
+        "interface_id": "router:ce3-spoke:interface:eth2",
+        "ip_address": "10.100.4.10",
+        "mgmt_ip": "192.168.122.53",
+        "name": "d3-blue",
+        "network_name": "lan-spoke3",
+        "status": "Ready",
+        "vlan": null
+      },
+      {
+        "config": null,
+        "gateway": "10.101.3.1",
+        "id": "device:d3-red",
+        "interface_id": "router:ce3-red:interface:eth2",
+        "ip_address": "10.101.3.10",
+        "mgmt_ip": "192.168.122.56",
+        "name": "d3-red",
+        "network_name": "lan-red3",
+        "status": "Ready",
+        "vlan": null
+      },
+      {
+        "config": null,
+        "gateway": "10.101.4.1",
+        "id": "device:d4-red",
+        "interface_id": "router:ce4-red:interface:eth2",
+        "ip_address": "10.101.4.10",
+        "mgmt_ip": "192.168.122.57",
+        "name": "d4-red",
+        "network_name": "lan-red4",
+        "status": "Ready",
+        "vlan": null
+      },
+      {
+        "config": null,
+        "gateway": "10.100.2.1",
+        "id": "device:dh-blue",
+        "interface_id": "router:ce1-hub:interface:eth2",
+        "ip_address": "10.100.2.10",
+        "mgmt_ip": "192.168.122.50",
+        "name": "dh-blue",
+        "network_name": "lan-hub",
+        "status": "Ready",
+        "vlan": null
+      }
+    ],
+    "Interface_Link": [
+      {
+        "interface_id": "router:ce1-hub:interface:eth1",
+        "link_id": "link:pe2-ce1-hub"
+      },
+      {
+        "interface_id": "router:ce1-red:interface:eth1",
+        "link_id": "link:pe1-ce1-red"
+      },
+      {
+        "interface_id": "router:ce1-spoke:interface:eth1",
+        "link_id": "link:pe1-ce1-spoke"
+      },
+      {
+        "interface_id": "router:ce2-red:interface:eth1",
+        "link_id": "link:pe2-ce2-red"
+      },
+      {
+        "interface_id": "router:ce2-spoke:interface:eth1",
+        "link_id": "link:pe3-ce2-spoke"
+      },
+      {
+        "interface_id": "router:ce3-red:interface:eth1",
+        "link_id": "link:pe3-ce3-red"
+      },
+      {
+        "interface_id": "router:ce3-spoke:interface:eth1",
+        "link_id": "link:pe4-ce3-spoke"
+      },
+      {
+        "interface_id": "router:ce4-red:interface:eth1",
+        "link_id": "link:pe4-ce4-red"
+      },
+      {
+        "interface_id": "router:p1:interface:eth1",
+        "link_id": "link:p1-p2"
+      },
+      {
+        "interface_id": "router:p1:interface:eth2",
+        "link_id": "link:p1-p3"
+      },
+      {
+        "interface_id": "router:p1:interface:eth3",
+        "link_id": "link:p1-pe1"
+      },
+      {
+        "interface_id": "router:p1:interface:eth4",
+        "link_id": "link:p1-rr1"
+      },
+      {
+        "interface_id": "router:p1:interface:eth5",
+        "link_id": "link:p1-pe2"
+      },
+      {
+        "interface_id": "router:p2:interface:eth1",
+        "link_id": "link:p1-p2"
+      },
+      {
+        "interface_id": "router:p2:interface:eth2",
+        "link_id": "link:p2-p4"
+      },
+      {
+        "interface_id": "router:p2:interface:eth3",
+        "link_id": "link:p2-rr1"
+      },
+      {
+        "interface_id": "router:p2:interface:eth4",
+        "link_id": "link:p2-pe4"
+      },
+      {
+        "interface_id": "router:p2:interface:eth5",
+        "link_id": "link:p2-pe3"
+      },
+      {
+        "interface_id": "router:p3:interface:eth1",
+        "link_id": "link:p3-pe2"
+      },
+      {
+        "interface_id": "router:p3:interface:eth2",
+        "link_id": "link:p1-p3"
+      },
+      {
+        "interface_id": "router:p3:interface:eth3",
+        "link_id": "link:p3-p4"
+      },
+      {
+        "interface_id": "router:p3:interface:eth4",
+        "link_id": "link:p3-rr2"
+      },
+      {
+        "interface_id": "router:p3:interface:eth5",
+        "link_id": "link:p3-pe1"
+      },
+      {
+        "interface_id": "router:p4:interface:eth1",
+        "link_id": "link:p4-rr2"
+      },
+      {
+        "interface_id": "router:p4:interface:eth2",
+        "link_id": "link:p2-p4"
+      },
+      {
+        "interface_id": "router:p4:interface:eth3",
+        "link_id": "link:p3-p4"
+      },
+      {
+        "interface_id": "router:p4:interface:eth4",
+        "link_id": "link:p4-pe3"
+      },
+      {
+        "interface_id": "router:p4:interface:eth5",
+        "link_id": "link:p4-pe4"
+      },
+      {
+        "interface_id": "router:pe1:interface:eth1",
+        "link_id": "link:p1-pe1"
+      },
+      {
+        "interface_id": "router:pe1:interface:eth2",
+        "link_id": "link:pe1-ce1-spoke"
+      },
+      {
+        "interface_id": "router:pe1:interface:eth3",
+        "link_id": "link:pe1-ce1-red"
+      },
+      {
+        "interface_id": "router:pe1:interface:eth4",
+        "link_id": "link:p3-pe1"
+      },
+      {
+        "interface_id": "router:pe2:interface:eth1",
+        "link_id": "link:p1-pe2"
+      },
+      {
+        "interface_id": "router:pe2:interface:eth2",
+        "link_id": "link:p3-pe2"
+      },
+      {
+        "interface_id": "router:pe2:interface:eth3",
+        "link_id": "link:pe2-ce1-hub"
+      },
+      {
+        "interface_id": "router:pe2:interface:eth4",
+        "link_id": "link:pe2-ce2-red"
+      },
+      {
+        "interface_id": "router:pe3:interface:eth1",
+        "link_id": "link:p4-pe3"
+      },
+      {
+        "interface_id": "router:pe3:interface:eth2",
+        "link_id": "link:pe3-ce2-spoke"
+      },
+      {
+        "interface_id": "router:pe3:interface:eth3",
+        "link_id": "link:pe3-ce3-red"
+      },
+      {
+        "interface_id": "router:pe3:interface:eth4",
+        "link_id": "link:p2-pe3"
+      },
+      {
+        "interface_id": "router:pe4:interface:eth1",
+        "link_id": "link:p2-pe4"
+      },
+      {
+        "interface_id": "router:pe4:interface:eth2",
+        "link_id": "link:pe4-ce3-spoke"
+      },
+      {
+        "interface_id": "router:pe4:interface:eth3",
+        "link_id": "link:pe4-ce4-red"
+      },
+      {
+        "interface_id": "router:pe4:interface:eth4",
+        "link_id": "link:p4-pe4"
+      },
+      {
+        "interface_id": "router:rr1:interface:eth1",
+        "link_id": "link:p2-rr1"
+      },
+      {
+        "interface_id": "router:rr1:interface:eth2",
+        "link_id": "link:p1-rr1"
+      },
+      {
+        "interface_id": "router:rr2:interface:eth1",
+        "link_id": "link:p4-rr2"
+      },
+      {
+        "interface_id": "router:rr2:interface:eth2",
+        "link_id": "link:p3-rr2"
+      }
+    ],
+    "L3VPNService": [
+      {
+        "config": null,
+        "customer_id": "cust:default",
+        "id": "vpn:BLUE_HUB",
+        "name": "BLUE_HUB",
+        "service_type": "l3vpn",
+        "status": "Ready",
+        "topology": "hub"
+      },
+      {
+        "config": null,
+        "customer_id": "cust:default",
+        "id": "vpn:BLUE_SPOKE",
+        "name": "BLUE_SPOKE",
+        "service_type": "l3vpn",
+        "status": "Ready",
+        "topology": "spoke"
+      },
+      {
+        "config": null,
+        "customer_id": "cust:default",
+        "id": "vpn:RED_MESH",
+        "name": "RED_MESH",
+        "service_type": "l3vpn",
+        "status": "Ready",
+        "topology": "any-to-any"
+      }
+    ],
+    "LogicalSubnet": [
+      {
+        "cidr": "10.0.0.1/32",
+        "description": null,
+        "id": "subnet:10.0.0.1/32",
+        "mtu": null,
+        "network_type": "loopback",
+        "properties": null
+      },
+      {
+        "cidr": "10.0.0.10/32",
+        "description": null,
+        "id": "subnet:10.0.0.10/32",
+        "mtu": null,
+        "network_type": "loopback",
+        "properties": null
+      },
+      {
+        "cidr": "10.0.0.100/32",
+        "description": null,
+        "id": "subnet:10.0.0.100/32",
+        "mtu": null,
+        "network_type": "loopback",
+        "properties": null
+      },
+      {
+        "cidr": "10.0.0.101/32",
+        "description": null,
+        "id": "subnet:10.0.0.101/32",
+        "mtu": null,
+        "network_type": "loopback",
+        "properties": null
+      },
+      {
+        "cidr": "10.0.0.102/32",
+        "description": null,
+        "id": "subnet:10.0.0.102/32",
+        "mtu": null,
+        "network_type": "loopback",
+        "properties": null
+      },
+      {
+        "cidr": "10.0.0.103/32",
+        "description": null,
+        "id": "subnet:10.0.0.103/32",
+        "mtu": null,
+        "network_type": "loopback",
+        "properties": null
+      },
+      {
+        "cidr": "10.0.0.104/32",
+        "description": null,
+        "id": "subnet:10.0.0.104/32",
+        "mtu": null,
+        "network_type": "loopback",
+        "properties": null
+      },
+      {
+        "cidr": "10.0.0.11/32",
+        "description": null,
+        "id": "subnet:10.0.0.11/32",
+        "mtu": null,
+        "network_type": "loopback",
+        "properties": null
+      },
+      {
+        "cidr": "10.0.0.2/32",
+        "description": null,
+        "id": "subnet:10.0.0.2/32",
+        "mtu": null,
+        "network_type": "loopback",
+        "properties": null
+      },
+      {
+        "cidr": "10.0.0.3/32",
+        "description": null,
+        "id": "subnet:10.0.0.3/32",
+        "mtu": null,
+        "network_type": "loopback",
+        "properties": null
+      },
+      {
+        "cidr": "10.0.0.4/32",
+        "description": null,
+        "id": "subnet:10.0.0.4/32",
+        "mtu": null,
+        "network_type": "loopback",
+        "properties": null
+      },
+      {
+        "cidr": "10.0.0.5/32",
+        "description": null,
+        "id": "subnet:10.0.0.5/32",
+        "mtu": null,
+        "network_type": "loopback",
+        "properties": null
+      },
+      {
+        "cidr": "10.0.0.6/32",
+        "description": null,
+        "id": "subnet:10.0.0.6/32",
+        "mtu": null,
+        "network_type": "loopback",
+        "properties": null
+      },
+      {
+        "cidr": "10.0.0.7/32",
+        "description": null,
+        "id": "subnet:10.0.0.7/32",
+        "mtu": null,
+        "network_type": "loopback",
+        "properties": null
+      },
+      {
+        "cidr": "10.0.0.8/32",
+        "description": null,
+        "id": "subnet:10.0.0.8/32",
+        "mtu": null,
+        "network_type": "loopback",
+        "properties": null
+      },
+      {
+        "cidr": "10.0.0.80/32",
+        "description": null,
+        "id": "subnet:10.0.0.80/32",
+        "mtu": null,
+        "network_type": "loopback",
+        "properties": null
+      },
+      {
+        "cidr": "10.0.0.90/32",
+        "description": null,
+        "id": "subnet:10.0.0.90/32",
+        "mtu": null,
+        "network_type": "loopback",
+        "properties": null
+      },
+      {
+        "cidr": "10.0.0.91/32",
+        "description": null,
+        "id": "subnet:10.0.0.91/32",
+        "mtu": null,
+        "network_type": "loopback",
+        "properties": null
+      },
+      {
+        "cidr": "10.100.2.0/24",
+        "description": null,
+        "id": "subnet:lan-hub",
+        "mtu": null,
+        "network_type": "multi-access",
+        "properties": null
+      },
+      {
+        "cidr": "10.101.1.0/24",
+        "description": null,
+        "id": "subnet:lan-red1",
+        "mtu": null,
+        "network_type": "multi-access",
+        "properties": null
+      },
+      {
+        "cidr": "10.101.2.0/24",
+        "description": null,
+        "id": "subnet:lan-red2",
+        "mtu": null,
+        "network_type": "multi-access",
+        "properties": null
+      },
+      {
+        "cidr": "10.101.3.0/24",
+        "description": null,
+        "id": "subnet:lan-red3",
+        "mtu": null,
+        "network_type": "multi-access",
+        "properties": null
+      },
+      {
+        "cidr": "10.101.4.0/24",
+        "description": null,
+        "id": "subnet:lan-red4",
+        "mtu": null,
+        "network_type": "multi-access",
+        "properties": null
+      },
+      {
+        "cidr": "10.100.1.0/24",
+        "description": null,
+        "id": "subnet:lan-spoke1",
+        "mtu": null,
+        "network_type": "multi-access",
+        "properties": null
+      },
+      {
+        "cidr": "10.100.3.0/24",
+        "description": null,
+        "id": "subnet:lan-spoke2",
+        "mtu": null,
+        "network_type": "multi-access",
+        "properties": null
+      },
+      {
+        "cidr": "10.100.4.0/24",
+        "description": null,
+        "id": "subnet:lan-spoke3",
+        "mtu": null,
+        "network_type": "multi-access",
+        "properties": null
+      },
+      {
+        "cidr": "192.168.122.0/24",
+        "description": null,
+        "id": "subnet:mgmt",
+        "mtu": null,
+        "network_type": "management",
+        "properties": null
+      },
+      {
+        "cidr": "172.16.30.0/24",
+        "description": null,
+        "id": "subnet:p1-p2",
+        "mtu": null,
+        "network_type": "p2p",
+        "properties": null
+      },
+      {
+        "cidr": "172.16.40.0/24",
+        "description": null,
+        "id": "subnet:p1-p3",
+        "mtu": null,
+        "network_type": "p2p",
+        "properties": null
+      },
+      {
+        "cidr": "172.16.90.0/24",
+        "description": null,
+        "id": "subnet:p1-pe1",
+        "mtu": null,
+        "network_type": "p2p",
+        "properties": null
+      },
+      {
+        "cidr": "172.16.100.0/24",
+        "description": null,
+        "id": "subnet:p1-pe2",
+        "mtu": null,
+        "network_type": "p2p",
+        "properties": null
+      },
+      {
+        "cidr": "172.16.10.0/24",
+        "description": null,
+        "id": "subnet:p1-rr1",
+        "mtu": null,
+        "network_type": "p2p",
+        "properties": null
+      },
+      {
+        "cidr": "172.16.60.0/24",
+        "description": null,
+        "id": "subnet:p2-p4",
+        "mtu": null,
+        "network_type": "p2p",
+        "properties": null
+      },
+      {
+        "cidr": "172.16.170.0/24",
+        "description": null,
+        "id": "subnet:p2-pe3",
+        "mtu": null,
+        "network_type": "p2p",
+        "properties": null
+      },
+      {
+        "cidr": "172.16.150.0/24",
+        "description": null,
+        "id": "subnet:p2-pe4",
+        "mtu": null,
+        "network_type": "p2p",
+        "properties": null
+      },
+      {
+        "cidr": "172.16.20.0/24",
+        "description": null,
+        "id": "subnet:p2-rr1",
+        "mtu": null,
+        "network_type": "p2p",
+        "properties": null
+      },
+      {
+        "cidr": "172.16.50.0/24",
+        "description": null,
+        "id": "subnet:p3-p4",
+        "mtu": null,
+        "network_type": "p2p",
+        "properties": null
+      },
+      {
+        "cidr": "172.16.160.0/24",
+        "description": null,
+        "id": "subnet:p3-pe1",
+        "mtu": null,
+        "network_type": "p2p",
+        "properties": null
+      },
+      {
+        "cidr": "172.16.110.0/24",
+        "description": null,
+        "id": "subnet:p3-pe2",
+        "mtu": null,
+        "network_type": "p2p",
+        "properties": null
+      },
+      {
+        "cidr": "172.16.70.0/24",
+        "description": null,
+        "id": "subnet:p3-rr2",
+        "mtu": null,
+        "network_type": "p2p",
+        "properties": null
+      },
+      {
+        "cidr": "172.16.140.0/24",
+        "description": null,
+        "id": "subnet:p4-pe3",
+        "mtu": null,
+        "network_type": "p2p",
+        "properties": null
+      },
+      {
+        "cidr": "172.16.180.0/24",
+        "description": null,
+        "id": "subnet:p4-pe4",
+        "mtu": null,
+        "network_type": "p2p",
+        "properties": null
+      },
+      {
+        "cidr": "172.16.80.0/24",
+        "description": null,
+        "id": "subnet:p4-rr2",
+        "mtu": null,
+        "network_type": "p2p",
+        "properties": null
+      },
+      {
+        "cidr": "10.55.55.0/24",
+        "description": null,
+        "id": "subnet:pe1-ce1-red",
+        "mtu": null,
+        "network_type": "p2p",
+        "properties": null
+      },
+      {
+        "cidr": "10.50.50.0/24",
+        "description": null,
+        "id": "subnet:pe1-ce1-spoke",
+        "mtu": null,
+        "network_type": "p2p",
+        "properties": null
+      },
+      {
+        "cidr": "10.80.80.0/24",
+        "description": null,
+        "id": "subnet:pe2-ce1-hub",
+        "mtu": null,
+        "network_type": "p2p",
+        "properties": null
+      },
+      {
+        "cidr": "10.65.65.0/24",
+        "description": null,
+        "id": "subnet:pe2-ce2-red",
+        "mtu": null,
+        "network_type": "p2p",
+        "properties": null
+      },
+      {
+        "cidr": "10.60.60.0/24",
+        "description": null,
+        "id": "subnet:pe3-ce2-spoke",
+        "mtu": null,
+        "network_type": "p2p",
+        "properties": null
+      },
+      {
+        "cidr": "10.75.75.0/24",
+        "description": null,
+        "id": "subnet:pe3-ce3-red",
+        "mtu": null,
+        "network_type": "p2p",
+        "properties": null
+      },
+      {
+        "cidr": "10.70.70.0/24",
+        "description": null,
+        "id": "subnet:pe4-ce3-spoke",
+        "mtu": null,
+        "network_type": "p2p",
+        "properties": null
+      },
+      {
+        "cidr": "10.85.85.0/24",
+        "description": null,
+        "id": "subnet:pe4-ce4-red",
+        "mtu": null,
+        "network_type": "p2p",
+        "properties": null
+      }
+    ],
+    "PhysicalInterface": [
+      {
+        "id": "router:ce1-hub:interface:eth0",
+        "ip_address": "192.168.122.41",
+        "mac_address": "02:3f:3e:3d:4e:b7",
+        "media_type": "ethernet",
+        "name": "eth0",
+        "router_id": "router:ce1-hub",
+        "speed": "1G",
+        "status": "UP"
+      },
+      {
+        "id": "router:ce1-hub:interface:eth1",
+        "ip_address": "10.80.80.2",
+        "mac_address": "02:34:80:b3:88:73",
+        "media_type": "ethernet",
+        "name": "eth1",
+        "router_id": "router:ce1-hub",
+        "speed": "100M",
+        "status": "UP"
+      },
+      {
+        "id": "router:ce1-hub:interface:eth2",
+        "ip_address": "10.100.2.1",
+        "mac_address": "02:e6:df:0e:1c:e5",
+        "media_type": "ethernet",
+        "name": "eth2",
+        "router_id": "router:ce1-hub",
+        "speed": "100M",
+        "status": "UP"
+      },
+      {
+        "id": "router:ce1-hub:interface:lo",
+        "ip_address": "10.0.0.100",
+        "mac_address": "02:90:f6:e9:ad:53",
+        "media_type": "ethernet",
+        "name": "lo",
+        "router_id": "router:ce1-hub",
+        "speed": "1G",
+        "status": "UP"
+      },
+      {
+        "id": "router:ce1-red:interface:eth0",
+        "ip_address": "192.168.122.44",
+        "mac_address": "02:b4:64:20:3d:1e",
+        "media_type": "ethernet",
+        "name": "eth0",
+        "router_id": "router:ce1-red",
+        "speed": "1G",
+        "status": "UP"
+      },
+      {
+        "id": "router:ce1-red:interface:eth1",
+        "ip_address": "10.55.55.2",
+        "mac_address": "02:32:a8:69:5c:a9",
+        "media_type": "ethernet",
+        "name": "eth1",
+        "router_id": "router:ce1-red",
+        "speed": "100M",
+        "status": "UP"
+      },
+      {
+        "id": "router:ce1-red:interface:eth2",
+        "ip_address": "10.101.1.1",
+        "mac_address": "02:55:97:26:8a:f9",
+        "media_type": "ethernet",
+        "name": "eth2",
+        "router_id": "router:ce1-red",
+        "speed": "100M",
+        "status": "UP"
+      },
+      {
+        "id": "router:ce1-red:interface:lo",
+        "ip_address": "10.0.0.101",
+        "mac_address": "02:1e:89:78:f3:6e",
+        "media_type": "ethernet",
+        "name": "lo",
+        "router_id": "router:ce1-red",
+        "speed": "1G",
+        "status": "UP"
+      },
+      {
+        "id": "router:ce1-spoke:interface:eth0",
+        "ip_address": "192.168.122.40",
+        "mac_address": "02:4c:56:9b:03:dc",
+        "media_type": "ethernet",
+        "name": "eth0",
+        "router_id": "router:ce1-spoke",
+        "speed": "1G",
+        "status": "UP"
+      },
+      {
+        "id": "router:ce1-spoke:interface:eth1",
+        "ip_address": "10.50.50.2",
+        "mac_address": "02:f9:45:64:72:f6",
+        "media_type": "ethernet",
+        "name": "eth1",
+        "router_id": "router:ce1-spoke",
+        "speed": "100M",
+        "status": "UP"
+      },
+      {
+        "id": "router:ce1-spoke:interface:eth2",
+        "ip_address": "10.100.1.1",
+        "mac_address": "02:2b:41:85:a7:eb",
+        "media_type": "ethernet",
+        "name": "eth2",
+        "router_id": "router:ce1-spoke",
+        "speed": "100M",
+        "status": "UP"
+      },
+      {
+        "id": "router:ce1-spoke:interface:lo",
+        "ip_address": "10.0.0.80",
+        "mac_address": "02:2e:63:33:52:9d",
+        "media_type": "ethernet",
+        "name": "lo",
+        "router_id": "router:ce1-spoke",
+        "speed": "1G",
+        "status": "UP"
+      },
+      {
+        "id": "router:ce2-red:interface:eth0",
+        "ip_address": "192.168.122.45",
+        "mac_address": "02:c2:f1:e0:b4:76",
+        "media_type": "ethernet",
+        "name": "eth0",
+        "router_id": "router:ce2-red",
+        "speed": "1G",
+        "status": "UP"
+      },
+      {
+        "id": "router:ce2-red:interface:eth1",
+        "ip_address": "10.65.65.2",
+        "mac_address": "02:a2:04:a8:d5:ee",
+        "media_type": "ethernet",
+        "name": "eth1",
+        "router_id": "router:ce2-red",
+        "speed": "100M",
+        "status": "UP"
+      },
+      {
+        "id": "router:ce2-red:interface:eth2",
+        "ip_address": "10.101.2.1",
+        "mac_address": "02:30:56:cb:86:14",
+        "media_type": "ethernet",
+        "name": "eth2",
+        "router_id": "router:ce2-red",
+        "speed": "100M",
+        "status": "UP"
+      },
+      {
+        "id": "router:ce2-red:interface:lo",
+        "ip_address": "10.0.0.102",
+        "mac_address": "02:bf:92:25:b5:f0",
+        "media_type": "ethernet",
+        "name": "lo",
+        "router_id": "router:ce2-red",
+        "speed": "1G",
+        "status": "UP"
+      },
+      {
+        "id": "router:ce2-spoke:interface:eth0",
+        "ip_address": "192.168.122.42",
+        "mac_address": "02:3a:10:51:b0:82",
+        "media_type": "ethernet",
+        "name": "eth0",
+        "router_id": "router:ce2-spoke",
+        "speed": "1G",
+        "status": "UP"
+      },
+      {
+        "id": "router:ce2-spoke:interface:eth1",
+        "ip_address": "10.60.60.2",
+        "mac_address": "02:d2:ed:2d:5a:dd",
+        "media_type": "ethernet",
+        "name": "eth1",
+        "router_id": "router:ce2-spoke",
+        "speed": "100M",
+        "status": "UP"
+      },
+      {
+        "id": "router:ce2-spoke:interface:eth2",
+        "ip_address": "10.100.3.1",
+        "mac_address": "02:13:37:9b:60:18",
+        "media_type": "ethernet",
+        "name": "eth2",
+        "router_id": "router:ce2-spoke",
+        "speed": "100M",
+        "status": "UP"
+      },
+      {
+        "id": "router:ce2-spoke:interface:lo",
+        "ip_address": "10.0.0.90",
+        "mac_address": "02:9a:d8:1f:ec:50",
+        "media_type": "ethernet",
+        "name": "lo",
+        "router_id": "router:ce2-spoke",
+        "speed": "1G",
+        "status": "UP"
+      },
+      {
+        "id": "router:ce3-red:interface:eth0",
+        "ip_address": "192.168.122.46",
+        "mac_address": "02:fc:5c:db:b9:26",
+        "media_type": "ethernet",
+        "name": "eth0",
+        "router_id": "router:ce3-red",
+        "speed": "1G",
+        "status": "UP"
+      },
+      {
+        "id": "router:ce3-red:interface:eth1",
+        "ip_address": "10.75.75.2",
+        "mac_address": "02:e5:07:1d:7e:ef",
+        "media_type": "ethernet",
+        "name": "eth1",
+        "router_id": "router:ce3-red",
+        "speed": "100M",
+        "status": "UP"
+      },
+      {
+        "id": "router:ce3-red:interface:eth2",
+        "ip_address": "10.101.3.1",
+        "mac_address": "02:54:ef:17:03:91",
+        "media_type": "ethernet",
+        "name": "eth2",
+        "router_id": "router:ce3-red",
+        "speed": "100M",
+        "status": "UP"
+      },
+      {
+        "id": "router:ce3-red:interface:lo",
+        "ip_address": "10.0.0.103",
+        "mac_address": "02:ea:cd:90:11:9e",
+        "media_type": "ethernet",
+        "name": "lo",
+        "router_id": "router:ce3-red",
+        "speed": "1G",
+        "status": "UP"
+      },
+      {
+        "id": "router:ce3-spoke:interface:eth0",
+        "ip_address": "192.168.122.43",
+        "mac_address": "02:29:23:11:4d:7f",
+        "media_type": "ethernet",
+        "name": "eth0",
+        "router_id": "router:ce3-spoke",
+        "speed": "1G",
+        "status": "UP"
+      },
+      {
+        "id": "router:ce3-spoke:interface:eth1",
+        "ip_address": "10.70.70.2",
+        "mac_address": "02:71:8b:1f:a3:41",
+        "media_type": "ethernet",
+        "name": "eth1",
+        "router_id": "router:ce3-spoke",
+        "speed": "100M",
+        "status": "UP"
+      },
+      {
+        "id": "router:ce3-spoke:interface:eth2",
+        "ip_address": "10.100.4.1",
+        "mac_address": "02:f8:d8:fe:94:2c",
+        "media_type": "ethernet",
+        "name": "eth2",
+        "router_id": "router:ce3-spoke",
+        "speed": "100M",
+        "status": "UP"
+      },
+      {
+        "id": "router:ce3-spoke:interface:lo",
+        "ip_address": "10.0.0.91",
+        "mac_address": "02:e8:f7:f1:35:8f",
+        "media_type": "ethernet",
+        "name": "lo",
+        "router_id": "router:ce3-spoke",
+        "speed": "1G",
+        "status": "UP"
+      },
+      {
+        "id": "router:ce4-red:interface:eth0",
+        "ip_address": "192.168.122.47",
+        "mac_address": "02:b5:5f:a8:89:59",
+        "media_type": "ethernet",
+        "name": "eth0",
+        "router_id": "router:ce4-red",
+        "speed": "1G",
+        "status": "UP"
+      },
+      {
+        "id": "router:ce4-red:interface:eth1",
+        "ip_address": "10.85.85.2",
+        "mac_address": "02:f7:80:30:b2:61",
+        "media_type": "ethernet",
+        "name": "eth1",
+        "router_id": "router:ce4-red",
+        "speed": "100M",
+        "status": "UP"
+      },
+      {
+        "id": "router:ce4-red:interface:eth2",
+        "ip_address": "10.101.4.1",
+        "mac_address": "02:a8:59:53:1f:4b",
+        "media_type": "ethernet",
+        "name": "eth2",
+        "router_id": "router:ce4-red",
+        "speed": "100M",
+        "status": "UP"
+      },
+      {
+        "id": "router:ce4-red:interface:lo",
+        "ip_address": "10.0.0.104",
+        "mac_address": "02:e5:7c:50:7d:78",
+        "media_type": "ethernet",
+        "name": "lo",
+        "router_id": "router:ce4-red",
+        "speed": "1G",
+        "status": "UP"
+      },
+      {
+        "id": "router:p1:interface:eth0",
+        "ip_address": "192.168.122.11",
+        "mac_address": "02:73:f5:e9:ca:79",
+        "media_type": "ethernet",
+        "name": "eth0",
+        "router_id": "router:p1",
+        "speed": "1G",
+        "status": "UP"
+      },
+      {
+        "id": "router:p1:interface:eth1",
+        "ip_address": "172.16.30.1",
+        "mac_address": "02:70:50:19:83:87",
+        "media_type": "ethernet",
+        "name": "eth1",
+        "router_id": "router:p1",
+        "speed": "1G",
+        "status": "UP"
+      },
+      {
+        "id": "router:p1:interface:eth2",
+        "ip_address": "172.16.40.1",
+        "mac_address": "02:5a:be:6d:bc:fd",
+        "media_type": "ethernet",
+        "name": "eth2",
+        "router_id": "router:p1",
+        "speed": "1G",
+        "status": "UP"
+      },
+      {
+        "id": "router:p1:interface:eth3",
+        "ip_address": "172.16.90.1",
+        "mac_address": "02:a0:d2:aa:43:d2",
+        "media_type": "ethernet",
+        "name": "eth3",
+        "router_id": "router:p1",
+        "speed": "100M",
+        "status": "UP"
+      },
+      {
+        "id": "router:p1:interface:eth4",
+        "ip_address": "172.16.10.1",
+        "mac_address": "02:ea:1b:30:23:29",
+        "media_type": "ethernet",
+        "name": "eth4",
+        "router_id": "router:p1",
+        "speed": "1G",
+        "status": "UP"
+      },
+      {
+        "id": "router:p1:interface:eth5",
+        "ip_address": "172.16.100.1",
+        "mac_address": "02:fb:06:8d:27:9e",
+        "media_type": "ethernet",
+        "name": "eth5",
+        "router_id": "router:p1",
+        "speed": "100M",
+        "status": "UP"
+      },
+      {
+        "id": "router:p1:interface:lo",
+        "ip_address": "10.0.0.3",
+        "mac_address": "02:30:4f:27:d2:47",
+        "media_type": "ethernet",
+        "name": "lo",
+        "router_id": "router:p1",
+        "speed": "1G",
+        "status": "UP"
+      },
+      {
+        "id": "router:p2:interface:eth0",
+        "ip_address": "192.168.122.12",
+        "mac_address": "02:55:90:4f:c7:fb",
+        "media_type": "ethernet",
+        "name": "eth0",
+        "router_id": "router:p2",
+        "speed": "1G",
+        "status": "UP"
+      },
+      {
+        "id": "router:p2:interface:eth1",
+        "ip_address": "172.16.30.2",
+        "mac_address": "02:cc:b7:09:7b:81",
+        "media_type": "ethernet",
+        "name": "eth1",
+        "router_id": "router:p2",
+        "speed": "1G",
+        "status": "UP"
+      },
+      {
+        "id": "router:p2:interface:eth2",
+        "ip_address": "172.16.60.1",
+        "mac_address": "02:cf:07:ad:ae:3f",
+        "media_type": "ethernet",
+        "name": "eth2",
+        "router_id": "router:p2",
+        "speed": "1G",
+        "status": "UP"
+      },
+      {
+        "id": "router:p2:interface:eth3",
+        "ip_address": "172.16.20.1",
+        "mac_address": "02:06:63:8c:e3:88",
+        "media_type": "ethernet",
+        "name": "eth3",
+        "router_id": "router:p2",
+        "speed": "1G",
+        "status": "UP"
+      },
+      {
+        "id": "router:p2:interface:eth4",
+        "ip_address": "172.16.150.1",
+        "mac_address": "02:de:4d:4e:cc:e5",
+        "media_type": "ethernet",
+        "name": "eth4",
+        "router_id": "router:p2",
+        "speed": "100M",
+        "status": "UP"
+      },
+      {
+        "id": "router:p2:interface:eth5",
+        "ip_address": "172.16.170.1",
+        "mac_address": "02:c9:99:5f:6e:4b",
+        "media_type": "ethernet",
+        "name": "eth5",
+        "router_id": "router:p2",
+        "speed": "100M",
+        "status": "UP"
+      },
+      {
+        "id": "router:p2:interface:lo",
+        "ip_address": "10.0.0.4",
+        "mac_address": "02:eb:16:5d:e6:77",
+        "media_type": "ethernet",
+        "name": "lo",
+        "router_id": "router:p2",
+        "speed": "1G",
+        "status": "UP"
+      },
+      {
+        "id": "router:p3:interface:eth0",
+        "ip_address": "192.168.122.13",
+        "mac_address": "02:85:52:b2:41:f1",
+        "media_type": "ethernet",
+        "name": "eth0",
+        "router_id": "router:p3",
+        "speed": "1G",
+        "status": "UP"
+      },
+      {
+        "id": "router:p3:interface:eth1",
+        "ip_address": "172.16.110.1",
+        "mac_address": "02:31:87:be:0e:2a",
+        "media_type": "ethernet",
+        "name": "eth1",
+        "router_id": "router:p3",
+        "speed": "100M",
+        "status": "UP"
+      },
+      {
+        "id": "router:p3:interface:eth2",
+        "ip_address": "172.16.40.2",
+        "mac_address": "02:7c:f3:5c:23:ce",
+        "media_type": "ethernet",
+        "name": "eth2",
+        "router_id": "router:p3",
+        "speed": "1G",
+        "status": "UP"
+      },
+      {
+        "id": "router:p3:interface:eth3",
+        "ip_address": "172.16.50.1",
+        "mac_address": "02:c4:e4:5f:19:69",
+        "media_type": "ethernet",
+        "name": "eth3",
+        "router_id": "router:p3",
+        "speed": "1G",
+        "status": "UP"
+      },
+      {
+        "id": "router:p3:interface:eth4",
+        "ip_address": "172.16.70.1",
+        "mac_address": "02:6a:30:84:8e:6f",
+        "media_type": "ethernet",
+        "name": "eth4",
+        "router_id": "router:p3",
+        "speed": "1G",
+        "status": "UP"
+      },
+      {
+        "id": "router:p3:interface:eth5",
+        "ip_address": "172.16.160.1",
+        "mac_address": "02:9a:11:db:71:e5",
+        "media_type": "ethernet",
+        "name": "eth5",
+        "router_id": "router:p3",
+        "speed": "100M",
+        "status": "UP"
+      },
+      {
+        "id": "router:p3:interface:lo",
+        "ip_address": "10.0.0.5",
+        "mac_address": "02:d7:8a:b1:f7:72",
+        "media_type": "ethernet",
+        "name": "lo",
+        "router_id": "router:p3",
+        "speed": "1G",
+        "status": "UP"
+      },
+      {
+        "id": "router:p4:interface:eth0",
+        "ip_address": "192.168.122.14",
+        "mac_address": "02:94:4b:64:45:2d",
+        "media_type": "ethernet",
+        "name": "eth0",
+        "router_id": "router:p4",
+        "speed": "1G",
+        "status": "UP"
+      },
+      {
+        "id": "router:p4:interface:eth1",
+        "ip_address": "172.16.80.1",
+        "mac_address": "02:d9:b8:ea:35:6e",
+        "media_type": "ethernet",
+        "name": "eth1",
+        "router_id": "router:p4",
+        "speed": "1G",
+        "status": "UP"
+      },
+      {
+        "id": "router:p4:interface:eth2",
+        "ip_address": "172.16.60.2",
+        "mac_address": "02:08:a5:ad:d6:4d",
+        "media_type": "ethernet",
+        "name": "eth2",
+        "router_id": "router:p4",
+        "speed": "1G",
+        "status": "UP"
+      },
+      {
+        "id": "router:p4:interface:eth3",
+        "ip_address": "172.16.50.2",
+        "mac_address": "02:bc:e3:38:17:36",
+        "media_type": "ethernet",
+        "name": "eth3",
+        "router_id": "router:p4",
+        "speed": "1G",
+        "status": "UP"
+      },
+      {
+        "id": "router:p4:interface:eth4",
+        "ip_address": "172.16.140.1",
+        "mac_address": "02:c8:00:e1:f6:91",
+        "media_type": "ethernet",
+        "name": "eth4",
+        "router_id": "router:p4",
+        "speed": "100M",
+        "status": "UP"
+      },
+      {
+        "id": "router:p4:interface:eth5",
+        "ip_address": "172.16.180.1",
+        "mac_address": "02:1a:5a:e1:39:fc",
+        "media_type": "ethernet",
+        "name": "eth5",
+        "router_id": "router:p4",
+        "speed": "100M",
+        "status": "UP"
+      },
+      {
+        "id": "router:p4:interface:lo",
+        "ip_address": "10.0.0.6",
+        "mac_address": "02:ac:29:66:f8:15",
+        "media_type": "ethernet",
+        "name": "lo",
+        "router_id": "router:p4",
+        "speed": "1G",
+        "status": "UP"
+      },
+      {
+        "id": "router:pe1:interface:eth0",
+        "ip_address": "192.168.122.31",
+        "mac_address": "02:0e:9b:f6:77:91",
+        "media_type": "ethernet",
+        "name": "eth0",
+        "router_id": "router:pe1",
+        "speed": "1G",
+        "status": "UP"
+      },
+      {
+        "id": "router:pe1:interface:eth1",
+        "ip_address": "172.16.90.2",
+        "mac_address": "02:3e:4d:b7:02:b7",
+        "media_type": "ethernet",
+        "name": "eth1",
+        "router_id": "router:pe1",
+        "speed": "100M",
+        "status": "UP"
+      },
+      {
+        "id": "router:pe1:interface:eth2",
+        "ip_address": "10.50.50.1",
+        "mac_address": "02:23:09:da:73:af",
+        "media_type": "ethernet",
+        "name": "eth2",
+        "router_id": "router:pe1",
+        "speed": "100M",
+        "status": "UP"
+      },
+      {
+        "id": "router:pe1:interface:eth3",
+        "ip_address": "10.55.55.1",
+        "mac_address": "02:b3:4a:1b:a2:ac",
+        "media_type": "ethernet",
+        "name": "eth3",
+        "router_id": "router:pe1",
+        "speed": "100M",
+        "status": "UP"
+      },
+      {
+        "id": "router:pe1:interface:eth4",
+        "ip_address": "172.16.160.2",
+        "mac_address": "02:08:86:52:4c:41",
+        "media_type": "ethernet",
+        "name": "eth4",
+        "router_id": "router:pe1",
+        "speed": "100M",
+        "status": "UP"
+      },
+      {
+        "id": "router:pe1:interface:lo",
+        "ip_address": "10.0.0.7",
+        "mac_address": "02:a3:7e:a9:1f:82",
+        "media_type": "ethernet",
+        "name": "lo",
+        "router_id": "router:pe1",
+        "speed": "1G",
+        "status": "UP"
+      },
+      {
+        "id": "router:pe2:interface:eth0",
+        "ip_address": "192.168.122.32",
+        "mac_address": "02:eb:fe:32:26:3e",
+        "media_type": "ethernet",
+        "name": "eth0",
+        "router_id": "router:pe2",
+        "speed": "1G",
+        "status": "UP"
+      },
+      {
+        "id": "router:pe2:interface:eth1",
+        "ip_address": "172.16.100.2",
+        "mac_address": "02:1d:e4:4b:09:27",
+        "media_type": "ethernet",
+        "name": "eth1",
+        "router_id": "router:pe2",
+        "speed": "100M",
+        "status": "UP"
+      },
+      {
+        "id": "router:pe2:interface:eth2",
+        "ip_address": "172.16.110.2",
+        "mac_address": "02:20:df:22:21:6d",
+        "media_type": "ethernet",
+        "name": "eth2",
+        "router_id": "router:pe2",
+        "speed": "100M",
+        "status": "UP"
+      },
+      {
+        "id": "router:pe2:interface:eth3",
+        "ip_address": "10.80.80.1",
+        "mac_address": "02:1b:6e:23:5d:18",
+        "media_type": "ethernet",
+        "name": "eth3",
+        "router_id": "router:pe2",
+        "speed": "100M",
+        "status": "UP"
+      },
+      {
+        "id": "router:pe2:interface:eth4",
+        "ip_address": "10.65.65.1",
+        "mac_address": "02:3b:8d:82:b9:03",
+        "media_type": "ethernet",
+        "name": "eth4",
+        "router_id": "router:pe2",
+        "speed": "100M",
+        "status": "UP"
+      },
+      {
+        "id": "router:pe2:interface:lo",
+        "ip_address": "10.0.0.8",
+        "mac_address": "02:2b:6b:b2:0b:1c",
+        "media_type": "ethernet",
+        "name": "lo",
+        "router_id": "router:pe2",
+        "speed": "1G",
+        "status": "UP"
+      },
+      {
+        "id": "router:pe3:interface:eth0",
+        "ip_address": "192.168.122.33",
+        "mac_address": "02:93:5d:50:b4:10",
+        "media_type": "ethernet",
+        "name": "eth0",
+        "router_id": "router:pe3",
+        "speed": "1G",
+        "status": "UP"
+      },
+      {
+        "id": "router:pe3:interface:eth1",
+        "ip_address": "172.16.140.2",
+        "mac_address": "02:ff:34:59:ff:90",
+        "media_type": "ethernet",
+        "name": "eth1",
+        "router_id": "router:pe3",
+        "speed": "100M",
+        "status": "UP"
+      },
+      {
+        "id": "router:pe3:interface:eth2",
+        "ip_address": "10.60.60.1",
+        "mac_address": "02:29:1b:fd:b8:e3",
+        "media_type": "ethernet",
+        "name": "eth2",
+        "router_id": "router:pe3",
+        "speed": "100M",
+        "status": "UP"
+      },
+      {
+        "id": "router:pe3:interface:eth3",
+        "ip_address": "10.75.75.1",
+        "mac_address": "02:18:77:2f:29:ed",
+        "media_type": "ethernet",
+        "name": "eth3",
+        "router_id": "router:pe3",
+        "speed": "100M",
+        "status": "UP"
+      },
+      {
+        "id": "router:pe3:interface:eth4",
+        "ip_address": "172.16.170.2",
+        "mac_address": "02:fe:a9:5a:92:cf",
+        "media_type": "ethernet",
+        "name": "eth4",
+        "router_id": "router:pe3",
+        "speed": "100M",
+        "status": "UP"
+      },
+      {
+        "id": "router:pe3:interface:lo",
+        "ip_address": "10.0.0.10",
+        "mac_address": "02:71:40:13:6f:63",
+        "media_type": "ethernet",
+        "name": "lo",
+        "router_id": "router:pe3",
+        "speed": "1G",
+        "status": "UP"
+      },
+      {
+        "id": "router:pe4:interface:eth0",
+        "ip_address": "192.168.122.34",
+        "mac_address": "02:92:38:14:dc:4c",
+        "media_type": "ethernet",
+        "name": "eth0",
+        "router_id": "router:pe4",
+        "speed": "1G",
+        "status": "UP"
+      },
+      {
+        "id": "router:pe4:interface:eth1",
+        "ip_address": "172.16.150.2",
+        "mac_address": "02:fa:c0:a9:98:29",
+        "media_type": "ethernet",
+        "name": "eth1",
+        "router_id": "router:pe4",
+        "speed": "100M",
+        "status": "UP"
+      },
+      {
+        "id": "router:pe4:interface:eth2",
+        "ip_address": "10.70.70.1",
+        "mac_address": "02:09:92:22:6c:6b",
+        "media_type": "ethernet",
+        "name": "eth2",
+        "router_id": "router:pe4",
+        "speed": "100M",
+        "status": "UP"
+      },
+      {
+        "id": "router:pe4:interface:eth3",
+        "ip_address": "10.85.85.1",
+        "mac_address": "02:e9:8d:97:a8:22",
+        "media_type": "ethernet",
+        "name": "eth3",
+        "router_id": "router:pe4",
+        "speed": "100M",
+        "status": "UP"
+      },
+      {
+        "id": "router:pe4:interface:eth4",
+        "ip_address": "172.16.180.2",
+        "mac_address": "02:ad:9f:60:b6:68",
+        "media_type": "ethernet",
+        "name": "eth4",
+        "router_id": "router:pe4",
+        "speed": "100M",
+        "status": "UP"
+      },
+      {
+        "id": "router:pe4:interface:lo",
+        "ip_address": "10.0.0.11",
+        "mac_address": "02:4d:ce:b0:89:73",
+        "media_type": "ethernet",
+        "name": "lo",
+        "router_id": "router:pe4",
+        "speed": "1G",
+        "status": "UP"
+      },
+      {
+        "id": "router:rr1:interface:eth0",
+        "ip_address": "192.168.122.21",
+        "mac_address": "02:d2:53:8f:da:15",
+        "media_type": "ethernet",
+        "name": "eth0",
+        "router_id": "router:rr1",
+        "speed": "1G",
+        "status": "UP"
+      },
+      {
+        "id": "router:rr1:interface:eth1",
+        "ip_address": "172.16.20.2",
+        "mac_address": "02:01:45:74:28:d2",
+        "media_type": "ethernet",
+        "name": "eth1",
+        "router_id": "router:rr1",
+        "speed": "1G",
+        "status": "UP"
+      },
+      {
+        "id": "router:rr1:interface:eth2",
+        "ip_address": "172.16.10.2",
+        "mac_address": "02:12:fa:bf:64:8d",
+        "media_type": "ethernet",
+        "name": "eth2",
+        "router_id": "router:rr1",
+        "speed": "1G",
+        "status": "UP"
+      },
+      {
+        "id": "router:rr1:interface:lo",
+        "ip_address": "10.0.0.1",
+        "mac_address": "02:51:89:76:49:ef",
+        "media_type": "ethernet",
+        "name": "lo",
+        "router_id": "router:rr1",
+        "speed": "1G",
+        "status": "UP"
+      },
+      {
+        "id": "router:rr2:interface:eth0",
+        "ip_address": "192.168.122.22",
+        "mac_address": "02:60:23:d4:22:cc",
+        "media_type": "ethernet",
+        "name": "eth0",
+        "router_id": "router:rr2",
+        "speed": "1G",
+        "status": "UP"
+      },
+      {
+        "id": "router:rr2:interface:eth1",
+        "ip_address": "172.16.80.2",
+        "mac_address": "02:a3:5d:fb:32:ac",
+        "media_type": "ethernet",
+        "name": "eth1",
+        "router_id": "router:rr2",
+        "speed": "1G",
+        "status": "UP"
+      },
+      {
+        "id": "router:rr2:interface:eth2",
+        "ip_address": "172.16.70.2",
+        "mac_address": "02:de:1e:6a:5a:5d",
+        "media_type": "ethernet",
+        "name": "eth2",
+        "router_id": "router:rr2",
+        "speed": "1G",
+        "status": "UP"
+      },
+      {
+        "id": "router:rr2:interface:lo",
+        "ip_address": "10.0.0.2",
+        "mac_address": "02:7d:3a:96:18:7e",
+        "media_type": "ethernet",
+        "name": "lo",
+        "router_id": "router:rr2",
+        "speed": "1G",
+        "status": "UP"
+      }
+    ],
+    "PhysicalLink": [
+      {
+        "bandwidth": "1gbit",
+        "id": "link:p1-p2",
+        "name": "p1-p2",
+        "properties": null,
+        "status": "UP"
+      },
+      {
+        "bandwidth": "1gbit",
+        "id": "link:p1-p3",
+        "name": "p1-p3",
+        "properties": null,
+        "status": "UP"
+      },
+      {
+        "bandwidth": "100mbit",
+        "id": "link:p1-pe1",
+        "name": "p1-pe1",
+        "properties": null,
+        "status": "UP"
+      },
+      {
+        "bandwidth": "100mbit",
+        "id": "link:p1-pe2",
+        "name": "p1-pe2",
+        "properties": null,
+        "status": "UP"
+      },
+      {
+        "bandwidth": "1gbit",
+        "id": "link:p1-rr1",
+        "name": "p1-rr1",
+        "properties": null,
+        "status": "UP"
+      },
+      {
+        "bandwidth": "1gbit",
+        "id": "link:p2-p4",
+        "name": "p2-p4",
+        "properties": null,
+        "status": "UP"
+      },
+      {
+        "bandwidth": "100mbit",
+        "id": "link:p2-pe3",
+        "name": "p2-pe3",
+        "properties": null,
+        "status": "UP"
+      },
+      {
+        "bandwidth": "100mbit",
+        "id": "link:p2-pe4",
+        "name": "p2-pe4",
+        "properties": null,
+        "status": "UP"
+      },
+      {
+        "bandwidth": "1gbit",
+        "id": "link:p2-rr1",
+        "name": "p2-rr1",
+        "properties": null,
+        "status": "UP"
+      },
+      {
+        "bandwidth": "1gbit",
+        "id": "link:p3-p4",
+        "name": "p3-p4",
+        "properties": null,
+        "status": "UP"
+      },
+      {
+        "bandwidth": "100mbit",
+        "id": "link:p3-pe1",
+        "name": "p3-pe1",
+        "properties": null,
+        "status": "UP"
+      },
+      {
+        "bandwidth": "100mbit",
+        "id": "link:p3-pe2",
+        "name": "p3-pe2",
+        "properties": null,
+        "status": "UP"
+      },
+      {
+        "bandwidth": "1gbit",
+        "id": "link:p3-rr2",
+        "name": "p3-rr2",
+        "properties": null,
+        "status": "UP"
+      },
+      {
+        "bandwidth": "100mbit",
+        "id": "link:p4-pe3",
+        "name": "p4-pe3",
+        "properties": null,
+        "status": "UP"
+      },
+      {
+        "bandwidth": "100mbit",
+        "id": "link:p4-pe4",
+        "name": "p4-pe4",
+        "properties": null,
+        "status": "UP"
+      },
+      {
+        "bandwidth": "1gbit",
+        "id": "link:p4-rr2",
+        "name": "p4-rr2",
+        "properties": null,
+        "status": "UP"
+      },
+      {
+        "bandwidth": "100mbit",
+        "id": "link:pe1-ce1-red",
+        "name": "pe1-ce1-red",
+        "properties": null,
+        "status": "UP"
+      },
+      {
+        "bandwidth": "100mbit",
+        "id": "link:pe1-ce1-spoke",
+        "name": "pe1-ce1-spoke",
+        "properties": null,
+        "status": "UP"
+      },
+      {
+        "bandwidth": "100mbit",
+        "id": "link:pe2-ce1-hub",
+        "name": "pe2-ce1-hub",
+        "properties": null,
+        "status": "UP"
+      },
+      {
+        "bandwidth": "100mbit",
+        "id": "link:pe2-ce2-red",
+        "name": "pe2-ce2-red",
+        "properties": null,
+        "status": "UP"
+      },
+      {
+        "bandwidth": "100mbit",
+        "id": "link:pe3-ce2-spoke",
+        "name": "pe3-ce2-spoke",
+        "properties": null,
+        "status": "UP"
+      },
+      {
+        "bandwidth": "100mbit",
+        "id": "link:pe3-ce3-red",
+        "name": "pe3-ce3-red",
+        "properties": null,
+        "status": "UP"
+      },
+      {
+        "bandwidth": "100mbit",
+        "id": "link:pe4-ce3-spoke",
+        "name": "pe4-ce3-spoke",
+        "properties": null,
+        "status": "UP"
+      },
+      {
+        "bandwidth": "100mbit",
+        "id": "link:pe4-ce4-red",
+        "name": "pe4-ce4-red",
+        "properties": null,
+        "status": "UP"
+      }
+    ],
+    "PhysicalRouter": [
+      {
+        "config": {
+          "country": "United Kingdom",
+          "hostname": "ce1-hub",
+          "router_id": "10.0.0.100",
+          "site": "Nottingham-Hub1"
+        },
+        "id": "router:ce1-hub",
+        "location_city": "Nottingham",
+        "location_lat": 52.9548,
+        "location_lon": -1.1581,
+        "model": "Virtual",
+        "name": "ce1-hub",
+        "role": "CE",
+        "status": "Running",
+        "vendor": "VyOS"
+      },
+      {
+        "config": {
+          "country": "United Kingdom",
+          "hostname": "ce1-red",
+          "router_id": "10.0.0.101",
+          "site": "Norwich-Site1"
+        },
+        "id": "router:ce1-red",
+        "location_city": "Norwich",
+        "location_lat": 52.6309,
+        "location_lon": 1.2974,
+        "model": "Virtual",
+        "name": "ce1-red",
+        "role": "CE",
+        "status": "Running",
+        "vendor": "VyOS"
+      },
+      {
+        "config": {
+          "country": "United Kingdom",
+          "hostname": "ce1-spoke",
+          "router_id": "10.0.0.80",
+          "site": "Sheffield-Site1"
+        },
+        "id": "router:ce1-spoke",
+        "location_city": "Sheffield",
+        "location_lat": 53.3811,
+        "location_lon": -1.4701,
+        "model": "Virtual",
+        "name": "ce1-spoke",
+        "role": "CE",
+        "status": "Running",
+        "vendor": "VyOS"
+      },
+      {
+        "config": {
+          "country": "United Kingdom",
+          "hostname": "ce2-red",
+          "router_id": "10.0.0.102",
+          "site": "Coventry-Site1"
+        },
+        "id": "router:ce2-red",
+        "location_city": "Coventry",
+        "location_lat": 52.4082,
+        "location_lon": -1.5109,
+        "model": "Virtual",
+        "name": "ce2-red",
+        "role": "CE",
+        "status": "Running",
+        "vendor": "VyOS"
+      },
+      {
+        "config": {
+          "country": "United Kingdom",
+          "hostname": "ce2-spoke",
+          "router_id": "10.0.0.90",
+          "site": "Liverpool-Site1"
+        },
+        "id": "router:ce2-spoke",
+        "location_city": "Liverpool",
+        "location_lat": 53.4084,
+        "location_lon": -2.9916,
+        "model": "Virtual",
+        "name": "ce2-spoke",
+        "role": "CE",
+        "status": "Running",
+        "vendor": "VyOS"
+      },
+      {
+        "config": {
+          "country": "United Kingdom",
+          "hostname": "ce3-red",
+          "router_id": "10.0.0.103",
+          "site": "Plymouth-Site1"
+        },
+        "id": "router:ce3-red",
+        "location_city": "Plymouth",
+        "location_lat": 50.3755,
+        "location_lon": -4.1427,
+        "model": "Virtual",
+        "name": "ce3-red",
+        "role": "CE",
+        "status": "Running",
+        "vendor": "VyOS"
+      },
+      {
+        "config": {
+          "country": "United Kingdom",
+          "hostname": "ce3-spoke",
+          "router_id": "10.0.0.91",
+          "site": "Huddersfield-Site1"
+        },
+        "id": "router:ce3-spoke",
+        "location_city": "Huddersfield",
+        "location_lat": 53.645,
+        "location_lon": -1.785,
+        "model": "Virtual",
+        "name": "ce3-spoke",
+        "role": "CE",
+        "status": "Running",
+        "vendor": "VyOS"
+      },
+      {
+        "config": {
+          "country": "United Kingdom",
+          "hostname": "ce4-red",
+          "router_id": "10.0.0.104",
+          "site": "Leicester-Site1"
+        },
+        "id": "router:ce4-red",
+        "location_city": "Leicester",
+        "location_lat": 52.6369,
+        "location_lon": -1.1398,
+        "model": "Virtual",
+        "name": "ce4-red",
+        "role": "CE",
+        "status": "Running",
+        "vendor": "VyOS"
+      },
+      {
+        "config": {
+          "country": "United Kingdom",
+          "hostname": "p1",
+          "router_id": "10.0.0.3",
+          "site": "London-DC1"
+        },
+        "id": "router:p1",
+        "location_city": "London",
+        "location_lat": 51.5074,
+        "location_lon": -0.1278,
+        "model": "Virtual",
+        "name": "p1",
+        "role": "P",
+        "status": "Running",
+        "vendor": "VyOS"
+      },
+      {
+        "config": {
+          "country": "United Kingdom",
+          "hostname": "p2",
+          "router_id": "10.0.0.4",
+          "site": "Manchester-DC1"
+        },
+        "id": "router:p2",
+        "location_city": "Manchester",
+        "location_lat": 53.4808,
+        "location_lon": -2.2426,
+        "model": "Virtual",
+        "name": "p2",
+        "role": "P",
+        "status": "Running",
+        "vendor": "VyOS"
+      },
+      {
+        "config": {
+          "country": "United Kingdom",
+          "hostname": "p3",
+          "router_id": "10.0.0.5",
+          "site": "Edinburgh-DC1"
+        },
+        "id": "router:p3",
+        "location_city": "Edinburgh",
+        "location_lat": 55.9533,
+        "location_lon": -3.1883,
+        "model": "Virtual",
+        "name": "p3",
+        "role": "P",
+        "status": "Running",
+        "vendor": "VyOS"
+      },
+      {
+        "config": {
+          "country": "United Kingdom",
+          "hostname": "p4",
+          "router_id": "10.0.0.6",
+          "site": "Leeds-DC1"
+        },
+        "id": "router:p4",
+        "location_city": "Leeds",
+        "location_lat": 53.8008,
+        "location_lon": -1.5491,
+        "model": "Virtual",
+        "name": "p4",
+        "role": "P",
+        "status": "Running",
+        "vendor": "VyOS"
+      },
+      {
+        "config": {
+          "country": "United Kingdom",
+          "hostname": "pe1",
+          "router_id": "10.0.0.7",
+          "site": "Oxford-DC1"
+        },
+        "id": "router:pe1",
+        "location_city": "Oxford",
+        "location_lat": 51.752,
+        "location_lon": -1.2577,
+        "model": "Virtual",
+        "name": "pe1",
+        "role": "PE",
+        "status": "Running",
+        "vendor": "VyOS"
+      },
+      {
+        "config": {
+          "country": "United Kingdom",
+          "hostname": "pe2",
+          "router_id": "10.0.0.8",
+          "site": "Cambridge-DC1"
+        },
+        "id": "router:pe2",
+        "location_city": "Cambridge",
+        "location_lat": 52.2053,
+        "location_lon": 0.1218,
+        "model": "Virtual",
+        "name": "pe2",
+        "role": "PE",
+        "status": "Running",
+        "vendor": "VyOS"
+      },
+      {
+        "config": {
+          "country": "United Kingdom",
+          "hostname": "pe3",
+          "router_id": "10.0.0.10",
+          "site": "Brighton-DC1"
+        },
+        "id": "router:pe3",
+        "location_city": "Brighton",
+        "location_lat": 50.8198,
+        "location_lon": -0.1371,
+        "model": "Virtual",
+        "name": "pe3",
+        "role": "PE",
+        "status": "Running",
+        "vendor": "VyOS"
+      },
+      {
+        "config": {
+          "country": "United Kingdom",
+          "hostname": "pe4",
+          "router_id": "10.0.0.11",
+          "site": "Cardiff-DC1"
+        },
+        "id": "router:pe4",
+        "location_city": "Cardiff",
+        "location_lat": 51.4816,
+        "location_lon": -3.1791,
+        "model": "Virtual",
+        "name": "pe4",
+        "role": "PE",
+        "status": "Running",
+        "vendor": "VyOS"
+      },
+      {
+        "config": {
+          "country": "United Kingdom",
+          "hostname": "rr1",
+          "router_id": "10.0.0.1",
+          "site": "Birmingham-DC1"
+        },
+        "id": "router:rr1",
+        "location_city": "Birmingham",
+        "location_lat": 52.4862,
+        "location_lon": -1.8904,
+        "model": "Virtual",
+        "name": "rr1",
+        "role": "RR",
+        "status": "Running",
+        "vendor": "VyOS"
+      },
+      {
+        "config": {
+          "country": "United Kingdom",
+          "hostname": "rr2",
+          "router_id": "10.0.0.2",
+          "site": "Bristol-DC1"
+        },
+        "id": "router:rr2",
+        "location_city": "Bristol",
+        "location_lat": 51.4545,
+        "location_lon": -2.5879,
+        "model": "Virtual",
+        "name": "rr2",
+        "role": "RR",
+        "status": "Running",
+        "vendor": "VyOS"
+      }
+    ],
+    "Subnet_Association": [
+      {
+        "entity_id": "router:ce1-hub:interface:eth0",
+        "entity_type": "Interface",
+        "subnet_id": "subnet:mgmt"
+      },
+      {
+        "entity_id": "router:ce1-hub:interface:eth1",
+        "entity_type": "Interface",
+        "subnet_id": "subnet:pe2-ce1-hub"
+      },
+      {
+        "entity_id": "router:ce1-hub:interface:eth2",
+        "entity_type": "Interface",
+        "subnet_id": "subnet:lan-hub"
+      },
+      {
+        "entity_id": "router:ce1-hub:interface:lo",
+        "entity_type": "Interface",
+        "subnet_id": "subnet:10.0.0.100/32"
+      },
+      {
+        "entity_id": "router:ce1-red:interface:eth0",
+        "entity_type": "Interface",
+        "subnet_id": "subnet:mgmt"
+      },
+      {
+        "entity_id": "router:ce1-red:interface:eth1",
+        "entity_type": "Interface",
+        "subnet_id": "subnet:pe1-ce1-red"
+      },
+      {
+        "entity_id": "router:ce1-red:interface:eth2",
+        "entity_type": "Interface",
+        "subnet_id": "subnet:lan-red1"
+      },
+      {
+        "entity_id": "router:ce1-red:interface:lo",
+        "entity_type": "Interface",
+        "subnet_id": "subnet:10.0.0.101/32"
+      },
+      {
+        "entity_id": "router:ce1-spoke:interface:eth0",
+        "entity_type": "Interface",
+        "subnet_id": "subnet:mgmt"
+      },
+      {
+        "entity_id": "router:ce1-spoke:interface:eth1",
+        "entity_type": "Interface",
+        "subnet_id": "subnet:pe1-ce1-spoke"
+      },
+      {
+        "entity_id": "router:ce1-spoke:interface:eth2",
+        "entity_type": "Interface",
+        "subnet_id": "subnet:lan-spoke1"
+      },
+      {
+        "entity_id": "router:ce1-spoke:interface:lo",
+        "entity_type": "Interface",
+        "subnet_id": "subnet:10.0.0.80/32"
+      },
+      {
+        "entity_id": "router:ce2-red:interface:eth0",
+        "entity_type": "Interface",
+        "subnet_id": "subnet:mgmt"
+      },
+      {
+        "entity_id": "router:ce2-red:interface:eth1",
+        "entity_type": "Interface",
+        "subnet_id": "subnet:pe2-ce2-red"
+      },
+      {
+        "entity_id": "router:ce2-red:interface:eth2",
+        "entity_type": "Interface",
+        "subnet_id": "subnet:lan-red2"
+      },
+      {
+        "entity_id": "router:ce2-red:interface:lo",
+        "entity_type": "Interface",
+        "subnet_id": "subnet:10.0.0.102/32"
+      },
+      {
+        "entity_id": "router:ce2-spoke:interface:eth0",
+        "entity_type": "Interface",
+        "subnet_id": "subnet:mgmt"
+      },
+      {
+        "entity_id": "router:ce2-spoke:interface:eth1",
+        "entity_type": "Interface",
+        "subnet_id": "subnet:pe3-ce2-spoke"
+      },
+      {
+        "entity_id": "router:ce2-spoke:interface:eth2",
+        "entity_type": "Interface",
+        "subnet_id": "subnet:lan-spoke2"
+      },
+      {
+        "entity_id": "router:ce2-spoke:interface:lo",
+        "entity_type": "Interface",
+        "subnet_id": "subnet:10.0.0.90/32"
+      },
+      {
+        "entity_id": "router:ce3-red:interface:eth0",
+        "entity_type": "Interface",
+        "subnet_id": "subnet:mgmt"
+      },
+      {
+        "entity_id": "router:ce3-red:interface:eth1",
+        "entity_type": "Interface",
+        "subnet_id": "subnet:pe3-ce3-red"
+      },
+      {
+        "entity_id": "router:ce3-red:interface:eth2",
+        "entity_type": "Interface",
+        "subnet_id": "subnet:lan-red3"
+      },
+      {
+        "entity_id": "router:ce3-red:interface:lo",
+        "entity_type": "Interface",
+        "subnet_id": "subnet:10.0.0.103/32"
+      },
+      {
+        "entity_id": "router:ce3-spoke:interface:eth0",
+        "entity_type": "Interface",
+        "subnet_id": "subnet:mgmt"
+      },
+      {
+        "entity_id": "router:ce3-spoke:interface:eth1",
+        "entity_type": "Interface",
+        "subnet_id": "subnet:pe4-ce3-spoke"
+      },
+      {
+        "entity_id": "router:ce3-spoke:interface:eth2",
+        "entity_type": "Interface",
+        "subnet_id": "subnet:lan-spoke3"
+      },
+      {
+        "entity_id": "router:ce3-spoke:interface:lo",
+        "entity_type": "Interface",
+        "subnet_id": "subnet:10.0.0.91/32"
+      },
+      {
+        "entity_id": "router:ce4-red:interface:eth0",
+        "entity_type": "Interface",
+        "subnet_id": "subnet:mgmt"
+      },
+      {
+        "entity_id": "router:ce4-red:interface:eth1",
+        "entity_type": "Interface",
+        "subnet_id": "subnet:pe4-ce4-red"
+      },
+      {
+        "entity_id": "router:ce4-red:interface:eth2",
+        "entity_type": "Interface",
+        "subnet_id": "subnet:lan-red4"
+      },
+      {
+        "entity_id": "router:ce4-red:interface:lo",
+        "entity_type": "Interface",
+        "subnet_id": "subnet:10.0.0.104/32"
+      },
+      {
+        "entity_id": "router:p1:interface:eth0",
+        "entity_type": "Interface",
+        "subnet_id": "subnet:mgmt"
+      },
+      {
+        "entity_id": "router:p1:interface:eth1",
+        "entity_type": "Interface",
+        "subnet_id": "subnet:p1-p2"
+      },
+      {
+        "entity_id": "router:p1:interface:eth2",
+        "entity_type": "Interface",
+        "subnet_id": "subnet:p1-p3"
+      },
+      {
+        "entity_id": "router:p1:interface:eth3",
+        "entity_type": "Interface",
+        "subnet_id": "subnet:p1-pe1"
+      },
+      {
+        "entity_id": "router:p1:interface:eth4",
+        "entity_type": "Interface",
+        "subnet_id": "subnet:p1-rr1"
+      },
+      {
+        "entity_id": "router:p1:interface:eth5",
+        "entity_type": "Interface",
+        "subnet_id": "subnet:p1-pe2"
+      },
+      {
+        "entity_id": "router:p1:interface:lo",
+        "entity_type": "Interface",
+        "subnet_id": "subnet:10.0.0.3/32"
+      },
+      {
+        "entity_id": "router:p2:interface:eth0",
+        "entity_type": "Interface",
+        "subnet_id": "subnet:mgmt"
+      },
+      {
+        "entity_id": "router:p2:interface:eth1",
+        "entity_type": "Interface",
+        "subnet_id": "subnet:p1-p2"
+      },
+      {
+        "entity_id": "router:p2:interface:eth2",
+        "entity_type": "Interface",
+        "subnet_id": "subnet:p2-p4"
+      },
+      {
+        "entity_id": "router:p2:interface:eth3",
+        "entity_type": "Interface",
+        "subnet_id": "subnet:p2-rr1"
+      },
+      {
+        "entity_id": "router:p2:interface:eth4",
+        "entity_type": "Interface",
+        "subnet_id": "subnet:p2-pe4"
+      },
+      {
+        "entity_id": "router:p2:interface:eth5",
+        "entity_type": "Interface",
+        "subnet_id": "subnet:p2-pe3"
+      },
+      {
+        "entity_id": "router:p2:interface:lo",
+        "entity_type": "Interface",
+        "subnet_id": "subnet:10.0.0.4/32"
+      },
+      {
+        "entity_id": "router:p3:interface:eth0",
+        "entity_type": "Interface",
+        "subnet_id": "subnet:mgmt"
+      },
+      {
+        "entity_id": "router:p3:interface:eth1",
+        "entity_type": "Interface",
+        "subnet_id": "subnet:p3-pe2"
+      },
+      {
+        "entity_id": "router:p3:interface:eth2",
+        "entity_type": "Interface",
+        "subnet_id": "subnet:p1-p3"
+      },
+      {
+        "entity_id": "router:p3:interface:eth3",
+        "entity_type": "Interface",
+        "subnet_id": "subnet:p3-p4"
+      },
+      {
+        "entity_id": "router:p3:interface:eth4",
+        "entity_type": "Interface",
+        "subnet_id": "subnet:p3-rr2"
+      },
+      {
+        "entity_id": "router:p3:interface:eth5",
+        "entity_type": "Interface",
+        "subnet_id": "subnet:p3-pe1"
+      },
+      {
+        "entity_id": "router:p3:interface:lo",
+        "entity_type": "Interface",
+        "subnet_id": "subnet:10.0.0.5/32"
+      },
+      {
+        "entity_id": "router:p4:interface:eth0",
+        "entity_type": "Interface",
+        "subnet_id": "subnet:mgmt"
+      },
+      {
+        "entity_id": "router:p4:interface:eth1",
+        "entity_type": "Interface",
+        "subnet_id": "subnet:p4-rr2"
+      },
+      {
+        "entity_id": "router:p4:interface:eth2",
+        "entity_type": "Interface",
+        "subnet_id": "subnet:p2-p4"
+      },
+      {
+        "entity_id": "router:p4:interface:eth3",
+        "entity_type": "Interface",
+        "subnet_id": "subnet:p3-p4"
+      },
+      {
+        "entity_id": "router:p4:interface:eth4",
+        "entity_type": "Interface",
+        "subnet_id": "subnet:p4-pe3"
+      },
+      {
+        "entity_id": "router:p4:interface:eth5",
+        "entity_type": "Interface",
+        "subnet_id": "subnet:p4-pe4"
+      },
+      {
+        "entity_id": "router:p4:interface:lo",
+        "entity_type": "Interface",
+        "subnet_id": "subnet:10.0.0.6/32"
+      },
+      {
+        "entity_id": "router:pe1:interface:eth0",
+        "entity_type": "Interface",
+        "subnet_id": "subnet:mgmt"
+      },
+      {
+        "entity_id": "router:pe1:interface:eth1",
+        "entity_type": "Interface",
+        "subnet_id": "subnet:p1-pe1"
+      },
+      {
+        "entity_id": "router:pe1:interface:eth2",
+        "entity_type": "Interface",
+        "subnet_id": "subnet:pe1-ce1-spoke"
+      },
+      {
+        "entity_id": "router:pe1:interface:eth3",
+        "entity_type": "Interface",
+        "subnet_id": "subnet:pe1-ce1-red"
+      },
+      {
+        "entity_id": "router:pe1:interface:eth4",
+        "entity_type": "Interface",
+        "subnet_id": "subnet:p3-pe1"
+      },
+      {
+        "entity_id": "router:pe1:interface:lo",
+        "entity_type": "Interface",
+        "subnet_id": "subnet:10.0.0.7/32"
+      },
+      {
+        "entity_id": "router:pe2:interface:eth0",
+        "entity_type": "Interface",
+        "subnet_id": "subnet:mgmt"
+      },
+      {
+        "entity_id": "router:pe2:interface:eth1",
+        "entity_type": "Interface",
+        "subnet_id": "subnet:p1-pe2"
+      },
+      {
+        "entity_id": "router:pe2:interface:eth2",
+        "entity_type": "Interface",
+        "subnet_id": "subnet:p3-pe2"
+      },
+      {
+        "entity_id": "router:pe2:interface:eth3",
+        "entity_type": "Interface",
+        "subnet_id": "subnet:pe2-ce1-hub"
+      },
+      {
+        "entity_id": "router:pe2:interface:eth4",
+        "entity_type": "Interface",
+        "subnet_id": "subnet:pe2-ce2-red"
+      },
+      {
+        "entity_id": "router:pe2:interface:lo",
+        "entity_type": "Interface",
+        "subnet_id": "subnet:10.0.0.8/32"
+      },
+      {
+        "entity_id": "router:pe3:interface:eth0",
+        "entity_type": "Interface",
+        "subnet_id": "subnet:mgmt"
+      },
+      {
+        "entity_id": "router:pe3:interface:eth1",
+        "entity_type": "Interface",
+        "subnet_id": "subnet:p4-pe3"
+      },
+      {
+        "entity_id": "router:pe3:interface:eth2",
+        "entity_type": "Interface",
+        "subnet_id": "subnet:pe3-ce2-spoke"
+      },
+      {
+        "entity_id": "router:pe3:interface:eth3",
+        "entity_type": "Interface",
+        "subnet_id": "subnet:pe3-ce3-red"
+      },
+      {
+        "entity_id": "router:pe3:interface:eth4",
+        "entity_type": "Interface",
+        "subnet_id": "subnet:p2-pe3"
+      },
+      {
+        "entity_id": "router:pe3:interface:lo",
+        "entity_type": "Interface",
+        "subnet_id": "subnet:10.0.0.10/32"
+      },
+      {
+        "entity_id": "router:pe4:interface:eth0",
+        "entity_type": "Interface",
+        "subnet_id": "subnet:mgmt"
+      },
+      {
+        "entity_id": "router:pe4:interface:eth1",
+        "entity_type": "Interface",
+        "subnet_id": "subnet:p2-pe4"
+      },
+      {
+        "entity_id": "router:pe4:interface:eth2",
+        "entity_type": "Interface",
+        "subnet_id": "subnet:pe4-ce3-spoke"
+      },
+      {
+        "entity_id": "router:pe4:interface:eth3",
+        "entity_type": "Interface",
+        "subnet_id": "subnet:pe4-ce4-red"
+      },
+      {
+        "entity_id": "router:pe4:interface:eth4",
+        "entity_type": "Interface",
+        "subnet_id": "subnet:p4-pe4"
+      },
+      {
+        "entity_id": "router:pe4:interface:lo",
+        "entity_type": "Interface",
+        "subnet_id": "subnet:10.0.0.11/32"
+      },
+      {
+        "entity_id": "router:rr1:interface:eth0",
+        "entity_type": "Interface",
+        "subnet_id": "subnet:mgmt"
+      },
+      {
+        "entity_id": "router:rr1:interface:eth1",
+        "entity_type": "Interface",
+        "subnet_id": "subnet:p2-rr1"
+      },
+      {
+        "entity_id": "router:rr1:interface:eth2",
+        "entity_type": "Interface",
+        "subnet_id": "subnet:p1-rr1"
+      },
+      {
+        "entity_id": "router:rr1:interface:lo",
+        "entity_type": "Interface",
+        "subnet_id": "subnet:10.0.0.1/32"
+      },
+      {
+        "entity_id": "router:rr2:interface:eth0",
+        "entity_type": "Interface",
+        "subnet_id": "subnet:mgmt"
+      },
+      {
+        "entity_id": "router:rr2:interface:eth1",
+        "entity_type": "Interface",
+        "subnet_id": "subnet:p4-rr2"
+      },
+      {
+        "entity_id": "router:rr2:interface:eth2",
+        "entity_type": "Interface",
+        "subnet_id": "subnet:p3-rr2"
+      },
+      {
+        "entity_id": "router:rr2:interface:lo",
+        "entity_type": "Interface",
+        "subnet_id": "subnet:10.0.0.2/32"
+      }
+    ],
+    "VRF": [
+      {
+        "config": {
+          "interfaces": [
+            "eth2"
+          ],
+          "rt_export": [
+            "65035:1011"
+          ],
+          "rt_import": [
+            "65035:1030"
+          ],
+          "table": 200
+        },
+        "id": "vrf:pe1:BLUE_SPOKE",
+        "name": "VRF-BLUE_SPOKE",
+        "rd": "10.50.50.1:1011",
+        "router_id": "router:pe1",
+        "status": "Active",
+        "vpn_id": "vpn:BLUE_SPOKE"
+      },
+      {
+        "config": {
+          "interfaces": [
+            "eth3"
+          ],
+          "rt_export": [
+            "65035:2000"
+          ],
+          "rt_import": [
+            "65035:2000"
+          ],
+          "table": 300
+        },
+        "id": "vrf:pe1:RED_MESH",
+        "name": "VRF-RED_MESH",
+        "rd": "10.55.55.1:2000",
+        "router_id": "router:pe1",
+        "status": "Active",
+        "vpn_id": "vpn:RED_MESH"
+      },
+      {
+        "config": {
+          "interfaces": [
+            "eth3"
+          ],
+          "rt_export": [
+            "65035:1030"
+          ],
+          "rt_import": [
+            "65035:1011",
+            "65035:1030"
+          ],
+          "table": 400
+        },
+        "id": "vrf:pe2:BLUE_HUB",
+        "name": "VRF-BLUE_HUB",
+        "rd": "10.80.80.1:1011",
+        "router_id": "router:pe2",
+        "status": "Active",
+        "vpn_id": "vpn:BLUE_HUB"
+      },
+      {
+        "config": {
+          "interfaces": [
+            "eth4"
+          ],
+          "rt_export": [
+            "65035:2000"
+          ],
+          "rt_import": [
+            "65035:2000"
+          ],
+          "table": 300
+        },
+        "id": "vrf:pe2:RED_MESH",
+        "name": "VRF-RED_MESH",
+        "rd": "10.65.65.1:2000",
+        "router_id": "router:pe2",
+        "status": "Active",
+        "vpn_id": "vpn:RED_MESH"
+      },
+      {
+        "config": {
+          "interfaces": [
+            "eth2"
+          ],
+          "rt_export": [
+            "65035:1011"
+          ],
+          "rt_import": [
+            "65035:1030"
+          ],
+          "table": 200
+        },
+        "id": "vrf:pe3:BLUE_SPOKE",
+        "name": "VRF-BLUE_SPOKE",
+        "rd": "10.60.60.1:1011",
+        "router_id": "router:pe3",
+        "status": "Active",
+        "vpn_id": "vpn:BLUE_SPOKE"
+      },
+      {
+        "config": {
+          "interfaces": [
+            "eth3"
+          ],
+          "rt_export": [
+            "65035:2000"
+          ],
+          "rt_import": [
+            "65035:2000"
+          ],
+          "table": 300
+        },
+        "id": "vrf:pe3:RED_MESH",
+        "name": "VRF-RED_MESH",
+        "rd": "10.75.75.1:2000",
+        "router_id": "router:pe3",
+        "status": "Active",
+        "vpn_id": "vpn:RED_MESH"
+      },
+      {
+        "config": {
+          "interfaces": [
+            "eth2"
+          ],
+          "rt_export": [
+            "65035:1011"
+          ],
+          "rt_import": [
+            "65035:1030"
+          ],
+          "table": 200
+        },
+        "id": "vrf:pe4:BLUE_SPOKE",
+        "name": "VRF-BLUE_SPOKE",
+        "rd": "10.70.70.1:1011",
+        "router_id": "router:pe4",
+        "status": "Active",
+        "vpn_id": "vpn:BLUE_SPOKE"
+      },
+      {
+        "config": {
+          "interfaces": [
+            "eth3"
+          ],
+          "rt_export": [
+            "65035:2000"
+          ],
+          "rt_import": [
+            "65035:2000"
+          ],
+          "table": 300
+        },
+        "id": "vrf:pe4:RED_MESH",
+        "name": "VRF-RED_MESH",
+        "rd": "10.85.85.1:2000",
+        "router_id": "router:pe4",
+        "status": "Active",
+        "vpn_id": "vpn:RED_MESH"
+      }
+    ]
+  },
+  "schema_version": "1.0",
+  "source": {
+    "mode": "from_yaml",
+    "network_name": "l3vpn-network",
+    "spanner_database": null,
+    "yaml_paths": [
+      "environment/telco-lab/l3vpn-network/blue-vpn.yaml",
+      "environment/telco-lab/l3vpn-network/infrastructure.yaml",
+      "environment/telco-lab/l3vpn-network/red-vpn.yaml",
+      "environment/telco-lab/l3vpn-network/underlay.yaml"
+    ]
+  }
+}

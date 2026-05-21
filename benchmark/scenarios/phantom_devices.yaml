@@ -1,0 +1,36 @@
+name: phantom_devices
+description: >
+  Catalog has phantom entities (no telemetry counterpart) and telemetry has
+  shadow entities (no catalog counterpart). Tests existence-conflict detection.
+
+seed: 5
+
+inputs:
+  golden_twin: benchmark/examples/golden_twin/l3vpn-hub-spoke.json
+
+outputs:
+  root: benchmark/out/phantom_devices/
+  catalog_dir: benchmark/out/phantom_devices/catalog/
+  telemetry_path: benchmark/out/phantom_devices/telemetry.json
+  ledger_path: benchmark/out/phantom_devices/defect_ledger.jsonl
+
+defects:
+  - id: catalog_phantom_routers
+    class: cross_source.phantom_entity
+    target_projection: catalog
+    target_entity_type: PhysicalRouter
+    selection:
+      mode: random_rate
+      rate: 0.05
+    parameters:
+      max_phantoms: 18
+
+  - id: telemetry_shadow_devices
+    class: cross_source.shadow_entity
+    target_projection: telemetry
+    target_entity_type: Device
+    selection:
+      mode: random_rate
+      rate: 0.05
+    parameters:
+      max_shadows: 8

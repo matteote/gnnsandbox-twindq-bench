@@ -1,0 +1,157 @@
+name: chaos
+description: >
+  All defect classes active at moderate rates simultaneously.
+  Tests graceful degradation of the system under test.
+
+seed: 2026
+
+inputs:
+  golden_twin: benchmark/examples/golden_twin/l3vpn-hub-spoke.json
+
+outputs:
+  root: benchmark/out/chaos/
+  catalog_dir: benchmark/out/chaos/catalog/
+  telemetry_path: benchmark/out/chaos/telemetry.json
+  ledger_path: benchmark/out/chaos/defect_ledger.jsonl
+
+defects:
+  - id: c_missing_routers
+    class: completeness.missing_node
+    target_projection: catalog
+    target_entity_type: PhysicalRouter
+    selection:
+      mode: random_rate
+      rate: 0.05
+
+  - id: c_missing_link_edge
+    class: completeness.missing_edge
+    target_projection: telemetry
+    target_entity_type: Interface_Link
+    selection:
+      mode: random_rate
+      rate: 0.05
+
+  - id: c_missing_attr_vendor
+    class: completeness.missing_attribute
+    target_projection: catalog
+    target_entity_type: PhysicalRouter
+    selection:
+      mode: random_rate
+      rate: 0.10
+    parameters:
+      attribute: model
+
+  - id: c_attribute_drift_vendor
+    class: accuracy.attribute_drift
+    target_projection: catalog
+    target_entity_type: PhysicalRouter
+    selection:
+      mode: random_rate
+      rate: 0.10
+    parameters:
+      attribute: vendor
+
+  - id: c_endpoint_shift
+    class: accuracy.endpoint_shift
+    target_projection: telemetry
+    target_entity_type: Interface_Link
+    selection:
+      mode: random_rate
+      rate: 0.05
+
+  - id: c_asymmetric_links
+    class: consistency.asymmetric_link
+    target_projection: telemetry
+    target_entity_type: PhysicalLink
+    selection:
+      mode: random_rate
+      rate: 0.10
+
+  - id: c_orphan_interface
+    class: consistency.orphan_entity
+    target_projection: telemetry
+    target_entity_type: PhysicalInterface
+    selection:
+      mode: random_rate
+      rate: 0.05
+
+  - id: c_split_identity
+    class: uniqueness.split_identity
+    target_projection: catalog
+    target_entity_type: PhysicalRouter
+    selection:
+      mode: random_rate
+      rate: 0.10
+
+  - id: c_malformed_id
+    class: validity.malformed_id
+    target_projection: catalog
+    target_entity_type: PhysicalInterface
+    selection:
+      mode: random_rate
+      rate: 0.05
+
+  - id: c_out_of_range_speed
+    class: validity.out_of_range
+    target_projection: telemetry
+    target_entity_type: PhysicalInterface
+    selection:
+      mode: random_rate
+      rate: 0.05
+    parameters:
+      attribute: speed
+
+  - id: c_invalid_enum_role
+    class: validity.invalid_enum
+    target_projection: catalog
+    target_entity_type: PhysicalRouter
+    selection:
+      mode: random_rate
+      rate: 0.05
+    parameters:
+      attribute: role
+
+  - id: c_cross_attribute_conflict
+    class: cross_source.attribute_conflict
+    target_projection: both
+    target_entity_type: PhysicalRouter
+    selection:
+      mode: random_rate
+      rate: 0.10
+    parameters:
+      attribute: model
+      drift_table: ["MX480", "ASR9K", "7750-SR", "NE40E", "7280R"]
+
+  - id: c_cross_structural
+    class: cross_source.structural_conflict
+    target_projection: both
+    target_entity_type: Interface_Link
+    selection:
+      mode: random_rate
+      rate: 0.05
+
+  - id: c_cross_existence
+    class: cross_source.existence_conflict
+    target_projection: both
+    target_entity_type: Device
+    selection:
+      mode: random_rate
+      rate: 0.10
+    parameters:
+      drop_from: telemetry
+
+  - id: c_phantom_router
+    class: cross_source.phantom_entity
+    target_projection: catalog
+    target_entity_type: PhysicalRouter
+    selection:
+      mode: fixed_count
+      count: 2
+
+  - id: c_shadow_device
+    class: cross_source.shadow_entity
+    target_projection: telemetry
+    target_entity_type: Device
+    selection:
+      mode: fixed_count
+      count: 2
