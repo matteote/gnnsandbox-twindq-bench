@@ -25,6 +25,8 @@ launch.json
 deployment-blueprint.tar.gz
 porch-install
 
+plans/
+
 
 # packages file containing multi-root paths
 .packages.generated
